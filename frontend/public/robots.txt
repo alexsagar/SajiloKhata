@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+
+# Disallow admin and private pages
+Disallow: /admin/
+Disallow: /settings/
+Disallow: /api/
+
+# Sitemap
+Sitemap: https://splitwise.app/sitemap.xml
