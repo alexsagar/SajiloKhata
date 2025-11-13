@@ -56,7 +56,12 @@ export function CreateGroupDialog({ open, onOpenChange }: CreateGroupDialogProps
 
 
   const createGroupMutation = useMutation({
-    mutationFn: groupAPI.createGroup,
+    mutationFn: (data: CreateGroupFormData) => {
+      const form = new FormData()
+      form.append("name", data.name)
+      if (data.description) form.append("description", data.description)
+      return groupAPI.createGroup(form)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["user-groups"] })
       toast({

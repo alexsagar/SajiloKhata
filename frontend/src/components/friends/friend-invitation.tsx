@@ -56,11 +56,11 @@ export function FriendInvitation() {
   const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>(mockPendingInvitations)
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false)
   const [inviteEmails, setInviteEmails] = useState('')
-  const [inviteMessage, setInviteMessage] = useState('Hey! Join me on SplitWise to easily split and track our shared expenses. It makes managing group expenses so much simpler!')
+  const [inviteMessage, setInviteMessage] = useState('Hey! Join me on Khutrukey to easily split and track our shared expenses. It makes managing group expenses so much simpler!')
   const [copiedLink, setCopiedLink] = useState(false)
   const { toast } = useToast()
 
-  const inviteLink = "https://splitwise.app/invite/abc123"
+  const inviteLink = "https://khutrukey.app/invite/abc123"
 
   const handleSendInvitations = () => {
     const emails = inviteEmails
@@ -196,7 +196,7 @@ export function FriendInvitation() {
         <div>
           <h2 className="text-2xl font-bold">Friends & Invitations</h2>
           <p className="text-muted-foreground">
-            Invite friends to join SplitWise and manage shared expenses together
+            Invite friends to join Khutrukey and manage shared expenses together
           </p>
         </div>
         <Button onClick={() => setIsInviteDialogOpen(true)}>
@@ -412,7 +412,7 @@ export function FriendInvitation() {
       <Dialog open={isInviteDialogOpen} onOpenChange={setIsInviteDialogOpen}>
         <DialogContent className="max-w-sm w-auto max-h-[85vh] mx-auto">
           <DialogHeader className="space-y-2">
-            <DialogTitle className="text-lg font-semibold">Invite Friends to SplitWise</DialogTitle>
+            <DialogTitle className="text-lg font-semibold">Invite Friends to Khutrukey</DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
               Send invitations via email or share your personal invite link
             </DialogDescription>
@@ -465,7 +465,7 @@ export function FriendInvitation() {
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Share this link with friends so they can join SplitWise and connect with you
+                  Share this link with friends so they can join Khutrukey and connect with you
                 </p>
               </div>
             </TabsContent>

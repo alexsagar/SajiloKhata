@@ -15,7 +15,7 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 export function ThemeProvider({
   children,
   defaultTheme = "system",
-  storageKey = "splitwise-theme",
+  storageKey = "khutrukey-theme",
   ...props
 }: {
   children: React.ReactNode

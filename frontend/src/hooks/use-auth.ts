@@ -15,8 +15,8 @@ export function useAuth() {
     setLoading(true);
     const result = await apiLogin(email, password);
     if (result.success) {
-      setState({ isAuthenticated: true, user: result.user });
-      setItem("auth", { isAuthenticated: true, user: result.user });
+      setState({ isAuthenticated: true, user: result.data.user });
+      setItem("auth", { isAuthenticated: true, user: result.data.user });
     }
     setLoading(false);
     return result;

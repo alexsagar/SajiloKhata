@@ -61,7 +61,7 @@ export default function InviteAcceptPage({ params }: { params: { code: string } 
         <CardHeader>
           <CardTitle>You're invited</CardTitle>
           <CardDescription>
-            {invite.inviter.firstName} {invite.inviter.lastName} invited you to connect on SplitWise.
+            {invite.inviter.firstName} {invite.inviter.lastName} invited you to connect on Khutrukey.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

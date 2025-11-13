@@ -41,8 +41,8 @@ export function ProfileSettings() {
       firstName: user?.firstName || "",
       lastName: user?.lastName || "",
       email: user?.email || "",
-      phone: user?.phone || "",
-      bio: user?.bio || "",
+      phone: (user as any)?.phone || "",
+      bio: (user as any)?.bio || "",
     },
   })
 

@@ -24,8 +24,8 @@ export function GroupInviteModal({ groupId, open, onOpenChange }: Props) {
   useEffect(() => {
     if (!open) return
     groupAPI
-      .get(`/groups/${groupId}/friends-eligible` as any)
-      .then((res: any) => setFriends(res.data.data || res.data || []))
+      .getEligibleFriends(groupId)
+      .then((res: any) => setFriends(res?.data?.data || res?.data || []))
       .catch(() => setFriends([]))
   }, [open, groupId])
 

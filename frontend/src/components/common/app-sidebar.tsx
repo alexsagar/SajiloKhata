@@ -87,7 +87,7 @@ export function AppSidebar() {
           <div className="flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-xl bg-emerald-500 text-black shadow-soft">
             <span className="text-sm sm:text-base font-bold">SW</span>
           </div>
-          <span className="font-semibold text-slate-100 text-sm sm:text-base">SplitWise</span>
+          <span className="font-semibold text-slate-100 text-sm sm:text-base">Khutrukey</span>
         </div>
         {isMobile && (
           <Button

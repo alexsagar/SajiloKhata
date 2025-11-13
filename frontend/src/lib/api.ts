@@ -76,7 +76,14 @@ export const userAPI = {
     api.post("/users/avatar", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     }),
-  searchUsers: (query: string) => api.get(`/users/search?q=${query}`),
+  searchUsers: (params: string | { query: string; limit?: number }) => {
+    if (typeof params === 'string') {
+      return api.get(`/users/search?q=${encodeURIComponent(params)}`)
+    }
+    const q = encodeURIComponent(params.query)
+    const lim = params.limit != null ? `&limit=${params.limit}` : ''
+    return api.get(`/users/search?q=${q}${lim}`)
+  },
   getBalance: () => api.get("/users/balance"),
   getSessions: () => api.get("/users/sessions"),
   revokeSession: (sessionId: string) => api.delete(`/users/sessions/${sessionId}`),
@@ -120,6 +127,10 @@ export const groupAPI = {
   getGroupInvites: (groupId: string) => api.get(`/groups/${groupId}/invites`),
   acceptGroupInvite: (inviteId: string) => api.post(`/invites/${inviteId}/accept`),
   declineGroupInvite: (inviteId: string) => api.post(`/invites/${inviteId}/decline`),
+  // Added helpers used by components
+  getBalances: (groupId: string) => api.get(`/groups/${groupId}/balances`),
+  getEligibleFriends: (groupId: string) => api.get(`/groups/${groupId}/friends-eligible`),
+  get: (url: string) => api.get(url),
 }
 
 export const expenseAPI = {

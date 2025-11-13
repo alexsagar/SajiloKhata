@@ -58,7 +58,7 @@ router.post(
       try {
         await sendEmail({
           to: email,
-          subject: "Verify your SplitWise account",
+          subject: "Verify your Khutrukey account",
           template: "emailVerification",
           data: {
             firstName,
@@ -108,9 +108,9 @@ router.post("/login", [body("email").isEmail().normalizeEmail(), body("password"
 
     // Generate tokens
     const { accessToken, refreshToken } = generateTokens(user._id)
-    const sameSite = process.env.COOKIE_SAMESITE || 'None'
-    const secure = process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : true
-    const common = { httpOnly: true, sameSite, secure, path: '/' }
+    const inferredSecure = process.env.COOKIE_SECURE ? (process.env.COOKIE_SECURE === 'true') : (process.env.CLIENT_URL?.startsWith('https') || process.env.NODE_ENV === 'production')
+    const inferredSameSite = process.env.COOKIE_SAMESITE || (inferredSecure ? 'None' : 'Lax')
+    const common = { httpOnly: true, sameSite: inferredSameSite, secure: inferredSecure, path: '/' }
     res
       .cookie('accessToken', accessToken, { ...common, maxAge: 15 * 60 * 1000 })
       .cookie('refreshToken', refreshToken, { ...common, maxAge: 7 * 24 * 60 * 60 * 1000 })
@@ -150,9 +150,9 @@ router.post("/refresh", async (req, res) => {
     }
 
     const { accessToken, refreshToken: newRefreshToken } = generateTokens(user._id)
-    const sameSite = process.env.COOKIE_SAMESITE || 'None'
-    const secure = process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : true
-    const common = { httpOnly: true, sameSite, secure, path: '/' }
+    const inferredSecure = process.env.COOKIE_SECURE ? (process.env.COOKIE_SECURE === 'true') : (process.env.CLIENT_URL?.startsWith('https') || process.env.NODE_ENV === 'production')
+    const inferredSameSite = process.env.COOKIE_SAMESITE || (inferredSecure ? 'None' : 'Lax')
+    const common = { httpOnly: true, sameSite: inferredSameSite, secure: inferredSecure, path: '/' }
     res
       .cookie('accessToken', accessToken, { ...common, maxAge: 15 * 60 * 1000 })
       .cookie('refreshToken', newRefreshToken, { ...common, maxAge: 7 * 24 * 60 * 60 * 1000 })
@@ -202,7 +202,7 @@ router.post("/forgot-password", [body("email").isEmail().normalizeEmail()], asyn
     try {
       await sendEmail({
         to: email,
-        subject: "Reset your SplitWise password",
+        subject: "Reset your Khutrukey password",
         template: "passwordReset",
         data: {
           firstName: user.firstName,

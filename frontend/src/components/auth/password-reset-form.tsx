@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { validateEmail } from "../lib/validation";
-import { notify } from "../lib/notification";
-import { resetPassword } from "../lib/auth";
+import { validateEmail } from "@/lib/validation";
+import { notify } from "@/lib/notification";
+import { resetPassword } from "@/lib/auth";
 
 const PasswordResetForm: React.FC = () => {
   const [email, setEmail] = useState("");

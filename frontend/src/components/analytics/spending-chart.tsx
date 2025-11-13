@@ -28,7 +28,7 @@ export function SpendingChart({ data }: SpendingChartProps) {
           fontSize={12} 
           tickLine={false} 
           axisLine={false}
-          tickFormatter={(value) => new Date(value).toLocaleDateString()}
+          tickFormatter={(value) => new Date(String(value || "")).toLocaleDateString()}
         />
         <YAxis
           stroke="#888888"
@@ -45,7 +45,7 @@ export function SpendingChart({ data }: SpendingChartProps) {
                   <div className="grid grid-cols-2 gap-2">
                     <div className="flex flex-col">
                       <span className="text-[0.70rem] uppercase text-muted-foreground">
-                        {new Date(label).toLocaleDateString()}
+                        {new Date(String(label || "")).toLocaleDateString()}
                       </span>
                       <span className="font-bold text-muted-foreground">
                         {formatCurrency(payload[0].value as number)}

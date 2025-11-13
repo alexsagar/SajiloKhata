@@ -58,7 +58,7 @@ class EmailService {
       }
 
       const mailOptions = {
-        from: `"${process.env.APP_NAME || "SplitWise"}" <${process.env.SMTP_USER}>`,
+        from: `"${process.env.APP_NAME || "Khutrukey"}" <${process.env.SMTP_USER}>`,
         to,
         subject,
         text: emailText,
@@ -112,19 +112,19 @@ class EmailService {
       <body>
         <div class="container">
           <div class="header">
-            <h1>Welcome to SplitWise!</h1>
+            <h1>Welcome to Khutrukey!</h1>
           </div>
           <div class="content">
             <h2>Hi ${data.firstName},</h2>
-            <p>Thank you for signing up for SplitWise! To complete your registration, please verify your email address by clicking the button below:</p>
+            <p>Thank you for signing up for Khutrukey! To complete your registration, please verify your email address by clicking the button below:</p>
             <a href="${data.verificationUrl}" class="button">Verify Email Address</a>
             <p>If the button doesn't work, you can copy and paste this link into your browser:</p>
             <p><a href="${data.verificationUrl}">${data.verificationUrl}</a></p>
             <p>This link will expire in 24 hours for security reasons.</p>
-            <p>If you didn't create an account with SplitWise, you can safely ignore this email.</p>
+            <p>If you didn't create an account with Khutrukey, you can safely ignore this email.</p>
           </div>
           <div class="footer">
-            <p>&copy; 2024 SplitWise. All rights reserved.</p>
+            <p>&copy; 2024 Khutrukey. All rights reserved.</p>
           </div>
         </div>
       </body>
@@ -155,7 +155,7 @@ class EmailService {
           </div>
           <div class="content">
             <h2>Hi ${data.firstName},</h2>
-            <p>We received a request to reset your password for your SplitWise account. Click the button below to reset your password:</p>
+            <p>We received a request to reset your password for your Khutrukey account. Click the button below to reset your password:</p>
             <a href="${data.resetUrl}" class="button">Reset Password</a>
             <p>If the button doesn't work, you can copy and paste this link into your browser:</p>
             <p><a href="${data.resetUrl}">${data.resetUrl}</a></p>
@@ -163,7 +163,7 @@ class EmailService {
             <p>If you didn't request a password reset, you can safely ignore this email. Your password will remain unchanged.</p>
           </div>
           <div class="footer">
-            <p>&copy; 2024 SplitWise. All rights reserved.</p>
+            <p>&copy; 2024 Khutrukey. All rights reserved.</p>
           </div>
         </div>
       </body>
@@ -200,10 +200,10 @@ class EmailService {
               <p><strong>Amount:</strong> $${data.amount}</p>
               <p><strong>Description:</strong> ${data.title}</p>
             </div>
-            <p>You can view the full details and manage your expenses in the SplitWise app.</p>
+            <p>You can view the full details and manage your expenses in the Khutrukey app.</p>
           </div>
           <div class="footer">
-            <p>&copy; 2024 SplitWise. All rights reserved.</p>
+            <p>&copy; 2024 Khutrukey. All rights reserved.</p>
           </div>
         </div>
       </body>

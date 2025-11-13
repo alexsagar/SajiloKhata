@@ -10,9 +10,9 @@ export default function RegisterPage() {
     <AuthShell>
       <div className="space-y-6">
         <div className="text-center">
-          <Image src="/images/logo.svg" alt="SplitWise" width={60} height={60} className="mx-auto mb-4" />
+          <Image src="/images/logo.svg" alt="Khutrukey" width={60} height={60} className="mx-auto mb-4" />
           <h1 className="text-3xl font-bold">Create account</h1>
-          <p className="text-muted-foreground">Join SplitWise today</p>
+          <p className="text-muted-foreground">Join Khutrukey today</p>
         </div>
 
         <KanbanCard>

@@ -10,7 +10,7 @@ export default function PremiumPage() {
     <ProtectedRoute>
       <AppSidebar />
       <SidebarInset>
-        <Header title="Premium" description="Unlock advanced features with SplitWise Premium" />
+        <Header title="Premium" description="Unlock advanced features with Khutrukey Premium" />
         <div className="flex flex-1 flex-col gap-4 p-4">
           <PremiumFeatures />
           <PricingPlans />

@@ -20,13 +20,13 @@ const inter = Inter({ subsets: ["latin"] })
 
 // ✅ This remains for SEO
 export const metadata: Metadata = {
-  title: "SplitWise - Smart Expense Sharing",
+  title: "Khutrukey - Smart Expense Sharing",
   description: "Split expenses with friends and family easily with AI-powered features",
   manifest: "/manifest.json",
   keywords: ["expense sharing", "split bills", "group expenses", "money management"],
-  authors: [{ name: "SplitWise Team" }],
+  authors: [{ name: "Khutrukey Team" }],
   openGraph: {
-    title: "SplitWise - Smart Expense Sharing",
+    title: "Khutrukey - Smart Expense Sharing",
     description: "Split expenses with friends and family easily",
     type: "website",
     locale: "en_US",

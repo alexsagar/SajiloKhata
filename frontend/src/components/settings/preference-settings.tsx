@@ -32,8 +32,8 @@ export function PreferenceSettings() {
         language: user.preferences.language || "en",
         theme: user.preferences.theme || "system",
         timezone: user.preferences.timezone || "America/New_York",
-        autoSplit: user.preferences.autoSplit || true,
-        defaultSplitType: user.preferences.defaultSplitType || "equal",
+        autoSplit: !!(user as any).preferences?.autoSplit,
+        defaultSplitType: (user as any).preferences?.defaultSplitType ?? "equal",
       }
       setPreferences(newPreferences)
     }

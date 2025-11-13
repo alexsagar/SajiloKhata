@@ -32,7 +32,7 @@ export default function DesignSystemPage() {
             Modern Design System
           </div>
           <h1 className="text-5xl font-bold bg-gradient-to-r from-foreground via-primary to-accent bg-clip-text text-transparent">
-            SplitWise Design System
+            Khutrukey Design System
           </h1>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
             A comprehensive, modern design system with beautiful animations, glassmorphism effects, and perfect dark/light mode support.

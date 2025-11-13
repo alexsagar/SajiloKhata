@@ -151,7 +151,7 @@ const defaultPreferences: NotificationPreference[] = [
   {
     id: 'tips_tricks',
     title: 'Tips & Tricks',
-    description: 'Helpful tips to get the most out of SplitWise',
+    description: 'Helpful tips to get the most out of Khutrukey',
     category: 'marketing',
     channels: { email: true, push: false, sms: false, inApp: false },
     frequency: 'weekly',

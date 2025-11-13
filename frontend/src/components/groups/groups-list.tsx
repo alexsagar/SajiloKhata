@@ -14,7 +14,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 export function GroupsList() {
   const { data: groups, isLoading } = useQuery({
     queryKey: ["user-groups"],
-    queryFn: groupAPI.getGroups,
+    queryFn: () => groupAPI.getGroups(),
   })
 
   if (isLoading) {
@@ -25,7 +25,7 @@ export function GroupsList() {
     )
   }
 
-  const userGroups = groups?.data?.data || groups?.data || []
+  const userGroups = (groups as any)?.data?.data || (groups as any)?.data || []
 
   if (userGroups.length === 0) {
     return (

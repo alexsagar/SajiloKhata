@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { notify } from "../lib/notification";
+import { notify } from "@/lib/notification";
 
 interface FileUploadProps {
   accept?: string;

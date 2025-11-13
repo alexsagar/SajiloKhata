@@ -33,12 +33,13 @@ import { CreateExpenseSchema } from "@/lib/validation"
 type CreateExpenseFormData = z.infer<typeof CreateExpenseSchema>
 
 interface CreateExpenseDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   defaultGroupId?: string
+  children?: React.ReactNode
 }
 
-export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId }: CreateExpenseDialogProps) {
+export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, children }: CreateExpenseDialogProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [selectedMembers, setSelectedMembers] = useState<string[]>([])
   const [showCurrencySelection, setShowCurrencySelection] = useState(false)
@@ -47,7 +48,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId }: Crea
 
   const { data: groups } = useQuery({
     queryKey: ["user-groups"],
-    queryFn: groupAPI.getGroups,
+    queryFn: () => groupAPI.getGroups(),
   })
 
   const {
@@ -72,7 +73,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId }: Crea
 
   const selectedGroupId = watch("groupId")
   const selectedCurrency = watch("currencyCode")
-  const groupsData = groups?.data?.data || groups?.data || []
+  const groupsData = (groups as any)?.data?.data || (groups as any)?.data || []
   const selectedGroup = groupsData.find((g: any) => g._id === selectedGroupId)
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -131,7 +132,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId }: Crea
         title: "Expense created",
         description: "Your expense has been created successfully.",
       })
-      onOpenChange(false)
+      onOpenChange?.(false)
       reset()
       setSelectedFile(null)
       setSelectedMembers([])
@@ -207,6 +208,11 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId }: Crea
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
+      {children && (
+        <DialogTrigger asChild>
+          {children}
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-md w-auto max-h-[85vh] mx-auto">
         <DialogHeader className="space-y-2">
           <DialogTitle className="text-lg font-semibold">Create New Expense</DialogTitle>
@@ -418,7 +424,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId }: Crea
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={() => onOpenChange?.(false)}
               disabled={createExpenseMutation.isPending}
             >
               Cancel

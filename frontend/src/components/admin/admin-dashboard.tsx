@@ -35,9 +35,9 @@ const systemMetrics = {
   apiCalls: 0
 }
 
-const userGrowthData = []
-const subscriptionData = []
-const recentAlerts = []
+const userGrowthData: any[] = []
+const subscriptionData: any[] = []
+const recentAlerts: any[] = []
 
 const systemHealth = [
   { service: 'API Gateway', status: 'healthy', uptime: 99.98, responseTime: 45 },

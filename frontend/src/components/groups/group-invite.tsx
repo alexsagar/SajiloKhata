@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { validateEmail } from "../lib/validation";
-import { notify } from "../lib/notification";
+import { validateEmail } from "@/lib/validation";
+import { notify } from "@/lib/notification";
 
 interface GroupInviteProps {
   onInvite: (email: string) => Promise<void>;

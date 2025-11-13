@@ -245,7 +245,8 @@ export function CurrencySelector({
                       key={currency.code}
                       value={currency.code}
                       onSelect={(currentValue) => {
-                        onValueChange?.(currentValue === value ? "" : currentValue)
+                        const v = String(currentValue)
+                        onValueChange?.(v === value ? "" : v)
                         setOpen(false)
                       }}
                       className="flex items-center justify-between"
@@ -274,7 +275,8 @@ export function CurrencySelector({
                     key={currency.code}
                     value={currency.code}
                     onSelect={(currentValue) => {
-                      onValueChange?.(currentValue === value ? "" : currentValue)
+                      const v = String(currentValue)
+                      onValueChange?.(v === value ? "" : v)
                       setOpen(false)
                     }}
                     className="flex items-center justify-between"

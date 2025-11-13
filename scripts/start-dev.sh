@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Development startup script for SplitWise application
+# Development startup script for Khutrukey application
 
-echo "🚀 Starting SplitWise Development Environment"
+echo "🚀 Starting Khutrukey Development Environment"
 echo "============================================="
 
 # Check if Node.js is installed
@@ -68,7 +68,7 @@ npm run dev &
 FRONTEND_PID=$!
 
 echo ""
-echo "✅ SplitWise is starting up!"
+echo "✅ Khutrukey is starting up!"
 echo "📊 Backend:  http://localhost:5000"
 echo "🌐 Frontend: http://localhost:3000"
 echo "📚 API Docs: http://localhost:5000/api/health"

@@ -31,7 +31,7 @@ export function ExpenseFilters({ onFiltersChange }: ExpenseFiltersProps) {
 
   const { data: groups } = useQuery({
     queryKey: ["user-groups"],
-    queryFn: groupAPI.getGroups,
+    queryFn: () => groupAPI.getGroups(),
   })
 
   const updateFilter = (key: string, value: string) => {
@@ -114,7 +114,7 @@ export function ExpenseFilters({ onFiltersChange }: ExpenseFiltersProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All groups</SelectItem>
-                {(groups?.data?.data || groups?.data || []).map((group: any) => (
+                {(((groups as any)?.data?.data) || (groups as any)?.data || []).map((group: any) => (
                   <SelectItem key={group._id} value={group._id}>
                     {group.name}
                   </SelectItem>

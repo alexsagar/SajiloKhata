@@ -27,11 +27,11 @@ export function TestDeleteGroup() {
 
     setIsLoading(true)
     try {
-      const response = await groupAPI.createGroup({
-        name: groupName.trim(),
-        description: "Test group for deletion",
-        category: "other"
-      })
+      const form = new FormData()
+      form.append("name", groupName.trim())
+      form.append("description", "Test group for deletion")
+      form.append("category", "other")
+      const response = await groupAPI.createGroup(form)
 
       setTestGroups(prev => [...prev, response.data])
       setGroupName("")

@@ -72,7 +72,7 @@ export function ExpenseCalendar() {
   // Fetch user groups for group selector
   const { data: groupsData } = useQuery({
     queryKey: ['user-groups'],
-    queryFn: groupAPI.getGroups,
+    queryFn: () => groupAPI.getGroups(),
   })
 
   // Create expense mutation
@@ -148,7 +148,7 @@ export function ExpenseCalendar() {
 
   // Update currency when group changes
   const selectedGroupId = form.watch('groupId')
-  const selectedGroup = groupsData?.data?.data?.find((g: any) => g._id === selectedGroupId)
+  const selectedGroup = (groupsData as any)?.data?.data?.find((g: any) => g._id === selectedGroupId)
   
   useEffect(() => {
     if (filters.mode === 'personal') {
@@ -340,7 +340,7 @@ export function ExpenseCalendar() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Groups</SelectItem>
-                      {groupsData?.data?.data?.map((group: any) => (
+                      {(groupsData as any)?.data?.data?.map((group: any) => (
                         <SelectItem key={group._id} value={group._id}>
                           {group.name}
                         </SelectItem>

@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 import ImagePreview from "./image-preview";
-import { notify } from "../lib/notification";
+import { notify } from "@/lib/notification";
 
 interface AvatarUploadProps {
   initialUrl?: string;

@@ -11,7 +11,7 @@ interface PendingAction {
 }
 
 class OfflineManager {
-  private storageKey = "splitwise-pending-actions"
+  private storageKey = "khutrukey-pending-actions"
   private maxRetries = 3
 
   async getPendingActions(): Promise<PendingAction[]> {

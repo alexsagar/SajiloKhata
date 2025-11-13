@@ -40,11 +40,11 @@ import {
 } from "recharts"
 
 // Empty initial data - will be populated from API
-const userGrowthData = []
-const revenueData = []
-const platformData = []
-const featureUsageData = []
-const performanceData = []
+const userGrowthData: any[] = []
+const revenueData: any[] = []
+const platformData: any[] = []
+const featureUsageData: any[] = []
+const performanceData: any[] = []
 const systemMetrics = {
   totalUsers: 0,
   activeUsers: 0,

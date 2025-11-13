@@ -1,5 +1,5 @@
 import React from "react";
-import { useOnlineStatus } from "../hooks/use-online-status";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 
 const ConnectionMonitor: React.FC = () => {
   const online = useOnlineStatus();

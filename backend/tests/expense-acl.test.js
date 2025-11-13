@@ -2,6 +2,12 @@ const request = require('supertest')
 const express = require('express')
 const jwt = require('jsonwebtoken')
 
+// Mock Group model to avoid Mongoose buffering when DB is not connected
+jest.mock('../models/Group', () => ({
+  findOne: jest.fn().mockRejectedValue(new Error('DB unavailable')),
+  find: jest.fn().mockResolvedValue([]),
+}))
+
 const expensesRouter = require('../routes/expenses')
 
 // Minimal auth middleware stub
@@ -14,6 +20,7 @@ function authStub(user) {
 }
 
 describe('Expenses ACL', () => {
+  jest.setTimeout(10000)
   test('rejects access when not group member (GET /)', async () => {
     const app = express()
     app.use(express.json())
