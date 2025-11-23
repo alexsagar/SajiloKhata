@@ -5,16 +5,17 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Receipt, Calendar, Users, MoreHorizontal, Edit, Trash2, CreditCard, Building2 } from "lucide-react"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { expenseAPI } from "@/lib/api"
 import { LoadingSpinner } from "@/components/common/loading-spinner"
 import { formatDate, getInitials } from "@/lib/utils"
-import { formatCurrency } from "@/lib/currency"
+import { formatCurrencyWithSymbol } from "@/lib/currency"
 import { useAuth } from "@/contexts/auth-context"
 import Link from "next/link"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { EditExpenseDialog } from "./edit-expense-dialog"
 import { useState } from "react"
+import { toast } from "@/hooks/use-toast"
 
 interface ExpensesListProps {
   groupId?: string
@@ -30,11 +31,36 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || "USD"
   const [editingExpense, setEditingExpense] = useState<any>(null)
+  const queryClient = useQueryClient()
 
   const { data: expenses, isLoading } = useQuery({
     queryKey: ["expenses", groupId, filters],
     queryFn: () => expenseAPI.getExpenses(groupId),
   })
+
+  const deleteExpenseMutation = useMutation({
+    mutationFn: async (expenseId: string) => {
+      return expenseAPI.deleteExpense(expenseId)
+    },
+    onSuccess: () => {
+      toast({ title: "Expense deleted" })
+      queryClient.invalidateQueries({ queryKey: ["expenses", groupId] })
+      if (groupId) {
+        queryClient.invalidateQueries({ queryKey: ["group-balance", groupId] })
+      }
+    },
+    onError: () => {
+      toast({ variant: "destructive", title: "Failed to delete expense" })
+    },
+  })
+
+  const handleDelete = (expenseId: string) => {
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm("Delete this expense? This action cannot be undone.")
+      if (!confirmed) return
+    }
+    deleteExpenseMutation.mutate(expenseId)
+  }
 
   console.log('ExpensesList - Query key:', ["expenses", groupId, filters])
   console.log('ExpensesList - Query result:', expenses)
@@ -48,7 +74,8 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
     )
   }
 
-  const expensesList = expenses?.data?.expenses || []
+  const expensesPayload = (expenses?.data && (expenses?.data as any).data) ? (expenses?.data as any).data : (expenses?.data as any)
+  const expensesList = (expensesPayload?.expenses as any[]) || []
 
   if (expensesList.length === 0) {
     return (
@@ -92,7 +119,7 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
               <span className="text-sm text-muted-foreground">Personal</span>
             </div>
             <div className="text-xl font-bold text-blue-400 mt-1">
-              {formatCurrency(personalTotal / 100, userCurrency)}
+              {formatCurrencyWithSymbol(personalTotal / 100, userCurrency)}
             </div>
             <div className="text-xs text-muted-foreground">
               {personalExpenses.length} expense{personalExpenses.length !== 1 ? 's' : ''}
@@ -105,7 +132,7 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
               <span className="text-sm text-muted-foreground">Group</span>
             </div>
             <div className="text-xl font-bold text-green-400 mt-1">
-              {formatCurrency(groupTotal / 100, userCurrency)}
+              {formatCurrencyWithSymbol(groupTotal / 100, userCurrency)}
             </div>
             <div className="text-xs text-muted-foreground">
               {groupExpenses.length} expense{groupExpenses.length !== 1 ? 's' : ''}
@@ -118,7 +145,7 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
               <span className="text-sm text-muted-foreground">Total</span>
             </div>
             <div className="text-xl font-bold text-purple-400 mt-1">
-              {formatCurrency((personalTotal + groupTotal) / 100, userCurrency)}
+              {formatCurrencyWithSymbol((personalTotal + groupTotal) / 100, userCurrency)}
             </div>
             <div className="text-xs text-muted-foreground">
               {expensesList.length} total expense{expensesList.length !== 1 ? 's' : ''}
@@ -208,7 +235,7 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
                                 </AvatarFallback>
                               </Avatar>
                               <span>{split.user.firstName}</span>
-                              <span className="font-medium">{formatCurrency(split.amount, userCurrency)}</span>
+                              <span className="font-medium">{formatCurrencyWithSymbol(split.amount, userCurrency)}</span>
                               {split.settled && (
                                 <Badge variant="secondary" className="text-xs">Settled</Badge>
                               )}
@@ -221,8 +248,13 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
 
                   <div className="flex items-center gap-2">
                     <div className="text-right">
-                      <div className="text-2xl font-bold">{formatCurrency(expense.amount, userCurrency)}</div>
-                      <div className="text-sm text-muted-foreground">{expense.currency}</div>
+                      <div className="text-2xl font-bold">{
+                        formatCurrencyWithSymbol(
+                          ((expense.amountCents != null ? expense.amountCents : (expense.amount != null ? Math.round(expense.amount * 100) : 0)) / 100),
+                          userCurrency
+                        )
+                      }</div>
+                      <div className="text-sm text-muted-foreground">{expense.currencyCode || expense.currency || userCurrency}</div>
                     </div>
 
                     <DropdownMenu>
@@ -244,7 +276,10 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
                             <Link href={`/expenses/${expense._id}/receipt`}>View Receipt</Link>
                           </DropdownMenuItem>
                         )}
-                        <DropdownMenuItem className="text-destructive">
+                        <DropdownMenuItem 
+                          className="text-destructive"
+                          onClick={() => handleDelete(expense._id)}
+                        >
                           <Trash2 className="h-4 w-4 mr-2" />
                           Delete
                         </DropdownMenuItem>

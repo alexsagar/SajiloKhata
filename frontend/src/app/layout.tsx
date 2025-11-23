@@ -7,6 +7,7 @@ import "./globals.css"
 import { QueryProvider } from "@/components/providers/query-provider"
 import { ToastProvider } from "@/components/providers/toast-provider"
 import { SidebarProvider } from "@/components/ui/sidebar"
+import { MobileSidebarProvider } from "@/contexts/mobile-sidebar-context"
 import { AuthProvider } from "@/contexts/auth-context"
 import { CurrencyProvider } from "@/contexts/currency-context"
 import { NotificationProvider } from "@/contexts/notification-context"
@@ -64,11 +65,13 @@ export default function RootLayout({
                   <SocketProvider>
                     <OfflineProvider>
                       <SidebarProvider>
-                        <ToastProvider>
-                          {children}
-                          <Toaster />
-                          <OfflineIndicator />
-                        </ToastProvider>
+                        <MobileSidebarProvider>
+                          <ToastProvider>
+                            {children}
+                            <Toaster />
+                            <OfflineIndicator />
+                          </ToastProvider>
+                        </MobileSidebarProvider>
                       </SidebarProvider>
                     </OfflineProvider>
                   </SocketProvider>

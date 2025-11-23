@@ -3,9 +3,30 @@ const { body, validationResult } = require("express-validator")
 const { customAlphabet } = require("nanoid")
 const FriendInvite = require("../models/FriendInvite")
 const User = require("../models/User")
+const Conversation = require("../models/Conversation")
+const { sendEmail } = require("../services/emailService")
 
 const router = express.Router()
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", 12)
+
+// List my friends
+router.get("/", async (req, res) => {
+  try {
+    const me = await User.findById(req.user._id).select("friends").populate("friends", "firstName lastName username email avatar createdAt")
+    const friends = (me?.friends || []).map((u) => ({
+      _id: u._id,
+      firstName: u.firstName,
+      lastName: u.lastName,
+      username: u.username,
+      email: u.email,
+      avatar: u.avatar,
+      joinedAt: u.createdAt,
+    }))
+    res.json({ data: friends })
+  } catch (e) {
+    res.status(500).json({ message: "Server error" })
+  }
+})
 
 // Create invite
 router.post(
@@ -27,6 +48,21 @@ router.post(
       })
 
       const inviteUrl = `${process.env.CLIENT_URL || "http://localhost:3000"}/invite/${code}`
+
+      if (req.body.inviteeEmail) {
+        const inviter = await User.findById(req.user._id).select("firstName")
+        await sendEmail({
+          to: req.body.inviteeEmail,
+          subject: "You're invited to join Khutrukey",
+          template: "groupInvite",
+          data: {
+            firstName: "Friend",
+            message: `${inviter?.firstName || "Your friend"} invited you to connect on Khutrukey`,
+            inviteUrl,
+          },
+        })
+      }
+
       res.json({ code, inviteUrl, expiresAt })
     } catch (e) {
       res.status(500).json({ message: "Server error" })
@@ -82,6 +118,13 @@ router.post("/invites/:code/accept", async (req, res) => {
 
     invite.status = "accepted"
     await invite.save()
+
+    // Upsert a DM conversation between inviter and invitee
+    const participants = [inviterId, meId].sort()
+    let conv = await Conversation.findOne({ type: "dm", participants: { $all: participants, $size: 2 } })
+    if (!conv) {
+      conv = await Conversation.create({ type: "dm", participants })
+    }
 
     // notify inviter via socket
     req.io.to(`user_${inviterId}`).emit("friend:accepted", { userId: meId })

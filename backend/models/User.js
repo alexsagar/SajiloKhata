@@ -125,6 +125,18 @@ const userSchema = new mongoose.Schema(
   },
 )
 
+// Generate default avatar if not provided
+userSchema.pre("save", async function (next) {
+  // Only generate avatar for new users who don't have one
+  if (this.isNew && !this.avatar) {
+    // Use DiceBear API with user's ID as seed for consistent avatar
+    // Using 'bottts' style for cute, gender-neutral robot avatars
+    const seed = this._id.toString()
+    this.avatar = `https://api.dicebear.com/7.x/bottts/svg?seed=${seed}`
+  }
+  next()
+})
+
 // Hash password before saving
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next()

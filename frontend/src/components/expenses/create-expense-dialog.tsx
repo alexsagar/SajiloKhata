@@ -21,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Loader2, Upload, X } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { expenseAPI, groupAPI } from "@/lib/api"
+import { expenseAPI, groupAPI, receiptAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { getInitials } from "@/lib/utils"
@@ -41,6 +41,8 @@ interface CreateExpenseDialogProps {
 
 export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, children }: CreateExpenseDialogProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [uploadedReceiptId, setUploadedReceiptId] = useState<string | null>(null)
+  const [receiptParsed, setReceiptParsed] = useState<any>(null)
   const [selectedMembers, setSelectedMembers] = useState<string[]>([])
   const [showCurrencySelection, setShowCurrencySelection] = useState(false)
   const queryClient = useQueryClient()
@@ -83,7 +85,9 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
     },
     maxFiles: 1,
     onDrop: (acceptedFiles) => {
-      setSelectedFile(acceptedFiles[0])
+      const file = acceptedFiles[0]
+      setSelectedFile(file)
+      // Note: Receipt scanning is only supported for personal expenses.
     }
   })
 
@@ -107,12 +111,31 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
       } else {
         throw new Error('User not authenticated')
       }
-      
-      // Add selected members for splitting
-      if (selectedMembers.length > 0) {
-        selectedMembers.forEach(memberId => {
-          formData.append('splitWith[]', memberId)
-        })
+
+      // Build splits including payer (current user) + selected members
+      if (data.groupId) {
+        const amountNumber = typeof data.amount === 'string' ? parseFloat(data.amount) : data.amount
+        const participants = Array.from(new Set([user.id, ...selectedMembers]))
+
+        if (participants.length === 0) {
+          throw new Error('No participants selected for group split')
+        }
+
+        let splits: Array<{ user: string; amount?: number; percentage?: number }> = []
+        const splitType = data.splitType || 'equal'
+
+        if (splitType === 'equal') {
+          const share = amountNumber / participants.length
+          splits = participants.map((pid) => ({ user: pid, amount: Number(share.toFixed(2)) }))
+        } else if (splitType === 'percentage') {
+          const pct = Math.round((100 / participants.length) * 100) / 100 // equal fallback
+          splits = participants.map((pid) => ({ user: pid, percentage: pct }))
+        } else if (splitType === 'exact') {
+          const share = amountNumber / participants.length // default exact equally
+          splits = participants.map((pid) => ({ user: pid, amount: Number(share.toFixed(2)) }))
+        }
+
+        formData.append('splits', JSON.stringify(splits))
       }
       
       if (selectedFile) {
@@ -121,12 +144,25 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
       
       return expenseAPI.createExpense(formData)
     },
-    onSuccess: () => {
+    onSuccess: async (response: any) => {
       // Invalidate all expense-related queries to ensure the list refreshes
       queryClient.invalidateQueries({ queryKey: ["expenses"] })
       queryClient.invalidateQueries({ queryKey: ["expenses", undefined] })
       queryClient.invalidateQueries({ queryKey: ["expenses", null] })
       queryClient.invalidateQueries({ queryKey: ["user-groups"] })
+      queryClient.invalidateQueries({ queryKey: ["recent-expenses"] })
+      // Invalidate all analytics queries so dashboard updates in real time
+      queryClient.invalidateQueries({
+        predicate: (q) => typeof q.queryKey?.[0] === 'string' && (q.queryKey[0] as string).startsWith('analytics-')
+      })
+      // If we uploaded receipt first, link it to the created expense
+      try {
+        const created = response?.data?.data || response?.data
+        const expenseId = created?._id || created?.id
+        if (uploadedReceiptId && expenseId) {
+          await receiptAPI.linkToExpense(uploadedReceiptId, expenseId)
+        }
+      } catch {}
       
       toast({
         title: "Expense created",
@@ -135,6 +171,8 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
       onOpenChange?.(false)
       reset()
       setSelectedFile(null)
+      setUploadedReceiptId(null)
+      setReceiptParsed(null)
       setSelectedMembers([])
       setShowCurrencySelection(false)
     },

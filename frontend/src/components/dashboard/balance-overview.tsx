@@ -4,12 +4,13 @@ import { KanbanCard, KanbanCardContent, KanbanCardHeader, KanbanCardTitle } from
 import { DollarSign, TrendingUp, TrendingDown, Users, CreditCard, PiggyBank } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { expenseAPI } from "@/lib/api"
-import { useAuth } from "@/hooks/use-auth"
-import { formatCurrency } from "@/lib/utils"
+import { useAuth } from "@/contexts/auth-context"
+import { formatCurrencyWithSymbol } from "@/lib/currency"
 import { ComponentLoading } from "@/components/ui/loading"
 
 export function BalanceOverview() {
   const { user } = useAuth()
+  const userCurrency = user?.preferences?.currency || 'USD'
 
   // Fetch expense summary data
   const { data: expenseSummary, isLoading, error } = useQuery({
@@ -62,16 +63,35 @@ export function BalanceOverview() {
   }
 
   // Calculate personal vs group expense breakdown
-  const personalExpenses = expenseSummary?.expenses?.filter((exp: any) => !exp.groupId) || []
-  const groupExpenses = expenseSummary?.expenses?.filter((exp: any) => exp.groupId) || []
+  const payload = expenseSummary?.data?.data ? expenseSummary.data.data : expenseSummary?.data
+  const expensesData = payload?.expenses || expenseSummary?.expenses || []
+  const personalExpenses = expensesData.filter((exp: any) => !exp.groupId)
+  const groupExpenses = expensesData.filter((exp: any) => exp.groupId)
 
   const personalTotal = personalExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
   const groupTotal = groupExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
 
-  // Calculate balances (simplified - in real app you'd calculate from splits)
-  const totalBalance = 0 // This would be calculated from all group balances
-  const youOwe = 0 // This would be calculated from group splits where you owe money
-  const youreOwed = 0 // This would be calculated from group splits where others owe you
+  // Calculate balances from splits
+  const currentUserId = user?.id || (user as any)?._id
+  let youOwe = 0
+  let youreOwed = 0
+  for (const exp of groupExpenses) {
+    const payerId = exp?.paidBy?._id || exp?.paidBy?.id || exp?.paidBy
+    const splits = Array.isArray(exp?.splits) ? exp.splits : []
+    for (const s of splits) {
+      const sid = s?.user?._id || s?.user?.id || s?.user
+      const shareCents = (s?.amountCents != null)
+        ? s.amountCents
+        : Math.round(((s?.amount ?? 0) as number) * 100)
+      if (!Number.isFinite(shareCents)) continue
+      if (payerId === currentUserId && sid !== currentUserId) {
+        youreOwed += shareCents
+      } else if (sid === currentUserId && payerId !== currentUserId) {
+        youOwe += shareCents
+      }
+    }
+  }
+  const totalBalance = youreOwed - youOwe
 
   return (
     <>
@@ -82,7 +102,7 @@ export function BalanceOverview() {
         </KanbanCardHeader>
         <KanbanCardContent>
           <div className="text-2xl font-bold text-slate-100">
-            {formatCurrency(totalBalance / 100)}
+            {formatCurrencyWithSymbol(totalBalance / 100, userCurrency)}
           </div>
           <p className="text-xs text-slate-400 mt-1">Your overall balance</p>
         </KanbanCardContent>
@@ -95,7 +115,7 @@ export function BalanceOverview() {
         </KanbanCardHeader>
         <KanbanCardContent>
           <div className="text-2xl font-bold text-emerald-400">
-            {formatCurrency(youreOwed / 100)}
+            {formatCurrencyWithSymbol(youreOwed / 100, userCurrency)}
           </div>
           <p className="text-xs text-slate-400 mt-1">Money coming to you</p>
         </KanbanCardContent>
@@ -108,7 +128,7 @@ export function BalanceOverview() {
         </KanbanCardHeader>
         <KanbanCardContent>
           <div className="text-2xl font-bold text-rose-400">
-            {formatCurrency(youOwe / 100)}
+            {formatCurrencyWithSymbol(youOwe / 100, userCurrency)}
           </div>
           <p className="text-xs text-slate-400 mt-1">Money you need to pay</p>
         </KanbanCardContent>
@@ -121,7 +141,7 @@ export function BalanceOverview() {
         </KanbanCardHeader>
         <KanbanCardContent>
           <div className="text-2xl font-bold text-slate-100">
-            {formatCurrency(personalTotal / 100)}
+            {formatCurrencyWithSymbol(personalTotal / 100, userCurrency)}
           </div>
           <p className="text-xs text-slate-400 mt-1">
             {personalExpenses.length} personal expense{personalExpenses.length !== 1 ? 's' : ''}
@@ -136,7 +156,7 @@ export function BalanceOverview() {
         </KanbanCardHeader>
         <KanbanCardContent>
           <div className="text-2xl font-bold text-slate-100">
-            {formatCurrency(groupTotal / 100)}
+            {formatCurrencyWithSymbol(groupTotal / 100, userCurrency)}
           </div>
           <p className="text-xs text-slate-400 mt-1">
             {groupExpenses.length} group expense{groupExpenses.length !== 1 ? 's' : ''}
@@ -151,7 +171,7 @@ export function BalanceOverview() {
         </KanbanCardHeader>
         <KanbanCardContent>
           <div className="text-2xl font-bold text-slate-100">
-            {formatCurrency((personalTotal + groupTotal) / 100)}
+            {formatCurrencyWithSymbol((personalTotal + groupTotal) / 100, userCurrency)}
           </div>
           <p className="text-xs text-slate-400 mt-1">
             {personalExpenses.length + groupExpenses.length} total expenses

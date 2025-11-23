@@ -2,13 +2,14 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { expenseAPI } from "@/lib/api"
-import { useAuth } from "@/hooks/use-auth"
-import { formatCurrency } from "@/lib/utils"
+import { useAuth } from "@/contexts/auth-context"
+import { formatCurrencyWithSymbol } from "@/lib/currency"
 import { CreditCard, Users, TrendingUp, TrendingDown } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
 export function ExpenseChart() {
   const { user } = useAuth()
+  const userCurrency = user?.preferences?.currency || 'USD'
 
   const { data: expenseData, isLoading } = useQuery({
     queryKey: ["expense-chart-data"],
@@ -20,7 +21,7 @@ export function ExpenseChart() {
     refetchInterval: 30000, // Refresh every 30 seconds
   })
 
-  const expenses = expenseData?.expenses || []
+  const expenses = expenseData?.data?.expenses || expenseData?.expenses || []
 
   // Calculate expense breakdowns
   const personalExpenses = expenses.filter((exp: any) => !exp.groupId)
@@ -75,7 +76,7 @@ export function ExpenseChart() {
             <div>
               <div className="text-sm text-muted-foreground">Personal Expenses</div>
               <div className="text-xl font-bold text-blue-400">
-                {formatCurrency(personalTotal / 100)}
+                {formatCurrencyWithSymbol(personalTotal / 100, userCurrency)}
               </div>
               <div className="text-xs text-muted-foreground">
                 {personalExpenses.length} expense{personalExpenses.length !== 1 ? 's' : ''}
@@ -92,7 +93,7 @@ export function ExpenseChart() {
             <div>
               <div className="text-sm text-muted-foreground">Group Expenses</div>
               <div className="text-xl font-bold text-green-400">
-                {formatCurrency(groupTotal / 100)}
+                {formatCurrencyWithSymbol(groupTotal / 100, userCurrency)}
               </div>
               <div className="text-xs text-muted-foreground">
                 {groupExpenses.length} expense{groupExpenses.length !== 1 ? 's' : ''}
@@ -108,7 +109,7 @@ export function ExpenseChart() {
           <div>
             <div className="text-sm text-muted-foreground">Total Spent</div>
             <div className="text-2xl font-bold text-white">
-              {formatCurrency(totalSpent / 100)}
+              {formatCurrencyWithSymbol(totalSpent / 100, userCurrency)}
             </div>
           </div>
           <div className="text-right">
@@ -133,7 +134,7 @@ export function ExpenseChart() {
                   </Badge>
                 </div>
                 <div className="text-sm font-medium text-white">
-                  {formatCurrency((amount as number) / 100)}
+                  {formatCurrencyWithSymbol((amount as number) / 100, userCurrency)}
                 </div>
               </div>
             ))}

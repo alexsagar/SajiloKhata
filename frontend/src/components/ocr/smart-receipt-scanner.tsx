@@ -65,7 +65,22 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
       return receiptAPI.uploadReceipt(formData)
     },
     onSuccess: (response) => {
-      setOcrResult(response.data.ocrData)
+      const data = (response as any)?.data?.data || (response as any)?.data || {}
+      const parsed = data.parsedData || {}
+      const mapped: OCRResult = {
+        merchantName: parsed.merchant || "",
+        date: parsed.date || null,
+        total: parsed.total || 0,
+        subtotal: parsed.subtotal || parsed.total || 0,
+        tax: parsed.tax || 0,
+        items: Array.isArray(parsed.items) ? parsed.items.map((it: any) => ({
+          description: it.description || "Item",
+          amount: it.totalPrice || it.amount || it.unitPrice || 0,
+        })) : [],
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : (data.confidence || 0),
+        suggestedCategory: parsed.suggestedCategory || parsed.category || 'other',
+      }
+      setOcrResult(mapped)
       setProcessingStep('results')
       toast({
         title: "Receipt processed",

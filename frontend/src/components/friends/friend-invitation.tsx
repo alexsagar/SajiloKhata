@@ -27,6 +27,7 @@ import {
   MoreHorizontal
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { friendsAPI } from "@/lib/api"
 
 interface Friend {
   id: string
@@ -62,7 +63,7 @@ export function FriendInvitation() {
 
   const inviteLink = "https://khutrukey.app/invite/abc123"
 
-  const handleSendInvitations = () => {
+  const handleSendInvitations = async () => {
     const emails = inviteEmails
       .split(/[,\n]/)
       .map(email => email.trim())
@@ -98,23 +99,41 @@ export function FriendInvitation() {
       return
     }
 
-    // Add new invitations
-    const newInvitations = newEmails.map(email => ({
-      id: Date.now().toString() + Math.random(),
-      email,
-      invitedDate: new Date().toISOString().split('T')[0],
-      status: 'sent' as const,
-      message: inviteMessage
-    }))
+    try {
+      const results = await Promise.allSettled(
+        newEmails.map(email => friendsAPI.createInvite({ inviteeEmail: email, message: inviteMessage }))
+      )
 
-    setPendingInvitations(prev => [...prev, ...newInvitations])
-    setInviteEmails('')
-    setIsInviteDialogOpen(false)
+      const succeeded: string[] = []
+      const failed: string[] = []
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') succeeded.push(newEmails[i])
+        else failed.push(newEmails[i])
+      })
 
-    toast({
-      title: "Invitations sent!",
-      description: `Sent ${newEmails.length} invitation${newEmails.length === 1 ? '' : 's'} successfully.`,
-    })
+      if (succeeded.length) {
+        const newInvitations = succeeded.map(email => ({
+          id: Date.now().toString() + Math.random(),
+          email,
+          invitedDate: new Date().toISOString().split('T')[0],
+          status: 'sent' as const,
+          message: inviteMessage,
+        }))
+        setPendingInvitations(prev => [...prev, ...newInvitations])
+      }
+
+      setInviteEmails('')
+      setIsInviteDialogOpen(false)
+
+      if (succeeded.length) {
+        toast({ title: "Invitations sent!", description: `Sent ${succeeded.length} invitation${succeeded.length === 1 ? '' : 's'}.` })
+      }
+      if (failed.length) {
+        toast({ title: "Some invites failed", description: failed.join(', '), variant: "destructive" })
+      }
+    } catch (e: any) {
+      toast({ title: "Failed to send invites", description: e?.message || "", variant: "destructive" })
+    }
   }
 
   const handleCopyLink = async () => {

@@ -91,8 +91,14 @@ router.post(
       conv.lastMessageAt = msg.createdAt
       await conv.save()
 
-      // emit to room
+      // emit to conversation room
       req.io.to(`conv_${conv._id}`).emit("message:new", { conversationId: String(conv._id), message: msg })
+      // also emit to each participant's personal room to guarantee delivery even if not joined to conv room yet
+      try {
+        ;(conv.participants || []).forEach((p) => {
+          req.io.to(`user_${String(p)}`).emit("message:new", { conversationId: String(conv._id), message: msg })
+        })
+      } catch (_) {}
 
       res.status(201).json({ data: msg })
     } catch (e) {

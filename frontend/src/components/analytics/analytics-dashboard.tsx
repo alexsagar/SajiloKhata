@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import dynamic from "next/dynamic"
 import { useQuery } from "@tanstack/react-query"
-import { analyticsAPI } from "@/lib/api"
+import { analyticsAPI, expenseAPI } from "@/lib/api"
+import { useAuth } from "@/contexts/auth-context"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -49,7 +50,7 @@ const Cell: any = dynamic(() => import('recharts').then(m => m.Cell), { ssr: fal
 interface AnalyticsFilters {
   mode: 'personal' | 'group' | 'all'
   time: {
-    range: 'THIS_MONTH' | 'LAST_3M' | 'YTD' | 'CUSTOM'
+    range: 'ALL_TIME' | 'THIS_MONTH' | 'LAST_3M' | 'YTD' | 'CUSTOM'
     from?: string
     to?: string
   }
@@ -65,7 +66,7 @@ interface AnalyticsFilters {
 // Default filters
 const defaultFilters: AnalyticsFilters = {
   mode: 'all',
-  time: { range: 'THIS_MONTH' },
+  time: { range: 'ALL_TIME' },
   categories: [],
   paymentMethods: [],
   currencies: [],
@@ -76,8 +77,10 @@ const defaultFilters: AnalyticsFilters = {
 
 export function AnalyticsDashboard() {
   const { currency: userCurrency } = useCurrency()
+  const { user } = useAuth()
   const [filters, setFilters] = useState<AnalyticsFilters>(defaultFilters)
   const [activeTab, setActiveTab] = useState('overview')
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   
   // Responsive state for mobile
   const [isMobile, setIsMobile] = useState(false)
@@ -92,62 +95,158 @@ export function AnalyticsDashboard() {
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
+  // Build effective filters for API: when ALL_TIME, omit time to fetch across all expenses
+  const effectiveFilters = useMemo(() => {
+    const f: any = { ...filters, baseCurrency: userCurrency }
+    if (f.time?.range === 'ALL_TIME') {
+      delete f.time?.from
+      delete f.time?.to
+      delete f.time
+    }
+    return f
+  }, [filters, userCurrency])
+
   // Fetch KPIs data
   const { data: kpisData, isLoading: kpisLoading } = useQuery({
-    queryKey: ['analytics-kpis', filters, userCurrency],
-    queryFn: () => analyticsAPI.getKPIs({ ...filters, baseCurrency: userCurrency }),
+    queryKey: ['analytics-kpis', effectiveFilters],
+    queryFn: () => analyticsAPI.getKPIs(effectiveFilters),
     staleTime: 5 * 60 * 1000, // 5 minutes
   })
 
   // Fetch spend over time data
   const { data: spendOverTimeData, isLoading: spendOverTimeLoading } = useQuery({
-    queryKey: ['analytics-spend-over-time', filters, userCurrency],
-    queryFn: () => analyticsAPI.getSpendOverTime({ ...filters, baseCurrency: userCurrency }),
+    queryKey: ['analytics-spend-over-time', effectiveFilters],
+    queryFn: () => analyticsAPI.getSpendOverTime(effectiveFilters),
     staleTime: 5 * 60 * 1000,
   })
 
   // Fetch category breakdown data
   const { data: categoryData, isLoading: categoryLoading } = useQuery({
-    queryKey: ['analytics-category-breakdown', filters, userCurrency],
-    queryFn: () => analyticsAPI.getCategoryBreakdown({ ...filters, baseCurrency: userCurrency }),
+    queryKey: ['analytics-category-breakdown', effectiveFilters],
+    queryFn: () => analyticsAPI.getCategoryBreakdown(effectiveFilters),
     staleTime: 5 * 60 * 1000,
   })
 
   // Fetch top partners data
   const { data: partnersData, isLoading: partnersLoading } = useQuery({
-    queryKey: ['analytics-top-partners', filters, userCurrency],
-    queryFn: () => analyticsAPI.getTopPartners({ ...filters, baseCurrency: userCurrency }),
+    queryKey: ['analytics-top-partners', effectiveFilters],
+    queryFn: () => analyticsAPI.getTopPartners(effectiveFilters),
     staleTime: 5 * 60 * 1000,
   })
 
   // Fetch aging data
   const { data: agingData, isLoading: agingLoading } = useQuery({
-    queryKey: ['analytics-aging', filters, userCurrency],
-    queryFn: () => analyticsAPI.getAgingBuckets({ ...filters, baseCurrency: userCurrency }),
+    queryKey: ['analytics-aging', effectiveFilters],
+    queryFn: () => analyticsAPI.getAgingBuckets(effectiveFilters),
     staleTime: 5 * 60 * 1000,
   })
 
   // Fetch ledger data
   const { data: ledgerData, isLoading: ledgerLoading } = useQuery({
-    queryKey: ['analytics-ledger', filters, userCurrency],
-    queryFn: () => analyticsAPI.getLedger({ ...filters, baseCurrency: userCurrency }),
+    queryKey: ['analytics-ledger', effectiveFilters],
+    queryFn: () => analyticsAPI.getLedger(effectiveFilters),
     staleTime: 5 * 60 * 1000,
   })
 
-  const kpis = kpisData?.data || {}
+  // Fallback: fetch raw expenses to compute analytics when API returns empty/zeros
+  const { data: expensesRaw } = useQuery({
+    queryKey: ['analytics-fallback-expenses'],
+    queryFn: () => expenseAPI.getExpenses(),
+    staleTime: 60 * 1000,
+  })
+
+  const fallback = useMemo(() => {
+    const payload = (expensesRaw?.data && (expensesRaw.data as any).data) ? (expensesRaw.data as any).data : (expensesRaw as any)?.data
+    const list: any[] = Array.isArray(payload?.expenses) ? payload.expenses : []
+    const toDate = (d: any) => new Date(d || Date.now()).toISOString().split('T')[0]
+    let totalCents = 0
+    let totalPersonalCents = 0
+    let totalGroupCents = 0
+    const counts = { personal: 0, group: 0 }
+    const byDate: Record<string, { personal: number; group: number }> = {}
+    const byCategory: Record<string, { totalCents: number; count: number; personal: number; group: number }> = {}
+    const currentUserId = (user as any)?.id || (user as any)?._id
+    let netBalanceBaseCents = 0
+    const settledDays: number[] = []
+    list.forEach((e) => {
+      const cents = e?.amountCents ?? Math.round((e?.amount || 0) * 100)
+      totalCents += cents
+      const isGroup = !!e?.groupId
+      if (isGroup) counts.group += 1; else counts.personal += 1
+      if (isGroup) totalGroupCents += cents; else totalPersonalCents += cents
+      const day = toDate(e?.date)
+      byDate[day] ||= { personal: 0, group: 0 }
+      if (isGroup) byDate[day].group += cents; else byDate[day].personal += cents
+      const cat = (e?.category || 'other') as string
+      byCategory[cat] ||= { totalCents: 0, count: 0, personal: 0, group: 0 }
+      byCategory[cat].totalCents += cents
+      byCategory[cat].count += 1
+      if (isGroup) byCategory[cat].group += cents; else byCategory[cat].personal += cents
+
+      // Net balance estimation from splits
+      if (currentUserId && Array.isArray(e?.splits)) {
+        const payerId = e?.paidBy?._id || e?.paidBy?.id || e?.paidBy
+        for (const s of e.splits) {
+          const sid = s?.user?._id || s?.user?.id || s?.user
+          const shareCents = (s?.amountCents != null) ? s.amountCents : Math.round(((s?.amount ?? 0) as number) * 100)
+          if (!Number.isFinite(shareCents)) continue
+          if (payerId === currentUserId && sid !== currentUserId) {
+            netBalanceBaseCents += shareCents
+          } else if (sid === currentUserId && payerId !== currentUserId) {
+            netBalanceBaseCents -= shareCents
+          }
+        }
+      }
+
+      // Avg settlement days (if available)
+      if (e?.status === 'settled' && e?.settledAt && e?.date) {
+        const days = Math.floor((new Date(e.settledAt as any).getTime() - new Date(e.date as any).getTime()) / (1000 * 60 * 60 * 24))
+        if (Number.isFinite(days)) settledDays.push(days)
+      }
+    })
+    const spendOverTime = Object.keys(byDate).sort().map((date) => ({
+      date,
+      personal: { baseCents: byDate[date].personal, amountCents: byDate[date].personal, count: 0 },
+      group: { baseCents: byDate[date].group, amountCents: byDate[date].group, count: 0 },
+    }))
+    const categories = Object.entries(byCategory).map(([k, v]) => ({
+      _id: k,
+      totalCents: v.totalCents,
+      totalBaseCents: v.totalCents,
+      count: v.count,
+      personal: v.personal,
+      group: v.group,
+    }))
+    const avgSettlementDays = settledDays.length ? Math.round(settledDays.reduce((a,b)=>a+b,0)/settledDays.length) : 0
+    return { totalCents, counts, spendOverTime, categories, totalPersonalCents, totalGroupCents, netBalanceBaseCents, avgSettlementDays }
+  }, [expensesRaw?.data, user])
+
+  // Merge KPIs with fallback values when API returns empty/zero
+  const kpisApi = kpisData?.data || {}
+  const kpis = useMemo(() => {
+    const apiTotal = (kpisApi?.totalSpendBaseCents ?? 0)
+    const totalSpendBaseCents = apiTotal || fallback.totalCents || 0
+    const expensesCount = kpisApi?.expensesCount || fallback.counts
+    const netBalanceBaseCents = (kpisApi?.netBalanceBaseCents ?? null) !== null ? kpisApi.netBalanceBaseCents : (fallback.netBalanceBaseCents || 0)
+    const totalSpendSplit = kpisApi?.totalSpendBaseCents && typeof kpisApi.totalSpendBaseCents === 'object'
+      ? kpisApi.totalSpendBaseCents
+      : { personal: fallback.totalPersonalCents || 0, group: fallback.totalGroupCents || 0 }
+    const avgSettlementDays = (kpisApi?.avgSettlementDays ?? null) !== null ? kpisApi.avgSettlementDays : (fallback.avgSettlementDays || 0)
+    return { ...kpisApi, totalSpendBaseCents, expensesCount, netBalanceBaseCents, totalSpendBaseCentsSplit: totalSpendSplit, avgSettlementDays }
+  }, [kpisApi, fallback])
   const baseCurrency = userCurrency
   
 
   
   // Ensure data is properly structured for chart components (memoized)
-  const safeSpendOverTimeData = useMemo(
-    () => (Array.isArray(spendOverTimeData?.data) ? spendOverTimeData.data : []),
-    [spendOverTimeData?.data]
-  )
-  const safeCategoryData = useMemo(
-    () => (Array.isArray(categoryData?.data) ? categoryData.data : []),
-    [categoryData?.data]
-  )
+  const safeSpendOverTimeData = useMemo(() => {
+    const api = Array.isArray(spendOverTimeData?.data) ? spendOverTimeData.data : []
+    return api.length > 0 ? api : (fallback.spendOverTime || [])
+  }, [spendOverTimeData?.data, fallback])
+  const safeCategoryData = useMemo(() => {
+    const api = Array.isArray(categoryData?.data) ? categoryData.data : []
+    return api.length > 0 ? api : (fallback.categories || [])
+  }, [categoryData?.data, fallback])
   const safePartnersData = useMemo(
     () => ({
       topUsers: Array.isArray(partnersData?.data?.topUsers) ? partnersData.data.topUsers : [],
@@ -175,7 +274,7 @@ export function AnalyticsDashboard() {
 
   // Handle CSV export
   const handleCSVExport = () => {
-    const url = `${process.env.NEXT_PUBLIC_API_URL}/api/analytics/export/csv?${new URLSearchParams(filters as any)}`
+    const url = `${process.env.NEXT_PUBLIC_API_URL}/api/analytics/export/csv?${new URLSearchParams(effectiveFilters as any)}`
     window.open(url, '_blank')
   }
   
@@ -198,29 +297,34 @@ export function AnalyticsDashboard() {
     <div className="space-y-4 md:space-y-6 max-w-full overflow-hidden">
       {/* Filter Bar */}
       <Card>
-        <CardHeader className="p-3 md:p-4">
+        <CardHeader className="px-2 md:px-3 py-1 md:py-1 pb-0">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Filter className="h-4 w-4" />
               <CardTitle className="text-responsive-lg">Filters</CardTitle>
             </div>
-            <Button variant="outline" size="sm" onClick={handleCSVExport} className="touch-friendly">
-              <Download className="h-4 w-4 mr-2" />
-              <span className="hidden sm:inline">Export CSV</span>
-              <span className="sm:hidden">Export</span>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setShowAdvancedFilters(v => !v)} className="h-8 px-2">
+                {showAdvancedFilters ? 'Hide filters' : 'More filters'}
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleCSVExport} className="touch-friendly">
+                <Download className="h-4 w-4 mr-2" />
+                <span className="hidden sm:inline">Export CSV</span>
+                <span className="sm:hidden">Export</span>
+              </Button>
+            </div>
           </div>
         </CardHeader>
-        <CardContent className="p-3 md:p-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+        <CardContent className="px-2 md:px-3 pt-0 pb-2">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-1 md:gap-2 items-end">
             {/* Mode Filter */}
-            <div className="space-y-2">
-              <label className="text-responsive-sm font-medium">Mode</label>
+            <div className="space-y-0.5">
+              <label className="text-xs font-medium">Mode</label>
               <Select 
                 value={filters.mode} 
                 onValueChange={(value: 'personal' | 'group' | 'all') => updateFilter('mode', value)}
               >
-                <SelectTrigger className="touch-friendly">
+                <SelectTrigger className="h-8">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -232,18 +336,19 @@ export function AnalyticsDashboard() {
             </div>
 
             {/* Time Range Filter */}
-            <div className="space-y-2">
-              <label className="text-responsive-sm font-medium">Time Range</label>
+            <div className="space-y-0.5">
+              <label className="text-xs font-medium">Time Range</label>
               <Select 
                 value={filters.time.range} 
-                onValueChange={(value: 'THIS_MONTH' | 'LAST_3M' | 'YTD' | 'CUSTOM') => 
+                onValueChange={(value: 'ALL_TIME' | 'THIS_MONTH' | 'LAST_3M' | 'YTD' | 'CUSTOM') => 
                   updateFilter('time', { ...filters.time, range: value })
                 }
               >
-                <SelectTrigger className="touch-friendly">
+                <SelectTrigger className="h-8">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="ALL_TIME">All Time</SelectItem>
                   <SelectItem value="THIS_MONTH">This Month</SelectItem>
                   <SelectItem value="LAST_3M">Last 3 Months</SelectItem>
                   <SelectItem value="YTD">Year to Date</SelectItem>
@@ -253,37 +358,38 @@ export function AnalyticsDashboard() {
               
               {/* Custom Date Range Inputs */}
               {filters.time.range === 'CUSTOM' && (
-                <div className="grid grid-cols-2 gap-2 mt-2">
+                <div className="grid grid-cols-2 gap-1 mt-1">
                   <div>
-                    <label className="text-responsive-xs text-muted-foreground">From</label>
+                    <label className="text-[10px] text-muted-foreground">From</label>
                     <input
                       type="date"
                       value={filters.time.from || ''}
                       onChange={(e) => updateFilter('time', { ...filters.time, from: e.target.value })}
-                      className="w-full px-2 py-1 text-responsive-xs border rounded-md touch-friendly"
+                      className="w-full px-2 py-1 text-xs border rounded-md h-8"
                     />
                   </div>
                   <div>
-                    <label className="text-responsive-xs text-muted-foreground">To</label>
+                    <label className="text-[10px] text-muted-foreground">To</label>
                     <input
                       type="date"
                       value={filters.time.to || ''}
                       onChange={(e) => updateFilter('time', { ...filters.time, to: e.target.value })}
-                      className="w-full px-2 py-1 text-responsive-xs border rounded-md touch-friendly"
+                      className="w-full px-2 py-1 text-xs border rounded-md h-8"
                     />
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Category Filter */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Categories</label>
+            {/* Category Filter (advanced) */}
+            {showAdvancedFilters && (
+            <div className="space-y-0.5">
+              <label className="text-xs font-medium">Categories</label>
               <Select 
                 value={filters.categories?.join(',') || 'all'} 
                 onValueChange={(value) => updateFilter('categories', value === 'all' ? [] : value.split(','))}
               >
-                <SelectTrigger>
+                <SelectTrigger className="h-8">
                   <SelectValue placeholder="All Categories" />
                 </SelectTrigger>
                 <SelectContent>
@@ -299,15 +405,17 @@ export function AnalyticsDashboard() {
                 </SelectContent>
               </Select>
             </div>
+            )}
 
-            {/* Status Filter */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Status</label>
+            {/* Status Filter (advanced) */}
+            {showAdvancedFilters && (
+            <div className="space-y-0.5">
+              <label className="text-xs font-medium">Status</label>
               <Select 
                 value={filters.status?.join(',') || 'all'} 
                 onValueChange={(value) => updateFilter('status', value === 'all' ? ['active', 'settled'] : value.split(','))}
               >
-                <SelectTrigger>
+                <SelectTrigger className="h-8">
                   <SelectValue placeholder="All Statuses" />
                 </SelectTrigger>
                 <SelectContent>
@@ -318,6 +426,7 @@ export function AnalyticsDashboard() {
                 </SelectContent>
               </Select>
             </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -334,7 +443,11 @@ export function AnalyticsDashboard() {
               {formatCurrency((kpis.totalSpendBaseCents || 0) / 100, baseCurrency)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {filters.time.range === 'THIS_MONTH' ? 'This month' : `This ${filters.time.range.toLowerCase()}`}
+              {filters.time.range === 'ALL_TIME' && 'All time'}
+              {filters.time.range === 'THIS_MONTH' && 'This month'}
+              {filters.time.range === 'LAST_3M' && 'Last 3 months'}
+              {filters.time.range === 'YTD' && 'Year to date'}
+              {filters.time.range === 'CUSTOM' && (filters.time.from && filters.time.to ? `${filters.time.from} to ${filters.time.to}` : 'Custom range')}
             </p>
           </CardContent>
         </Card>
@@ -378,7 +491,7 @@ export function AnalyticsDashboard() {
           </CardHeader>
           <CardContent className="p-3 pt-0">
             <div className="text-xl md:text-2xl font-bold text-blue-400">
-              {formatCurrency((kpis.totalSpendBaseCents?.personal || 0) / 100, baseCurrency)}
+              {formatCurrency(((kpis.totalSpendBaseCentsSplit?.personal) || (kpis.totalSpendBaseCents?.personal) || 0) / 100, baseCurrency)}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
               {kpis.expensesCount?.personal || 0} individual expense{(kpis.expensesCount?.personal || 0) !== 1 ? 's' : ''}
@@ -393,7 +506,7 @@ export function AnalyticsDashboard() {
           </CardHeader>
           <CardContent className="p-3 pt-0">
             <div className="text-xl md:text-2xl font-bold text-green-400">
-              {formatCurrency((kpis.totalSpendBaseCents?.group || 0) / 100, baseCurrency)}
+              {formatCurrency(((kpis.totalSpendBaseCentsSplit?.group) || (kpis.totalSpendBaseCents?.group) || 0) / 100, baseCurrency)}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
               {kpis.expensesCount?.group || 0} shared expense{(kpis.expensesCount?.group || 0) !== 1 ? 's' : ''}
@@ -430,15 +543,15 @@ export function AnalyticsDashboard() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4 md:space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+          <div className="grid grid-cols-1 gap-3 md:gap-4">
             <Card>
-              <CardHeader className="p-3 md:p-4">
-                <CardTitle className="text-base md:text-lg">Spending Over Time</CardTitle>
+              <CardHeader className="p-2 md:p-3">
+                <CardTitle className="text-responsive-lg">Spending Over Time</CardTitle>
                 <CardDescription className="text-xs md:text-sm">
                   Personal vs Group spending trends
                 </CardDescription>
               </CardHeader>
-              <CardContent className="p-3 md:p-4">
+              <CardContent className="p-2 md:p-3 pb-2 isolate">
                 {spendOverTimeLoading ? (
                   <div className="flex items-center justify-center h-40">
                     <ComponentLoading 
@@ -447,33 +560,14 @@ export function AnalyticsDashboard() {
                     />
                   </div>
                 ) : (
-                  <div className="chart-responsive chart-mobile">
+                  <div className="relative h-80 md:h-99 overflow-hidden mb-2">
                     <SpendingOverTimeChart data={safeSpendOverTimeData} baseCurrency={baseCurrency} />
                   </div>
                 )}
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Category Distribution</CardTitle>
-                <CardDescription>
-                  Breakdown by expense category
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {categoryLoading ? (
-                  <div className="min-h-[240px] flex items-center justify-center">
-                    <ComponentLoading 
-                      text="Loading Category Breakdown" 
-                      subtitle="Please wait while we load your category breakdown..."
-                    />
-                  </div>
-                ) : (
-                  <CategoryBreakdownChart data={safeCategoryData} baseCurrency={baseCurrency} />
-                )}
-              </CardContent>
-            </Card>
+            {/* Category Distribution block removed per request */}
 
             <Card>
               <CardHeader>
@@ -909,14 +1003,15 @@ function SpendingOverTimeChart({ data, baseCurrency, detailed = false }: {
 
       <div className="h-[280px]">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData}>
+          <BarChart data={chartData} barGap={4} barCategoryGap={12}>
             <CartesianGrid {...({ strokeDasharray: "3 3" } as any)} />
             <XAxis dataKey="date" tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} tickFormatter={(value: any) => formatCurrency(value, baseCurrency)} />
             <Tooltip content={<CustomTooltip />} />
-            <Line type="monotone" dataKey="personal" stroke="#10b981" name="Personal" dot={false} />
-            <Line type="monotone" dataKey="group" stroke="#3b82f6" name="Group" dot={false} />
-          </LineChart>
+            {/* Stacked bars for personal vs group */}
+            <Bar dataKey="personal" stackId="a" fill="#10b981" name="Personal" radius={[3,3,0,0]} />
+            <Bar dataKey="group" stackId="a" fill="#3b82f6" name="Group" radius={[3,3,0,0]} />
+          </BarChart>
         </ResponsiveContainer>
       </div>
     </div>

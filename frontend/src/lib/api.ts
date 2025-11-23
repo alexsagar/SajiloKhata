@@ -42,6 +42,12 @@ api.interceptors.response.use(
         await axios.post(`${API_BASE_URL}/auth/refresh`, {}, { withCredentials: true })
         return api(originalRequest)
       } catch (refreshError) {
+        // Refresh token failed - session expired, redirect to login
+        console.log('[API] Session expired, redirecting to login')
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('accessToken')
+          window.location.href = '/login'
+        }
         return Promise.reject(refreshError)
       }
     }
@@ -51,7 +57,7 @@ api.interceptors.response.use(
       error?.response?.data?.error?.message ||
       error?.response?.data?.message ||
       error?.message || "Request failed"
-    
+
     return Promise.reject(new Error(msg))
   },
 )
@@ -94,6 +100,7 @@ export const friendsAPI = {
   getInvite: (code: string) => api.get(`/friends/invites/${code}`),
   acceptInvite: (code: string) => api.post(`/friends/invites/${code}/accept`),
   revokeInvite: (code: string) => api.post(`/friends/invites/${code}/revoke`),
+  list: () => api.get("/friends"),
 }
 
 export const conversationAPI = {
@@ -102,11 +109,13 @@ export const conversationAPI = {
   list: () => api.get("/conversations"),
   listMessages: (id: string, params?: { cursor?: string; limit?: number }) =>
     api.get(`/conversations/${id}/messages`, { params }),
+  getMessages: (id: string, params?: { cursor?: string; limit?: number }) =>
+    api.get(`/conversations/${id}/messages`, { params }),
   sendMessage: (data: { conversationId: string; text: string; attachments?: any[] }) => api.post("/conversations/messages", data),
 }
 
 export const groupAPI = {
-  getGroups: (params?: { search?: string; limit?: number; page?: number }) => 
+  getGroups: (params?: { search?: string; limit?: number; page?: number }) =>
     api.get("/groups", { params }),
   getGroup: (id: string) => api.get(`/groups/${id}`),
   createGroup: (data: FormData) => api.post("/groups", data),
@@ -116,13 +125,13 @@ export const groupAPI = {
   leaveGroup: (id: string) => api.post(`/groups/${id}/leave`),
   addMember: (groupId: string, userId: string) => api.post(`/groups/${groupId}/members`, { userId }),
   removeMember: (groupId: string, userId: string) => api.delete(`/groups/${groupId}/members/${userId}`),
-  updateMemberRole: (groupId: string, userId: string, role: string) => 
+  updateMemberRole: (groupId: string, userId: string, role: string) =>
     api.put(`/groups/${groupId}/members/${userId}`, { role }),
-  getGroupExpenses: (groupId: string, params?: any) => 
+  getGroupExpenses: (groupId: string, params?: any) =>
     api.get(`/groups/${groupId}/expenses`, { params }),
   getGroupBalance: (groupId: string) => api.get(`/groups/${groupId}/balance`),
   getGroupSettlements: (groupId: string) => api.get(`/groups/${groupId}/settlements`),
-  createGroupInvite: (groupId: string, data: any) => 
+  createGroupInvite: (groupId: string, data: any) =>
     api.post(`/groups/${groupId}/invites`, data),
   getGroupInvites: (groupId: string) => api.get(`/groups/${groupId}/invites`),
   acceptGroupInvite: (inviteId: string) => api.post(`/invites/${inviteId}/accept`),
@@ -134,7 +143,7 @@ export const groupAPI = {
 }
 
 export const expenseAPI = {
-  getExpenses: (groupId?: string | { search?: string; limit?: number; page?: number; groupId?: string }) => {
+  getExpenses: (groupId?: string | { search?: string; limit?: number; page?: number; groupId?: string; sort?: string }) => {
     if (typeof groupId === 'string') {
       return api.get(`/expenses?groupId=${groupId}`)
     } else if (groupId && typeof groupId === 'object') {
@@ -183,24 +192,24 @@ export const analyticsAPI = {
   getCategoryBreakdown: (filters = {}) => api.get('/analytics/category-breakdown', { params: filters }),
   getSpendingOverview: (filters = {}) => api.get('/analytics/spending-overview', { params: filters }),
   getExpenseTrends: (filters = {}) => api.get('/analytics/expense-trends', { params: filters }),
-  
+
   // Partners and relationships
   getTopPartners: (filters = {}) => api.get('/analytics/top-partners', { params: filters }),
-  
+
   // Group-specific analytics
   getBalanceMatrix: (groupId: string) => api.get(`/analytics/balance-matrix?groupId=${groupId}`),
   getSettlementSuggestions: (groupId: string) => api.get(`/analytics/simplify?groupId=${groupId}`),
-  
+
   // Aging and settlements
   getAgingBuckets: (filters = {}) => api.get('/analytics/aging', { params: filters }),
-  
+
   // Data export
   getLedger: (filters = {}) => api.get('/analytics/ledger', { params: filters }),
   exportCSV: (filters = {}) => api.get('/analytics/export/csv', { params: filters }),
-  
+
   // Group health
   getGroupHealth: (groupId: string) => api.get(`/analytics/group-health?groupId=${groupId}`),
-  
+
   // Legacy endpoints for backward compatibility
   getSpendingAnalytics: (period: string) => api.get(`/analytics/spending?period=${period}`),
   getGroupAnalytics: (groupId: string) => api.get(`/analytics/groups/${groupId}`),
@@ -217,7 +226,7 @@ export const analyticsAPI = {
 
 
 export const calendarAPI = {
-  getMonth: (params: { year: number; month: number; mode?: 'personal' | 'group' | 'all'; groupIds?: string[]; baseCurrency?: string }) => 
+  getMonth: (params: { year: number; month: number; mode?: 'personal' | 'group' | 'all'; groupIds?: string[]; baseCurrency?: string }) =>
     api.get("/calendar/month", { params }),
   getIntegrations: () => api.get("/calendar/integrations"),
   connectProvider: (provider: string, data: any) => api.post(`/calendar/connect/${provider}`, data),

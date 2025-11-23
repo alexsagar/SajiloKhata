@@ -77,7 +77,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const checkAuth = async () => {
     let retryCount = 0
-    const maxRetries = 3
+    const suppress = typeof window !== 'undefined' && sessionStorage.getItem('suppressAuthCheck') === '1'
+    const maxRetries = suppress ? 0 : 1
+    const retryDelayMs = 250
+    if (suppress) {
+      try { sessionStorage.removeItem('suppressAuthCheck') } catch {}
+    }
     
     const attemptAuth = async (): Promise<any> => {
       try {
@@ -126,8 +131,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // If we haven't exceeded max retries, try again
         if (retryCount < maxRetries) {
           retryCount++
-          console.log(`AuthContext: Retrying in 1 second... (${retryCount}/${maxRetries})`)
-          await new Promise(resolve => setTimeout(resolve, 1000))
+          console.log(`AuthContext: Retrying in ${retryDelayMs}ms... (${retryCount}/${maxRetries})`)
+          await new Promise(resolve => setTimeout(resolve, retryDelayMs))
           return attemptAuth()
         }
         
@@ -168,6 +173,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         description: `Hello ${user.firstName}, you're successfully logged in.`,
       })
 
+      try { sessionStorage.setItem('suppressAuthCheck', '1') } catch {}
       router.push("/")
     } catch (error: any) {
       const message = error.response?.data?.error || error.response?.data?.message || "Login failed"
@@ -212,6 +218,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       description: "You have been successfully logged out.",
     })
 
+    try { sessionStorage.setItem('suppressAuthCheck', '1') } catch {}
     router.push("/login")
   }
 

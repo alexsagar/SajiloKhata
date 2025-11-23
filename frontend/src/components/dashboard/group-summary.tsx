@@ -2,13 +2,14 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { expenseAPI } from "@/lib/api"
-import { useAuth } from "@/hooks/use-auth"
-import { formatCurrency } from "@/lib/utils"
+import { useAuth } from "@/contexts/auth-context"
+import { formatCurrencyWithSymbol } from "@/lib/currency"
 import { Users, CreditCard, TrendingUp, Building2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
 export function GroupSummary() {
   const { user } = useAuth()
+  const userCurrency = user?.preferences?.currency || 'USD'
 
   const { data: expenseData, isLoading } = useQuery({
     queryKey: ["group-summary"],
@@ -20,7 +21,8 @@ export function GroupSummary() {
     refetchInterval: 30000, // Refresh every 30 seconds
   })
 
-  const expenses = expenseData?.expenses || []
+  const payload = (expenseData?.data?.data) ? expenseData.data.data : expenseData?.data || expenseData
+  const expenses = payload?.expenses || []
 
   // Calculate group breakdown
   const groupExpenses = expenses.filter((exp: any) => exp.groupId)
@@ -28,11 +30,11 @@ export function GroupSummary() {
 
   // Group expenses by group
   const groupBreakdown = groupExpenses.reduce((acc: any, exp: any) => {
-    const groupId = exp.groupId
+    const groupId = exp.groupId || exp.group?._id
     if (!acc[groupId]) {
       acc[groupId] = {
         id: groupId,
-        name: exp.groupId?.name || 'Unknown Group',
+        name: (exp.group && exp.group.name) || (exp.groupId?.name) || 'Unknown Group',
         total: 0,
         count: 0,
         expenses: []
@@ -71,7 +73,7 @@ export function GroupSummary() {
             <div>
               <div className="text-sm text-muted-foreground">Personal</div>
               <div className="text-xl font-bold text-blue-400">
-                {formatCurrency(personalExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0) / 100)}
+                {formatCurrencyWithSymbol(personalExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0) / 100, userCurrency)}
               </div>
               <div className="text-xs text-muted-foreground">
                 {personalExpenses.length} expense{personalExpenses.length !== 1 ? 's' : ''}
@@ -88,7 +90,7 @@ export function GroupSummary() {
             <div>
               <div className="text-sm text-muted-foreground">Group</div>
               <div className="text-xl font-bold text-green-400">
-                {formatCurrency(groupExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0) / 100)}
+                {formatCurrencyWithSymbol(groupExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0) / 100, userCurrency)}
               </div>
               <div className="text-xs text-muted-foreground">
                 {groupExpenses.length} expense{groupExpenses.length !== 1 ? 's' : ''}
@@ -135,11 +137,9 @@ export function GroupSummary() {
                 </div>
                 <div className="text-right">
                   <div className="text-sm font-semibold text-white">
-                    {formatCurrency(group.total / 100)}
+                    {formatCurrencyWithSymbol(group.total / 100, userCurrency)}
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    {group.expenses[0]?.currencyCode || 'USD'}
-                  </div>
+                  <div className="text-xs text-muted-foreground">{userCurrency}</div>
                 </div>
               </div>
             ))}

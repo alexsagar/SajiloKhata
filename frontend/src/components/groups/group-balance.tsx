@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useQuery } from "@tanstack/react-query"
-import { groupAPI } from "@/lib/api"
+import { groupAPI, expenseAPI } from "@/lib/api"
 import { LoadingSpinner } from "@/components/common/loading-spinner"
 import { formatCurrency as formatCurrencyUtil, getInitials } from "@/lib/utils"
 import { formatCurrency } from "@/lib/currency"
@@ -25,6 +25,12 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
     queryFn: () => groupAPI.getBalances(groupId),
   })
 
+  // Fetch expenses to compute balances if API doesn't provide them
+  const { data: expensesData } = useQuery({
+    queryKey: ["group-expenses-for-balance", groupId],
+    queryFn: () => expenseAPI.getExpenses(groupId),
+  })
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-[300px]">
@@ -33,16 +39,57 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
     )
   }
 
-  const balanceData = balance?.data || {
-    totalExpenses: 0,
-    balances: {},
-    minimumTransactions: [],
+  // Normalize API balances shape (object map or array) and compute fallback from expenses
+  const apiBalance = balance?.data || {}
+  let balancesMap: Record<string, any> = {}
+  if (apiBalance?.balances) {
+    if (Array.isArray(apiBalance.balances)) {
+      apiBalance.balances.forEach((b: any) => {
+        const uid = b?.user?._id || b?.userId || b?._id || "unknown"
+        balancesMap[uid] = b
+      })
+    } else {
+      balancesMap = apiBalance.balances as Record<string, any>
+    }
   }
 
+  // If no balances from API, compute from expenses
+  if (Object.keys(balancesMap).length === 0) {
+    const payload = (expensesData?.data && (expensesData?.data as any).data) ? (expensesData?.data as any).data : (expensesData?.data as any)
+    const expensesList: any[] = (payload?.expenses as any[]) || []
 
+    const addUser = (user: any) => {
+      const uid = user?._id
+      if (!uid) return
+      if (!balancesMap[uid]) {
+        balancesMap[uid] = { user, amount: 0 }
+      }
+    }
 
-  const balanceEntries = Object.entries(balanceData.balances || {})
-  const transactions = balanceData.minimumTransactions || []
+    expensesList.forEach((exp: any) => {
+      const total = exp?.amountCents != null ? exp.amountCents / 100 : (exp?.amount ?? 0)
+      if (exp?.paidBy) {
+        addUser(exp.paidBy)
+        const pid = exp.paidBy._id
+        balancesMap[pid].amount = (balancesMap[pid].amount || 0) + total
+      }
+      (exp?.splits || []).forEach((split: any) => {
+        addUser(split.user)
+        const uid = split.user?._id
+        const owe = split?.amount != null ? split.amount : 0
+        balancesMap[uid].amount = (balancesMap[uid].amount || 0) - owe
+      })
+    })
+  }
+
+  const balanceEntries = Object.entries(balancesMap)
+  const transactions = apiBalance?.minimumTransactions || []
+
+  // Total expenses: prefer API, else compute from expenses
+  const expensesPayload = (expensesData?.data && (expensesData?.data as any).data) ? (expensesData?.data as any).data : (expensesData?.data as any)
+  const expensesListForTotal: any[] = (expensesPayload?.expenses as any[]) || []
+  const computedTotal = expensesListForTotal.reduce((sum, exp) => sum + (exp?.amountCents != null ? exp.amountCents / 100 : (exp?.amount ?? 0)), 0)
+  const totalExpenses = apiBalance?.totalExpenses != null ? apiBalance.totalExpenses : computedTotal
 
   return (
     <div className="space-y-6">
@@ -61,7 +108,7 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="text-center">
               <p className="text-sm text-muted-foreground">Total Expenses</p>
-              <p className="text-2xl font-bold">{formatCurrency(balanceData.totalExpenses, userCurrency)}</p>
+              <p className="text-2xl font-bold">{formatCurrency(totalExpenses, userCurrency)}</p>
             </div>
             <div className="text-center">
               <p className="text-sm text-muted-foreground">Transactions Needed</p>

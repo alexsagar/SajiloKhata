@@ -22,6 +22,8 @@ function buildDateFilter(timeConfig) {
   const now = new Date()
   
   switch (timeConfig.range) {
+    case 'ALL_TIME':
+      return {}
     case 'THIS_MONTH':
       return {
         $gte: new Date(now.getFullYear(), now.getMonth(), 1),
@@ -62,7 +64,13 @@ async function buildBaseQuery(req, filters) {
   
   let matchQuery = {
     status: { $in: filters.status || ['active', 'settled'] },
-    date: buildDateFilter(filters.time || { range: 'THIS_MONTH' })
+  }
+  // Apply date filter only if provided (ALL_TIME or missing -> no date filter)
+  if (filters.time && Object.keys(filters.time).length > 0) {
+    const dateFilter = buildDateFilter(filters.time)
+    if (dateFilter && Object.keys(dateFilter).length > 0) {
+      matchQuery.date = dateFilter
+    }
   }
   
   // Handle mode filtering
@@ -134,6 +142,7 @@ router.get("/kpis", async (req, res) => {
   try {
     const filters = req.query
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
+    const userId = (req.user._id || req.user.id).toString()
     
     // Get expenses for calculations
     const expenses = await Expense.find(matchQuery)

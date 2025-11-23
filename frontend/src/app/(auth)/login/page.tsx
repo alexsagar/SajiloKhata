@@ -10,7 +10,7 @@ export default function LoginPage() {
     <AuthShell>
       <div className="space-y-6">
         <div className="text-center">
-          <Image src="/images/logo.svg" alt="Khutrukey" width={60} height={60} className="mx-auto mb-4" />
+          <Image src="/images/logo.svg" alt="Khutrukey" width={150} height={150} className="mx-auto mb-4" />
           <h1 className="text-3xl font-bold">Welcome back</h1>
           <p className="text-muted-foreground">Sign in to your account</p>
         </div>

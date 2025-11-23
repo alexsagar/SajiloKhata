@@ -6,15 +6,20 @@ class EmailService {
     if (process.env.SMTP_USER && process.env.SMTP_PASS && 
         !process.env.SMTP_USER.includes('your-email') && 
         !process.env.SMTP_PASS.includes('your-app-password')) {
-      
+      const port = Number(process.env.SMTP_PORT) || 587
+      const secure = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || port === 465
+
       this.transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST || "smtp.gmail.com",
-        port: process.env.SMTP_PORT || 587,
-        secure: false, // true for 465, false for other ports
+        port,
+        secure,
         auth: {
           user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
+          // Gmail app password should not contain spaces; if present, strip them
+          pass: (process.env.SMTP_PASS || '').replace(/\s+/g, ''),
         },
+        logger: String(process.env.EMAIL_DEBUG || '').toLowerCase() === 'true',
+        debug: String(process.env.EMAIL_DEBUG || '').toLowerCase() === 'true',
       })
 
       // Verify connection configuration
@@ -57,16 +62,33 @@ class EmailService {
         emailText = this.htmlToText(emailHtml)
       }
 
+      const fromAddress = `${process.env.APP_NAME || "Khutrukey"} <${process.env.SMTP_FROM || process.env.SMTP_USER}>`
+      const replyTo = (process.env.SMTP_FROM && process.env.SMTP_FROM !== process.env.SMTP_USER)
+        ? process.env.SMTP_FROM
+        : undefined
+
+      const bccSelf = String(process.env.EMAIL_BCC_SELF || '').toLowerCase() === 'true'
+
       const mailOptions = {
-        from: `"${process.env.APP_NAME || "Khutrukey"}" <${process.env.SMTP_USER}>`,
+        from: fromAddress,
         to,
+        ...(bccSelf ? { bcc: process.env.SMTP_USER } : {}),
         subject,
         text: emailText,
         html: emailHtml,
+        replyTo,
+        envelope: {
+          from: process.env.SMTP_USER, // ensure SMTP envelope aligns with authenticated user
+          to,
+        },
       }
 
       const result = await this.transporter.sendMail(mailOptions)
-      console.log("Email sent successfully:", result.messageId)
+      console.log("Email sent successfully:", result.messageId, {
+        accepted: result.accepted,
+        rejected: result.rejected,
+        response: result.response,
+      })
       return result
     } catch (error) {
       console.error("Failed to send email:", error)
@@ -223,27 +245,30 @@ class EmailService {
         <meta charset="utf-8">
         <title>Payment Reminder</title>
         <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          body { margin:0; padding:0; background:#f6f9fc; font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .wrapper { padding: 24px; }
+          .container { max-width: 600px; margin: 0 auto; background:#ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(16,24,40,0.08); }
           .header { background: #F59E0B; color: white; padding: 20px; text-align: center; }
-          .content { padding: 20px; background: #f9f9f9; }
-          .button { display: inline-block; background: #F59E0B; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 20px 0; }
-          .footer { text-align: center; padding: 20px; color: #666; font-size: 14px; }
+          .content { padding: 24px; }
+          .button { display: inline-block; background: #F59E0B; color: white; padding: 12px 20px; text-decoration: none; border-radius: 6px; margin: 20px 0; font-weight: 600; }
+          .muted { color:#667085; font-size: 14px; }
+          @media (max-width: 640px){ .wrapper{ padding:12px } .content{ padding:16px } }
         </style>
       </head>
       <body>
-        <div class="container">
-          <div class="header">
-            <h1>Payment Reminder</h1>
+        <div class="wrapper">
+          <div class="container">
+            <div class="header">
+              <h1>Payment Reminder</h1>
+            </div>
+            <div class="content">
+              <h2>Hi ${data.firstName},</h2>
+              <p>${data.message}</p>
+              <a href="${process.env.CLIENT_URL}/expenses" class="button">View Expenses</a>
+              <p class="muted">You received this because you have pending balances in Khutrukey.</p>
+            </div>
           </div>
-          <div class="content">
-            <h2>Hi ${data.firstName},</h2>
-            <p>${data.message}</p>
-            <a href="${process.env.CLIENT_URL}/expenses" class="button">View Expenses</a>
-          </div>
-          <div class="footer">
-            <p>&copy; 2024 SplitWise. All rights reserved.</p>
-          </div>
+          <p class="muted" style="text-align:center; margin-top:12px;">&copy; 2024 Khutrukey. All rights reserved.</p>
         </div>
       </body>
       </html>
@@ -256,29 +281,33 @@ class EmailService {
       <html>
       <head>
         <meta charset="utf-8">
-        <title>Group Invitation</title>
+        <title>Khutrukey Invitation</title>
         <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          body { margin:0; padding:0; background:#f6f9fc; font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .wrapper { padding: 24px; }
+          .container { max-width: 600px; margin: 0 auto; background:#ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(16,24,40,0.08); }
           .header { background: #8B5CF6; color: white; padding: 20px; text-align: center; }
-          .content { padding: 20px; background: #f9f9f9; }
-          .button { display: inline-block; background: #8B5CF6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 20px 0; }
-          .footer { text-align: center; padding: 20px; color: #666; font-size: 14px; }
+          .content { padding: 24px; }
+          .button { display: inline-block; background: #8B5CF6; color: white; padding: 12px 20px; text-decoration: none; border-radius: 6px; margin: 20px 0; font-weight: 600; }
+          .muted { color:#667085; font-size: 14px; }
+          @media (max-width: 640px){ .wrapper{ padding:12px } .content{ padding:16px } }
         </style>
       </head>
       <body>
-        <div class="container">
-          <div class="header">
-            <h1>You're Invited!</h1>
+        <div class="wrapper">
+          <div class="container">
+            <div class="header">
+              <h1>You're invited to Khutrukey!</h1>
+            </div>
+            <div class="content">
+              <h2>Hi ${data.firstName},</h2>
+              <p>${data.message}</p>
+              <a href="${data.inviteUrl}" class="button">Accept Invitation</a>
+              <p class="muted">If the button doesn't work, copy and paste this link into your browser:</p>
+              <p><a href="${data.inviteUrl}">${data.inviteUrl}</a></p>
+            </div>
           </div>
-          <div class="content">
-            <h2>Hi ${data.firstName},</h2>
-            <p>${data.message}</p>
-            <a href="${data.inviteUrl}" class="button">Join Group</a>
-          </div>
-          <div class="footer">
-            <p>&copy; 2024 SplitWise. All rights reserved.</p>
-          </div>
+          <p class="muted" style="text-align:center; margin-top:12px;">&copy; 2024 Khutrukey. All rights reserved.</p>
         </div>
       </body>
       </html>

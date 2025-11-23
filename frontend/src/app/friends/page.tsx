@@ -1,3 +1,5 @@
+"use client"
+
 import { AppLayout } from "@/components/common/app-layout"
 import { Header } from "@/components/common/header"
 import { FriendInvitationWithDelete } from "@/components/friends/friend-invitation-with-delete"

@@ -2,26 +2,35 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { expenseAPI } from "@/lib/api"
-import { useAuth } from "@/hooks/use-auth"
-import { formatCurrency } from "@/lib/utils"
+import { useAuth } from "@/contexts/auth-context"
+import { formatCurrencyWithSymbol } from "@/lib/currency"
 import { formatDistanceToNow } from "date-fns"
 import { CreditCard, Users, Calendar, Tag } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
 export function RecentTransactions() {
   const { user } = useAuth()
+  const userCurrency = user?.preferences?.currency || 'USD'
 
   const { data: expenseData, isLoading } = useQuery({
     queryKey: ["recent-expenses"],
     queryFn: async () => {
-      const response = await expenseAPI.getExpenses({ limit: 10 })
+      const response = await expenseAPI.getExpenses({ limit: 8, sort: '-createdAt' })
       return response.data
     },
     enabled: !!user,
-    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchInterval: 15000, // Refresh every 15 seconds
+    refetchOnWindowFocus: true,
   })
 
-  const recentExpenses = expenseData?.expenses || []
+  // Support both shapes and enforce newest-first ordering with safe date parsing
+  const rawExpenses = expenseData?.data?.expenses || expenseData?.expenses || []
+  const getSafeTime = (exp: any): number => {
+    const val = exp?.createdAt || exp?.updatedAt || exp?.date
+    const t = val ? Date.parse(val) : NaN
+    return Number.isFinite(t) ? t : Date.now()
+  }
+  const recentExpenses = [...rawExpenses].sort((a: any, b: any) => getSafeTime(b) - getSafeTime(a))
 
   if (isLoading) {
     return (
@@ -46,10 +55,13 @@ export function RecentTransactions() {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-3">
+      <div className="space-y-3 max-h-[400px] overflow-y-auto">
         {recentExpenses.map((expense: any) => {
           const isPersonal = !expense.groupId
-          const expenseDate = new Date(expense.date || expense.createdAt)
+          // For relative "recent" display, prefer createdAt; fallback to updatedAt/date; if invalid, use now
+          const dateStr = expense?.createdAt || expense?.updatedAt || expense?.date
+          const parsed = dateStr ? new Date(dateStr) : new Date()
+          const expenseDate = isNaN(parsed.getTime()) ? new Date() : parsed
           
           return (
             <div key={expense._id} className="flex items-center justify-between p-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors">
@@ -69,16 +81,16 @@ export function RecentTransactions() {
 
                 {/* Expense Details */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center space-x-2">
-                    <p className="text-sm font-medium text-white truncate">
+                  <div className="flex items-baseline gap-2">
+                    <p className="text-sm font-medium text-white truncate leading-tight">
                       {expense.description}
                     </p>
-                    <Badge variant={isPersonal ? "secondary" : "default"} className="text-xs">
+                    <Badge variant={isPersonal ? "secondary" : "default"} className="text-xs leading-none py-0.5">
                       {isPersonal ? "Personal" : "Group"}
                     </Badge>
                   </div>
                   
-                  <div className="flex items-center space-x-4 mt-1 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-4 mt-1.5 text-xs text-muted-foreground">
                     <div className="flex items-center space-x-1">
                       <Tag className="h-3 w-3" />
                       <span className="capitalize">{expense.category || 'other'}</span>
@@ -94,10 +106,13 @@ export function RecentTransactions() {
               {/* Amount */}
               <div className="text-right ml-4">
                 <div className="text-sm font-semibold text-white">
-                  {formatCurrency((expense.amountCents || 0) / 100)}
+                  {formatCurrencyWithSymbol(
+                    (expense.amountCents || 0) / 100,
+                    expense.currencyCode || userCurrency
+                  )}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {expense.currencyCode || 'USD'}
+                  {expense.currencyCode || userCurrency}
                 </div>
               </div>
             </div>
@@ -111,20 +126,22 @@ export function RecentTransactions() {
           <div>
             <div className="text-sm text-muted-foreground">Personal</div>
             <div className="text-lg font-semibold text-blue-400">
-              {formatCurrency(
+              {formatCurrencyWithSymbol(
                 recentExpenses
                   .filter((exp: any) => !exp.groupId)
-                  .reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0) / 100
+                  .reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0) / 100,
+                userCurrency
               )}
             </div>
           </div>
           <div>
             <div className="text-sm text-muted-foreground">Group</div>
             <div className="text-lg font-semibold text-green-400">
-              {formatCurrency(
+              {formatCurrencyWithSymbol(
                 recentExpenses
                   .filter((exp: any) => exp.groupId)
-                  .reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0) / 100
+                  .reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0) / 100,
+                userCurrency
               )}
             </div>
           </div>

@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { KanbanCard, KanbanCardContent, KanbanCardDescription, KanbanCardHeader, KanbanCardTitle } from "@/components/ui/kanban-card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -27,6 +28,7 @@ import {
   MoreHorizontal
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { friendsAPI, conversationAPI } from "@/lib/api"
 
 interface Friend {
   id: string
@@ -60,13 +62,37 @@ export function FriendInvitationWithDelete() {
   const [inviteEmails, setInviteEmails] = useState('')
   const [inviteMessage, setInviteMessage] = useState('Hey! Join me on Khutrukey to easily split and track our shared expenses. It makes managing group expenses so much simpler!')
   const [copiedLink, setCopiedLink] = useState(false)
+  const [sending, setSending] = useState(false)
   const { toast } = useToast()
+  const router = useRouter()
 
   const inviteLink = "https://khutrukey.app/invite/abc123"
 
-  const handleSendInvitations = () => {
+  useEffect(() => {
+    friendsAPI
+      .list()
+      .then((res) => {
+        const items = Array.isArray(res.data?.data) ? res.data.data : []
+        const mapped: Friend[] = items.map((u: any) => ({
+          id: u._id,
+          name: [u.firstName, u.lastName].filter(Boolean).join(" "),
+          email: u.email,
+          avatar: u.avatar || undefined,
+          status: 'active',
+          joinedDate: u.joinedAt || new Date().toISOString(),
+          totalExpenses: 0,
+          balance: 0,
+        }))
+        setFriends(mapped)
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleSendInvitations = async () => {
+    if (sending) return
+    setSending(true)
     const emails = inviteEmails
-      .split(/[,\n]/)
+      .split(/[\,\n]/)
       .map(email => email.trim())
       .filter(email => email && email.includes('@'))
 
@@ -76,6 +102,7 @@ export function FriendInvitationWithDelete() {
         description: "Please enter at least one valid email address.",
         variant: "destructive"
       })
+      setSending(false)
       return
     }
 
@@ -100,23 +127,45 @@ export function FriendInvitationWithDelete() {
       return
     }
 
-    // Add new invitations
-    const newInvitations = newEmails.map(email => ({
-      id: Date.now().toString() + Math.random(),
-      email,
-      invitedDate: new Date().toISOString().split('T')[0],
-      status: 'sent' as const,
-      message: inviteMessage
-    }))
+    try {
+      console.log('[Friends] Sending invitations', { emails, message: inviteMessage })
+      const results = await Promise.allSettled(
+        newEmails.map(email => friendsAPI.createInvite({ inviteeEmail: email, message: inviteMessage }))
+      )
 
-    setPendingInvitations(prev => [...prev, ...newInvitations])
-    setInviteEmails('')
-    setIsInviteDialogOpen(false)
+      const succeeded: string[] = []
+      const failed: string[] = []
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') succeeded.push(newEmails[i])
+        else failed.push(newEmails[i])
+      })
 
-    toast({
-      title: "Invitations sent!",
-      description: `Sent ${newEmails.length} invitation${newEmails.length === 1 ? '' : 's'} successfully.`,
-    })
+      if (succeeded.length) {
+        const newInvitations = succeeded.map(email => ({
+          id: Date.now().toString() + Math.random(),
+          email,
+          invitedDate: new Date().toISOString().split('T')[0],
+          status: 'sent' as const,
+          message: inviteMessage
+        }))
+        setPendingInvitations(prev => [...prev, ...newInvitations])
+      }
+
+      setInviteEmails('')
+      setIsInviteDialogOpen(false)
+
+      if (succeeded.length) {
+        toast({ title: "Invitations sent!", description: `Sent ${succeeded.length} invitation${succeeded.length === 1 ? '' : 's'}.` })
+      }
+      if (failed.length) {
+        toast({ title: "Some invites failed", description: failed.join(', '), variant: 'destructive' })
+      }
+      console.log('[Friends] Invite results', { succeeded, failed })
+    } catch (e: any) {
+      console.error('[Friends] Failed to send invites', e)
+      toast({ title: "Failed to send invites", description: e?.message || '', variant: 'destructive' })
+    }
+    setSending(false)
   }
 
   const handleCopyLink = async () => {
@@ -193,18 +242,21 @@ export function FriendInvitationWithDelete() {
     }
   }
 
-  const startDirectChat = (friendId: string) => {
-    toast({
-      title: "Starting chat",
-      description: "Opening direct message...",
-    })
+  const startDirectChat = async (friendId: string) => {
+    try {
+      await conversationAPI.upsertDM(friendId)
+      router.push(`/chat?dm=${friendId}`)
+    } catch (e: any) {
+      toast({ title: "Failed to open chat", description: e?.response?.data?.message || "", variant: "destructive" })
+    }
   }
 
   const addToExpense = (friendId: string) => {
-    toast({
-      title: "Adding to expense",
-      description: "Opening expense creation...",
-    })
+    router.push(`/expenses/create?with=${friendId}`)
+  }
+
+  const addToGroup = (friendId: string) => {
+    router.push(`/groups?addMember=${friendId}`)
   }
 
   return (
@@ -339,6 +391,10 @@ export function FriendInvitationWithDelete() {
                               <DropdownMenuItem onClick={() => addToExpense(friend.id)}>
                                 <DollarSign className="h-4 w-4 mr-2" />
                                 Add to Expense
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => addToGroup(friend.id)}>
+                                <Users className="h-4 w-4 mr-2" />
+                                Add to Group
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem 
@@ -517,9 +573,9 @@ export function FriendInvitationWithDelete() {
             <Button variant="outline" onClick={() => setIsInviteDialogOpen(false)} size="sm" className="h-8 px-3">
               Cancel
             </Button>
-            <Button onClick={handleSendInvitations} size="sm" className="h-8 px-3">
+            <Button onClick={handleSendInvitations} size="sm" className="h-8 px-3" disabled={sending}>
               <Send className="h-3 w-3 mr-1" />
-              Send Invitations
+              {sending ? 'Sending...' : 'Send Invitations'}
             </Button>
           </DialogFooter>
         </DialogContent>

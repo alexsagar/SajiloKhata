@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import { KanbanCard, KanbanCardContent, KanbanCardHeader, KanbanCardTitle } from "@/components/ui/kanban-card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,11 +10,11 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { 
-  Send, 
-  Search, 
-  MoreVertical, 
-  Phone, 
+import {
+  Send,
+  Search,
+  MoreVertical,
+  Phone,
   Video,
   MessageSquare,
   UserPlus,
@@ -21,6 +22,9 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
+import { friendsAPI, conversationAPI } from "@/lib/api"
+import { useAuth } from "@/contexts/auth-context"
+import { useSocket } from "@/contexts/socket-context"
 
 interface Friend {
   id: string
@@ -53,14 +57,38 @@ interface Conversation {
 const mockFriends: Friend[] = []
 const mockConversations: Conversation[] = []
 
+// Keep track of processed message IDs across component remounts (React Strict Mode)
+const processedMessageIds = new Set<string>()
+
+// Track messages currently being added to prevent React Strict Mode double-invocation from creating duplicates
+const messagesBeingAdded = new Set<string>()
+
 export function DirectMessages() {
   const [conversations, setConversations] = useState<Conversation[]>(mockConversations)
+  const [friends, setFriends] = useState<Friend[]>(mockFriends)
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [message, setMessage] = useState("")
   const [searchTerm, setSearchTerm] = useState("")
   const [isNewChatOpen, setIsNewChatOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    console.log("DirectMessages component mounted")
+    return () => console.log("DirectMessages component unmounted")
+  }, [])
+
+  // Deduplicate messages in conversations on mount
+  useEffect(() => {
+    setConversations(prev => prev.map(conv => ({
+      ...conv,
+      messages: Array.from(new Map(conv.messages.map(m => [m.id, m])).values())
+    })))
+  }, [])
+
   const { toast } = useToast()
+  const { user } = useAuth()
+  const searchParams = useSearchParams()
+  const { socket, isConnected, onlineUsers, joinConversations } = useSocket()
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -70,45 +98,316 @@ export function DirectMessages() {
     scrollToBottom()
   }, [selectedConversation?.messages])
 
+  // Load friends and conversations, and optionally open a specific DM from query (?dm=<userId>)
+  useEffect(() => {
+    let mounted = true
+    const load = async () => {
+      try {
+        const [friendsRes, convsRes] = await Promise.all([
+          friendsAPI.list(),
+          conversationAPI.list(),
+        ])
+
+        if (!mounted) return
+
+        const friendsData = Array.isArray(friendsRes.data?.data) ? friendsRes.data.data : []
+        const mappedFriends: Friend[] = friendsData.map((u: any) => ({
+          id: u._id,
+          name: [u.firstName, u.lastName].filter(Boolean).join(" "),
+          email: u.email,
+          avatar: u.avatar || undefined,
+          isOnline: false,
+        }))
+        setFriends(mappedFriends)
+
+        const convs = Array.isArray(convsRes.data?.data) ? convsRes.data.data : []
+        const myId = (user as any)?.id || (user as any)?._id
+        const dmConvs = convs
+          .filter((c: any) => c.type === "dm")
+          .map((c: any) => {
+            const otherId = (c.participants || []).map((p: any) => String(p)).find((id: string) => id !== String(myId))
+            const friend = mappedFriends.find((f) => f.id === otherId)
+            const friendFallback: Friend = friend || {
+              id: otherId || "unknown",
+              name: "Friend",
+              email: "",
+              avatar: undefined,
+              isOnline: false,
+            }
+            const conv: Conversation = {
+              id: String(c._id),
+              friend: friendFallback,
+              unreadCount: 0,
+              messages: [],
+            }
+            return conv
+          })
+
+        // Also list friends without existing conv as empty conversations to show them
+        const conversationsMerged: Conversation[] = [
+          ...dmConvs,
+          ...mappedFriends
+            .filter((f) => !dmConvs.some((c: any) => c.friend.id === f.id))
+            .map((f) => ({ id: `local-${f.id}`, friend: f, unreadCount: 0, messages: [] })),
+        ]
+
+        setConversations(conversationsMerged)
+        // Join all existing DM conversations for real-time messages
+        const idsToJoin = dmConvs.map((c: any) => c.id).filter((id: any) => !String(id).startsWith("local-"))
+        joinConversations(idsToJoin)
+
+        // If ?dm is present, ensure/upsert and select that DM
+        const dmUserId = searchParams.get("dm")
+        if (dmUserId) {
+          try {
+            const upsert = await conversationAPI.upsertDM(dmUserId)
+            const convId = String(upsert.data?.data?._id || upsert.data?.data?.id)
+            const friend = mappedFriends.find((f) => f.id === dmUserId)
+            const ensured: Conversation = {
+              id: convId || `local-${dmUserId}`,
+              friend: friend || {
+                id: dmUserId,
+                name: "Friend",
+                email: "",
+                isOnline: false,
+              },
+              unreadCount: 0,
+              messages: [],
+            }
+            setConversations((prev) => {
+              const exists = prev.some((c) => c.id === ensured.id)
+              return exists ? prev : [ensured, ...prev]
+            })
+            // join this conversation's room
+            if (convId) joinConversations([convId])
+            setSelectedConversation(ensured)
+          } catch {
+            // ignore
+          }
+        }
+      } catch (e: any) {
+        // ignore for now; UI will show empty state
+      }
+    }
+    load()
+    return () => {
+      mounted = false
+    }
+  }, [searchParams, user])
+
+  // Ensure we join conversations when socket connects
+  useEffect(() => {
+    if (isConnected && conversations.length > 0) {
+      const idsToJoin = conversations.map((c) => c.id).filter((id) => !String(id).startsWith("local-"))
+      console.log("[JOIN] Attempting to join conversations:", idsToJoin)
+      if (idsToJoin.length > 0) {
+        joinConversations(idsToJoin)
+      }
+    }
+  }, [isConnected, conversations.length, joinConversations])
+
+  // Use refs for stable event handler references
+  const handleNewMessageRef = useRef<((e: any) => void) | undefined>(undefined)
+  const handleOnlineRef = useRef<((e: any) => void) | undefined>(undefined)
+  const handleOfflineRef = useRef<((e: any) => void) | undefined>(undefined)
+  const handlePresenceStateRef = useRef<((e: any) => void) | undefined>(undefined)
+
+  // Update the handler refs when dependencies change
+  useEffect(() => {
+    handleNewMessageRef.current = (e: any) => {
+      console.log("[SOCKET] Message event received:", e.detail)
+      const detail = e.detail || {}
+      const convId = String(detail.conversationId || '')
+      const msg = detail.message || {}
+      const msgId = String(msg._id || '')
+      if (!convId || !msgId) return
+
+      if (processedMessageIds.has(msgId)) {
+        console.log("[SOCKET] Duplicate ignored:", msgId)
+        return
+      }
+      processedMessageIds.add(msgId)
+
+      console.log("[SOCKET] Processing message:", msgId, "from:", msg.sender)
+
+      // Determine if this message is from the current user
+      const currentUserId = String((user as any)?._id || (user as any)?.id || '')
+      const senderId = String(msg.sender || '')
+      const isFromCurrentUser = !!(currentUserId && senderId === currentUserId)
+
+      const newMsg: DirectMessage = {
+        id: String(msg._id || Date.now()),
+        senderId: senderId,
+        senderName: isFromCurrentUser ? 'You' : '',
+        content: msg.text || '',
+        timestamp: new Date(msg.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isCurrentUser: isFromCurrentUser,
+      }
+
+      setConversations((prev) => {
+        // Guard against React Strict Mode calling updater twice
+        if (messagesBeingAdded.has(msgId)) {
+          return prev
+        }
+
+        const existingIndex = prev.findIndex((c) => String(c.id) === convId)
+
+        if (existingIndex === -1) {
+          // Remove any local placeholder conversation for this friend
+          const friendId = String(msg.sender)
+          const withoutLocal = prev.filter((c) => c.id !== `local-${friendId}`)
+
+          const friend = friends.find((f) => f.id === friendId) || {
+            id: friendId || 'unknown',
+            name: 'Friend',
+            email: '',
+            isOnline: false,
+          } as Friend
+          const created: Conversation = { id: convId, friend, unreadCount: 0, messages: [newMsg], lastMessage: newMsg as any }
+
+          messagesBeingAdded.add(msgId)
+          setTimeout(() => messagesBeingAdded.delete(msgId), 100) // Cleanup after React finishes
+
+          return [created, ...withoutLocal]
+        }
+
+        // Update only the first matching conversation
+        const existing = prev[existingIndex]
+        if (existing.messages.some(m => String(m.id) === String(newMsg.id))) {
+          return prev
+        }
+
+        messagesBeingAdded.add(msgId)
+        setTimeout(() => messagesBeingAdded.delete(msgId), 100) // Cleanup after React finishes
+
+        const updated = [...prev]
+        updated[existingIndex] = {
+          ...existing,
+          messages: [...existing.messages, newMsg],
+          lastMessage: newMsg
+        }
+
+        // Also remove any duplicate conversations with the same ID (cleanup)
+        return updated.filter((c, idx) => idx === existingIndex || String(c.id) !== convId)
+      })
+
+      setSelectedConversation((prev) => {
+        if (prev && String(prev.id) === convId) {
+          if (prev.messages.some(m => String(m.id) === String(newMsg.id))) return prev
+          return { ...prev, messages: [...prev.messages, newMsg], lastMessage: newMsg }
+        }
+        return prev
+      })
+    }
+  }, [friends, user])
+
+  // Sync online status from SocketContext
+  useEffect(() => {
+    // Always run this, even if onlineUsers is empty, to ensure we clear status if needed
+    console.log("[PRESENCE] Syncing online users:", onlineUsers)
+    console.log("[PRESENCE] Current friends:", friends.map(f => ({ id: f.id, name: f.name })))
+
+    setConversations(prev => prev.map(c => {
+      const isOnline = onlineUsers.includes(String(c.friend.id))
+      if (isOnline !== c.friend.isOnline) {
+        console.log(`[PRESENCE] Updating ${c.friend.name} (${c.friend.id}) to ${isOnline ? 'Online' : 'Offline'}`)
+      }
+      return {
+        ...c,
+        friend: {
+          ...c.friend,
+          isOnline: isOnline
+        }
+      }
+    }))
+
+    setFriends(prev => prev.map(f => ({
+      ...f,
+      isOnline: onlineUsers.includes(String(f.id))
+    })))
+
+    setSelectedConversation(prev => {
+      if (!prev) return null
+      return {
+        ...prev,
+        friend: {
+          ...prev.friend,
+          isOnline: onlineUsers.includes(String(prev.friend.id))
+        }
+      }
+    })
+  }, [onlineUsers, friends.length, conversations.length])
+
+  // Register event listeners ONCE with stable wrapper functions
+  useEffect(() => {
+    const handleNewMessage = (e: any) => handleNewMessageRef.current?.(e)
+
+    window.addEventListener("socket:message:new", handleNewMessage)
+
+    return () => {
+      window.removeEventListener("socket:message:new", handleNewMessage)
+    }
+  }, []) // Only run once!
+
   const filteredConversations = conversations.filter(conv =>
     conv.friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     conv.friend.email.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
-  const availableFriends = mockFriends.filter(friend =>
+  const availableFriends = friends.filter(friend =>
     !conversations.some(conv => conv.friend.id === friend.id)
   )
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!message.trim() || !selectedConversation) return
+    try {
+      const res = await conversationAPI.sendMessage({ conversationId: selectedConversation.id, text: message.trim() })
+      const msgData = res.data?.data || {}
+      const msgId = String(msgData._id || Date.now())
 
-    const newMessage: DirectMessage = {
-      id: Date.now().toString(),
-      senderId: 'current',
-      senderName: 'You',
-      content: message.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      isCurrentUser: true
-    }
-
-    setConversations(prev => prev.map(conv => {
-      if (conv.id === selectedConversation.id) {
-        return {
-          ...conv,
-          messages: [...conv.messages, newMessage],
-          lastMessage: newMessage
-        }
+      const newMessage: DirectMessage = {
+        id: msgId,
+        senderId: String(msgData.sender || 'current'),
+        senderName: 'You',
+        senderAvatar: (user as any)?.avatar || '',
+        content: msgData.text || message.trim(),
+        timestamp: new Date(msgData.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isCurrentUser: true,
       }
-      return conv
-    }))
 
-    setSelectedConversation(prev => prev ? {
-      ...prev,
-      messages: [...prev.messages, newMessage],
-      lastMessage: newMessage
-    } : null)
+      // Add to processed IDs immediately to prevent echo duplication
+      if (msgData._id) {
+        processedMessageIds.add(String(msgData._id))
+      }
 
-    setMessage("")
+      setConversations(prev => prev.map(conv => {
+        if (conv.id === selectedConversation.id) {
+          // Check if message already exists
+          if (conv.messages.some(m => String(m.id) === msgId)) {
+            return conv
+          }
+          return {
+            ...conv,
+            messages: [...conv.messages, newMessage],
+            lastMessage: newMessage,
+          }
+        }
+        return conv
+      }))
+
+      setSelectedConversation(prev => {
+        if (!prev) return null
+        // Check if message already exists
+        if (prev.messages.some(m => String(m.id) === msgId)) {
+          return prev
+        }
+        return { ...prev, messages: [...prev.messages, newMessage], lastMessage: newMessage }
+      })
+
+      setMessage("")
+    } catch (e: any) {
+      toast({ title: "Failed to send", description: e?.response?.data?.message || "", variant: "destructive" })
+    }
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -136,11 +435,51 @@ export function DirectMessages() {
     })
   }
 
-  const markAsRead = (conversationId: string) => {
+  const markConversationAsRead = (conversationId: string) => {
     setConversations(prev => prev.map(conv =>
       conv.id === conversationId ? { ...conv, unreadCount: 0 } : conv
     ))
   }
+
+  // Load messages when a conversation is selected
+  useEffect(() => {
+    if (!selectedConversation || selectedConversation.id.startsWith('local-')) return
+
+    const loadMessages = async () => {
+      try {
+        console.log("[MESSAGES] Loading messages for conversation:", selectedConversation.id)
+        const res = await conversationAPI.getMessages(selectedConversation.id)
+        const messagesData = res.data?.data || []
+
+        const loadedMessages: DirectMessage[] = messagesData.map((msg: any) => ({
+          id: String(msg._id),
+          senderId: String(msg.sender),
+          senderName: String(msg.sender) === String((user as any)?._id || (user as any)?.id) ? 'You' : selectedConversation.friend.name,
+          senderAvatar: selectedConversation.friend.avatar,
+          content: msg.text || '',
+          timestamp: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isCurrentUser: String(msg.sender) === String((user as any)?._id || (user as any)?.id),
+        }))
+
+        console.log("[MESSAGES] Loaded", loadedMessages.length, "messages")
+
+        setSelectedConversation(prev => prev ? {
+          ...prev,
+          messages: loadedMessages
+        } : null)
+
+        setConversations(prev => prev.map(conv =>
+          conv.id === selectedConversation.id
+            ? { ...conv, messages: loadedMessages }
+            : conv
+        ))
+      } catch (error) {
+        console.error("[MESSAGES] Failed to load messages:", error)
+      }
+    }
+
+    loadMessages()
+  }, [selectedConversation?.id, user])
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 h-full">
@@ -178,26 +517,26 @@ export function DirectMessages() {
                     <div
                       key={conversation.id}
                       className={cn(
-                        "flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all hover:bg-muted/60 hover:shadow-sm group",
-                        selectedConversation?.id === conversation.id && "bg-muted ring-1 ring-white/10"
+                        "flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all hover:bg-muted/80 group",
+                        selectedConversation?.id === conversation.id && "bg-primary/10 ring-2 ring-primary/20"
                       )}
                       onClick={() => setSelectedConversation(conversation)}
                     >
                       <div className="relative">
-                        <Avatar className="h-8 w-8">
+                        <Avatar className="h-11 w-11">
                           <AvatarImage src={conversation.friend.avatar} />
                           <AvatarFallback>
                             {conversation.friend.name.split(' ').map(n => n[0]).join('').toUpperCase()}
                           </AvatarFallback>
                         </Avatar>
                         <div className={cn(
-                          "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background",
+                          "absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-background",
                           conversation.friend.isOnline ? "bg-green-500" : "bg-gray-400"
                         )} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <p className="font-medium text-sm truncate">{conversation.friend.name}</p>
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="font-medium text-xs truncate">{conversation.friend.name}</p>
                           {conversation.lastMessage && (
                             <span className="text-xs text-muted-foreground">
                               {conversation.lastMessage.timestamp}
@@ -214,8 +553,12 @@ export function DirectMessages() {
                             </Badge>
                           )}
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {conversation.friend.isOnline ? "Online" : conversation.friend.lastSeen || "Offline"}
+                        <p className="text-xs text-muted-foreground flex items-center gap-1">
+                          <span className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            conversation.friend.isOnline ? "bg-green-500" : "bg-gray-400"
+                          )} />
+                          {conversation.friend.isOnline ? "Online" : "Offline"}
                         </p>
                       </div>
                     </div>
@@ -260,14 +603,14 @@ export function DirectMessages() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="relative">
-                      <Avatar className="h-6 w-6">
+                      <Avatar className="h-10 w-10">
                         <AvatarImage src={selectedConversation.friend.avatar} />
                         <AvatarFallback>
                           {selectedConversation.friend.name.split(' ').map(n => n[0]).join('').toUpperCase()}
                         </AvatarFallback>
                       </Avatar>
                       <div className={cn(
-                        "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background",
+                        "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background",
                         selectedConversation.friend.isOnline ? "bg-green-500" : "bg-gray-400"
                       )} />
                     </div>
@@ -305,7 +648,7 @@ export function DirectMessages() {
 
                         return (
                           <div
-                            key={msg.id}
+                            key={`${msg.id}-${index}`}
                             className={cn("flex gap-2", msg.isCurrentUser && "flex-row-reverse")}
                           >
                             <div className="flex flex-col items-center">
@@ -339,10 +682,10 @@ export function DirectMessages() {
                               )}
                               <div
                                 className={cn(
-                                  "rounded-xl px-2 py-1 text-sm shadow-sm ring-1 ring-black/5 dark:ring-white/5",
+                                  "px-4 py-2.5 rounded-2xl text-sm max-w-md",
                                   msg.isCurrentUser
-                                    ? "bg-primary text-primary-foreground"
-                                    : "bg-muted/70"
+                                    ? "bg-primary text-primary-foreground rounded-br-md"
+                                    : "bg-muted rounded-bl-md"
                                 )}
                               >
                                 {msg.content}
@@ -415,7 +758,7 @@ export function DirectMessages() {
               Choose a friend to start a direct conversation
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-2">
             {availableFriends.length > 0 ? (
               <div className="space-y-1">
@@ -464,7 +807,7 @@ export function DirectMessages() {
               </div>
             )}
           </div>
-          
+
           <DialogFooter className="flex justify-end pt-1">
             <Button variant="outline" onClick={() => setIsNewChatOpen(false)} size="sm" className="h-8 px-3">
               Cancel

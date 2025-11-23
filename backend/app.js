@@ -29,11 +29,14 @@ const analyticsRoutes = require("./routes/analytics")
 const { handleMulterError } = require("./middleware/upload")
 
 const app = express()
+// Track online users by userId
+const onlineUsers = new Set()
 const server = createServer(app)
 const io = new Server(server, {
   cors: {
     origin: process.env.CLIENT_URL || "http://localhost:3000",
     methods: ["GET", "POST"],
+    credentials: true,
   },
 })
 
@@ -49,14 +52,14 @@ app.use(
   }),
 )
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: "Too many requests from this IP, please try again later.",
-})
+// // Rate limiting
+// const limiter = rateLimit({
+//   windowMs: 15 * 60 * 1000, // 15 minutes
+//   max: 100, // limit each IP to 100 requests per windowMs
+//   message: "Too many requests from this IP, please try again later.",
+// })
 
-app.use("/api", limiter)
+// app.use("/api", limiter)
 
 // Body parsing middleware
 app.use(express.json({ limit: "10mb" }))
@@ -107,18 +110,34 @@ app.get("/api/health", (req, res) => {
 
 // Socket.IO connection handling
 io.use((socket, next) => {
-  // Prefer cookie-based auth for socket handshake
   try {
     const cookieHeader = socket.handshake.headers.cookie || ''
-    const cookies = Object.fromEntries(cookieHeader.split(';').map(c => {
+    console.log(`[SOCKET] Handshake from ${socket.id}`)
+    console.log(`[SOCKET] Cookie header: ${cookieHeader ? 'Present' : 'Missing'}`)
+
+    const cookies = Object.fromEntries(cookieHeader.split(';').filter(Boolean).map(c => {
       const [k, ...rest] = c.trim().split('=')
       return [k, decodeURIComponent(rest.join('='))]
     }))
-    const token = cookies['accessToken']
-    if (!token) return next(new Error('Authentication error'))
+
+    // Prefer accessToken cookie, but fall back to auth token from client
+    const authToken = socket.handshake.auth && socket.handshake.auth.token
+    const token = cookies['accessToken'] || authToken
+
+    console.log(`[SOCKET] Auth token found: ${!!token}`)
+    if (!token) {
+      console.log('[SOCKET] Authentication failed: No token')
+      return next(new Error('Authentication error'))
+    }
+
     const jwt = require('jsonwebtoken')
     const decoded = jwt.verify(token, process.env.JWT_SECRET)
-    socket.userId = decoded.userId
+
+    // Support multiple possible id fields from JWT payload
+    const uid = decoded.userId || decoded.id || decoded._id
+    if (!uid) return next(new Error('Authentication error'))
+
+    socket.userId = String(uid)
     return next()
   } catch (err) {
     return next(new Error('Authentication error'))
@@ -131,6 +150,12 @@ io.on("connection", (socket) => {
   // Join user to their personal room
   socket.join(`user_${socket.userId}`)
 
+  // Presence: add to online set and send current state to this socket
+  try {
+    onlineUsers.add(String(socket.userId))
+    socket.emit("presence:state", { onlineUserIds: Array.from(onlineUsers) })
+  } catch (_) { }
+
   // Join user to their group rooms
   socket.on("join_groups", (groupIds) => {
     groupIds.forEach((groupId) => {
@@ -138,8 +163,27 @@ io.on("connection", (socket) => {
     })
   })
 
+  // Allow client to join DM/group conversation rooms
+  socket.on("join_conversations", (conversationIds = []) => {
+    try {
+      conversationIds.forEach((id) => socket.join(`conv_${id}`))
+    } catch (_) { }
+  })
+
+  // Explicitly request presence state
+  socket.on("presence:request", () => {
+    try {
+      socket.emit("presence:state", { onlineUserIds: Array.from(onlineUsers) })
+    } catch (_) { }
+  })
+
+  // Simple presence broadcast
+  socket.broadcast.emit("presence:online", { userId: String(socket.userId) })
+
   socket.on("disconnect", () => {
     console.log(`User ${socket.userId} disconnected`)
+    try { onlineUsers.delete(String(socket.userId)) } catch (_) { }
+    socket.broadcast.emit("presence:offline", { userId: String(socket.userId) })
   })
 })
 

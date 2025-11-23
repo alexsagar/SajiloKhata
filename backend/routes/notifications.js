@@ -9,42 +9,25 @@ const router = express.Router()
 // Get user notifications
 router.get("/", async (req, res) => {
   try {
-    const { page = 1, limit = 20, unreadOnly = false } = req.query
-    const skip = (page - 1) * limit
+    const pageNum = Number.parseInt(req.query.page) || 1
+    const limitNum = Number.parseInt(req.query.limit) || 20
+    const unreadOnly = String(req.query.unreadOnly) === "true"
 
-    const query = { userId: req.user._id }
-
-    if (unreadOnly === "true") {
-      query.read = false
-    }
-
-    const notifications = await Notification.find(query)
-      .populate("relatedUser", "firstName lastName username avatar")
-      .populate("relatedGroup", "name")
-      .populate("relatedExpense", "description amount")
-      .sort({ createdAt: -1 })
-      .limit(Number.parseInt(limit))
-      .skip(skip)
-
-    const total = await Notification.countDocuments(query)
-    const unreadCount = await Notification.countDocuments({
-      userId: req.user._id,
-      read: false,
+    const result = await notificationService.getUserNotifications(req.user._id, {
+      page: pageNum,
+      limit: limitNum,
+      unreadOnly,
     })
 
-    res.json({
-      notifications,
-      unreadCount,
-      pagination: {
-        page: Number.parseInt(page),
-        limit: Number.parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit),
-      },
+    // Ensure consistent response shape for frontend
+    return res.json({
+      notifications: result.notifications || [],
+      unreadCount: result.unreadCount || 0,
+      pagination: result.pagination || { page: pageNum, limit: limitNum, total: 0, pages: 0 },
     })
   } catch (error) {
     console.error("Get notifications error:", error)
-    res.status(500).json({ message: "Server error" })
+    return res.status(500).json({ message: "Server error" })
   }
 })
 

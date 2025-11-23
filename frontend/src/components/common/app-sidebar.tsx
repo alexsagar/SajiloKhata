@@ -75,9 +75,9 @@ export function AppSidebar() {
 
   return (
     <div className={cn(
-      "font-sans bg-[#12151c] text-slate-200 border-r border-white/10 h-screen overflow-y-auto",
+      "font-sans bg-[#12151c] text-slate-200 border-r border-white/10 h-screen",
       "touch-manipulation select-none", // Enhanced touch interactions
-      isMobile ? "w-full h-screen fixed inset-0 z-50" : "w-[260px]",
+      isMobile ? "w-full h-screen fixed inset-0 z-50" : "w-[280px]",
       isMobile && !isOpen && "translate-x-[-100%]",
       "transition-transform duration-300 ease-in-out"
     )}>
@@ -103,7 +103,7 @@ export function AppSidebar() {
       </div>
 
       {/* Content */}
-      <div className="px-3 py-4 flex-1 overflow-y-auto">
+      <div className="px-3 py-4 flex-1">
         {/* Main Navigation */}
         <div className="mb-6">
           <div className="px-3 py-2 text-xs font-medium uppercase tracking-wider text-slate-400 mb-3">
@@ -170,30 +170,32 @@ export function AppSidebar() {
       </div>
 
       {/* Footer */}
-      <div className="border-t border-white/5 p-4">
+      <div className="border-t border-white/5 p-4 pb-6">
         {user && (
-          <div className="flex items-center gap-3">
-            <Avatar className="h-8 w-8 sm:h-10 sm:w-10 ring-2 ring-white/10 flex-shrink-0">
-              <AvatarImage src={user.avatar || "/placeholder.svg"} />
-              <AvatarFallback className="bg-slate-600 text-slate-200 font-medium text-sm">
-                {getInitials(user.firstName, user.lastName)}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-slate-100 truncate">
-                {user.firstName} {user.lastName}
-              </p>
-              <p className="text-xs text-slate-400 truncate">{user.email}</p>
+          <div className="space-y-2">
+            <div className="flex items-start gap-3">
+              <Avatar className="h-8 w-8 sm:h-10 sm:w-10 ring-2 ring-white/10 flex-shrink-0">
+                <AvatarImage src={user.avatar || "/placeholder.svg"} />
+                <AvatarFallback className="bg-slate-600 text-slate-200 font-medium text-sm">
+                  {getInitials(user.firstName, user.lastName)}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-slate-100 leading-tight break-words">
+                  {user.firstName} {user.lastName}
+                </p>
+                <p className="text-xs text-slate-400 break-words mt-0.5">{user.email}</p>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={logout}
+                className="h-10 w-10 min-h-[44px] min-w-[44px] text-slate-400 hover:text-white hover:bg-white/5 touch-manipulation flex-shrink-0"
+                aria-label="Logout"
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
             </div>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={logout}
-              className="h-10 w-10 min-h-[44px] min-w-[44px] text-slate-400 hover:text-white hover:bg-white/5 touch-manipulation"
-              aria-label="Logout"
-            >
-              <LogOut className="h-4 w-4" />
-            </Button>
           </div>
         )}
       </div>

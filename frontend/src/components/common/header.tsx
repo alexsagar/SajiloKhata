@@ -208,9 +208,9 @@ export function Header({
                       </div>
                     ) : (
                       <div className="space-y-1">
-                        {searchResults.map((result) => (
+                        {searchResults.map((result, idx) => (
                           <div
-                            key={result.id}
+                            key={(result as any)?.id || `${result.type}-${result.title}-${idx}`}
                             onClick={() => handleSearchResultClick(result)}
                             className="flex items-center space-x-3 p-3 hover:bg-white/5 rounded-lg cursor-pointer transition-colors"
                           >
@@ -310,9 +310,9 @@ export function Header({
                   </div>
                 ) : (
                   <div className="space-y-1">
-                    {notifications.slice(0, 10).map((notification) => (
+                    {notifications.slice(0, 10).map((notification, idx) => (
                       <div
-                        key={notification.id}
+                        key={(notification as any)?.id || (notification as any)?._id || `${notification.title}-${notification.createdAt}-${idx}`}
                         className={`p-3 hover:bg-white/5 transition-colors cursor-pointer ${
                           !notification.read ? 'bg-blue-500/10' : ''
                         }`}

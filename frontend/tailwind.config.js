@@ -1,7 +1,8 @@
-const { fontFamily } = require("tailwindcss/defaultTheme")
+ import defaultTheme from "tailwindcss/defaultTheme";
+ import animate from "tailwindcss-animate";
 
 /** @type {import('tailwindcss').Config} */
-module.exports = {
+const config = {
   darkMode: ["class"],
   content: [
     './pages/**/*.{ts,tsx}',
@@ -73,7 +74,7 @@ module.exports = {
         "2xl": "18px",
       },
       fontFamily: {
-        sans: ["Inter", "var(--font-sans)", ...fontFamily.sans],
+        sans: ["Inter", "var(--font-sans)", ...defaultTheme.fontFamily.sans],
       },
       fontSize: {
         'xs': ['0.75rem', { lineHeight: '1rem' }],
@@ -114,5 +115,7 @@ module.exports = {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
-}
+  plugins: [animate],
+};
+
+export default config;

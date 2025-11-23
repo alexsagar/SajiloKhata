@@ -1,6 +1,8 @@
 import nextPWA from 'next-pwa';
 import bundleAnalyzer from '@next/bundle-analyzer';
 
+const isTurbopack = process.env.TURBOPACK === '1';
+
 /** @type {import('next').NextConfig} */
 const withAnalyzer = bundleAnalyzer({ enabled: process.env.ANALYZE === 'true' })
 
@@ -36,11 +38,13 @@ const nextConfig = {
   }
 };
 
-const withPWA = nextPWA({
+const applyPWA = isTurbopack ? (config) => config : nextPWA({
   dest: 'public',
   register: true,
   skipWaiting: true,
   disable: process.env.NODE_ENV === 'development',
 });
 
-export default withAnalyzer(withPWA(nextConfig));
+const applyAnalyzer = isTurbopack ? ((config) => config) : withAnalyzer;
+
+export default applyAnalyzer(applyPWA(nextConfig));

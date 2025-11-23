@@ -35,6 +35,17 @@ router.post("/:id/members", async (req, res) => {
     toAdd.forEach((id) => group.members.push({ user: id, role: "member", joinedAt: new Date() }))
     await group.save()
 
+    // Upsert or update the group's conversation participants
+    const Conversation = require("../models/Conversation")
+    const participantIds = group.members.map((m) => m.user)
+    let conv = await Conversation.findOne({ type: "group", groupId: group._id })
+    if (!conv) {
+      conv = await Conversation.create({ type: "group", groupId: group._id, participants: participantIds })
+    } else {
+      conv.participants = participantIds
+      await conv.save()
+    }
+
     // emit socket event
     req.io.to(`group_${group._id}`).emit("group:membersAdded", { groupId: String(group._id), userIds: toAdd })
     res.json({ data: { added: toAdd.length } })
@@ -207,6 +218,17 @@ router.post("/join", [body("inviteCode").notEmpty().trim()], async (req, res) =>
 
     await group.save()
     await group.populate("members.user", "firstName lastName username avatar")
+
+    // Upsert or update the group's conversation participants
+    const Conversation = require("../models/Conversation")
+    const participantIds = group.members.map((m) => m.user)
+    let conv = await Conversation.findOne({ type: "group", groupId: group._id })
+    if (!conv) {
+      conv = await Conversation.create({ type: "group", groupId: group._id, participants: participantIds })
+    } else {
+      conv.participants = participantIds
+      await conv.save()
+    }
 
     // Emit to group members
     req.io.to(`group_${group._id}`).emit("member_joined", {

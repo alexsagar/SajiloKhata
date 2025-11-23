@@ -1,13 +1,20 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { DirectMessages } from "./direct-messages"
 import { GroupChatSimpleDelete } from "./group-chat-simple-delete"
 import { MessageSquare, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 export function ChatInterface() {
+  const searchParams = useSearchParams()
   const [activeTab, setActiveTab] = useState("groups")
+
+  useEffect(() => {
+    const dm = searchParams.get("dm")
+    if (dm) setActiveTab("direct")
+  }, [searchParams])
 
   return (
     <div className="h-full min-h-[420px] space-y-4">

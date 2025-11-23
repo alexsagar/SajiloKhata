@@ -21,21 +21,38 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const [notifications, setNotifications] = useState<Notification[]>([])
   const auth = useAuth()
   const isAuthenticated = auth?.isAuthenticated || false
+  const [disabled, setDisabled] = useState(false)
 
   const unreadCount = notifications.filter((n) => !n.read).length
 
   useEffect(() => {
-    if (isAuthenticated && auth) {
-      refreshNotifications()
-    }
-  }, [isAuthenticated, auth])
+    if (!isAuthenticated || !auth || disabled) return
+    refreshNotifications()
+  }, [isAuthenticated, auth, disabled])
 
   const refreshNotifications = async () => {
     try {
       const response = await notificationAPI.getNotifications()
-      setNotifications(response.data.notifications)
-    } catch (error) {
-      console.error("Failed to fetch notifications:", error)
+      const data = response?.data
+      const list = data?.notifications || data?.data?.notifications || []
+      const normalized = Array.isArray(list)
+        ? list.map((n: any) => ({
+            ...n,
+            id: n?.id || n?._id || String(n?._id || n?.id || ''),
+          }))
+        : []
+      setNotifications(normalized)
+    } catch (error: any) {
+      // Avoid spamming errors in console if the endpoint is not available
+      if (process.env.NODE_ENV !== 'production') {
+        console.error("Failed to fetch notifications:", error)
+      }
+      // Temporarily disable further fetch attempts for this session
+      setDisabled(true)
+      // Re-enable after 5 minutes
+      if (typeof window !== 'undefined') {
+        setTimeout(() => setDisabled(false), 5 * 60 * 1000)
+      }
     }
   }
 

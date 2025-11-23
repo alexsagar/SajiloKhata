@@ -8,6 +8,28 @@ export interface Currency {
   region?: string
 }
 
+// Always show our mapped symbol (e.g., NPR -> रू) regardless of locale behavior
+export function formatCurrencyWithSymbol(amount: number, currencyCode = 'USD', locale = 'en-US'): string {
+  // Handle invalid amounts
+  if (isNaN(amount) || !isFinite(amount)) {
+    amount = 0
+  }
+
+  const currency = getCurrency(currencyCode)
+  const decimals = currency?.decimals ?? 2
+  const symbol = getCurrencySymbol(currencyCode)
+
+  try {
+    const number = new Intl.NumberFormat(locale, {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    }).format(amount)
+    return `${symbol}${number}`
+  } catch {
+    return `${symbol}${amount.toFixed(decimals)}`
+  }
+}
+
 export const CURRENCIES: Currency[] = [
   // Popular currencies
   { code: 'USD', name: 'US Dollar', symbol: '$', decimals: 2, flag: '🇺🇸', popular: true, region: 'North America' },
