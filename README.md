@@ -94,8 +94,8 @@ The application now features a **centralized currency system** that automaticall
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/splitwise.git
-   cd splitwise
+   git clone https://github.com/yourusername/khutrukey.git
+   cd khutrukey
    ```
 
 2. **Install dependencies**
@@ -112,7 +112,7 @@ The application now features a **centralized currency system** that automaticall
 3. **Environment Setup**
    ```bash
    # Backend (.env)
-   MONGODB_URI=mongodb://localhost:27017/splitwise
+   MONGODB_URI=mongodb://localhost:27017/khutrukey
    JWT_SECRET=your_jwt_secret
    PORT=5000
    
