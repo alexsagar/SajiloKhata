@@ -64,7 +64,7 @@ export function InviteAcceptClient({ code }: { code: string }) {
         <CardHeader>
           <CardTitle>You're invited</CardTitle>
           <CardDescription>
-            {invite.inviter.firstName} {invite.inviter.lastName} invited you to connect on Khutrukey.
+            {invite.inviter.firstName} {invite.inviter.lastName} invited you to connect on SajiloKhata.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

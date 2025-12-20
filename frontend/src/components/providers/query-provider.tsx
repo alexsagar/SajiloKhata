@@ -12,12 +12,12 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            // Cache data longer and avoid refetching on remount to speed navigation
-            staleTime: 5 * 60 * 1000,
+            // Cache data for reasonable time but allow fresh data when needed
+            staleTime: 2 * 60 * 1000, // 2 minutes
             gcTime: 10 * 60 * 1000,
             retry: 2,
-            refetchOnWindowFocus: false,
-            refetchOnMount: false,
+            refetchOnWindowFocus: true,
+            refetchOnMount: true,
             refetchOnReconnect: true,
             placeholderData: keepPreviousData,
           },

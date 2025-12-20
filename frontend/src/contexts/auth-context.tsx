@@ -3,6 +3,7 @@
 import React from "react"
 import { createContext, useContext, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { useSession, signOut as nextAuthSignOut } from "next-auth/react"
 import { authAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 import type { User } from "@/types/user"
@@ -16,6 +17,7 @@ interface AuthContextType {
   refreshAuth: () => Promise<void>
   loading: boolean
   isAuthenticated: boolean
+  isOAuthUser: boolean
 }
 
 interface RegisterData {
@@ -31,9 +33,136 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const { data: session, status: sessionStatus } = useSession()
   const router = useRouter()
 
-  const isAuthenticated = !!user
+  // Check if user is authenticated via OAuth
+  const isOAuthUser = !!session?.user
+  const [oauthSynced, setOauthSynced] = useState(false)
+  const [oauthSyncFailed, setOauthSyncFailed] = useState(false)
+  
+  // Sync OAuth user with backend when session is available
+  useEffect(() => {
+    const syncOAuthUser = async () => {
+      if (session?.user && !user && !oauthSynced && !oauthSyncFailed) {
+        try {
+          // Use NextAuth session data to sync with backend via /auth/oauth.
+          const provider = (session.user as any).provider || "oauth"
+          const rawEmail = session.user.email || ""
+          const providerAccountId = (session.user as any).providerAccountId as string | undefined
+          const fallbackId = (session.user as any).id as string | undefined
+
+          const providerId = providerAccountId || fallbackId || rawEmail
+
+          // Some Facebook accounts won't return an email even with the email permission.
+          // Our backend requires a non-empty email, so in that case we synthesize one
+          // from the providerId so the user can still log in.
+          const email = rawEmail || (providerId ? `${providerId}@${provider}.oauth.local` : "")
+
+          if (!providerId || !email) {
+            console.error("OAuth session missing required fields for backend sync", {
+              provider,
+              providerId,
+              hasEmail: !!email,
+            })
+
+            setOauthSyncFailed(true)
+            setOauthSynced(true)
+
+            await nextAuthSignOut({ redirect: false })
+            router.push("/login")
+            return
+          }
+
+          const response = await authAPI.oauthLogin({
+            provider,
+            providerId,
+            email,
+            name: session.user.name || "",
+            firstName: session.user.name?.split(" ")[0] || "",
+            lastName: session.user.name?.split(" ").slice(1).join(" ") || "",
+            avatar: session.user.image || "",
+          })
+
+          // Response should include backend user and set cookies for access/refresh tokens
+          let backendUser: any = null
+          if (response.data?.data?.user) {
+            backendUser = response.data.data.user
+          } else if (response.data?.user) {
+            backendUser = response.data.user
+          }
+
+          backendUser = normalizeUser(backendUser)
+
+          if (backendUser) {
+            setUser(backendUser)
+            setOauthSynced(true)
+            setOauthSyncFailed(false)
+          } else {
+            console.error("Backend OAuth sync returned no user")
+            setOauthSyncFailed(true)
+            setOauthSynced(true)
+
+            await nextAuthSignOut({ redirect: false })
+            router.push("/login")
+          }
+        } catch (error) {
+          console.error("Failed to sync OAuth user with backend:", error)
+          // Mark sync as failed - user should not be considered authenticated
+          setOauthSyncFailed(true)
+          setOauthSynced(true)
+          
+          // Sign out from NextAuth since backend sync failed
+          await nextAuthSignOut({ redirect: false })
+          router.push("/login")
+        }
+      }
+    }
+    
+    if (sessionStatus === "authenticated" && !loading) {
+      syncOAuthUser()
+    }
+  }, [session, sessionStatus, user, oauthSynced, oauthSyncFailed, loading, router])
+  
+  // Create user object from OAuth session if no backend user
+  const oauthUser: User | null = session?.user ? {
+    id: (session.user as any).backendUserId || session.user.id || "",
+    email: session.user.email || "",
+    firstName: session.user.name?.split(" ")[0] || "",
+    lastName: session.user.name?.split(" ").slice(1).join(" ") || "",
+    username: session.user.email?.split("@")[0] || "",
+    avatar: session.user.image || undefined,
+    role: "user",
+    isActive: true,
+    isPremium: false,
+    createdAt: new Date().toISOString(),
+    lastLoginAt: new Date().toISOString(),
+    preferences: {
+      currency: "USD",
+      baseCurrency: "USD",
+      language: "en",
+      theme: "system",
+      timezone: "America/New_York",
+      dateFormat: "MM/DD/YYYY",
+      autoSplit: true,
+      defaultSplitType: "equal",
+      notifications: {
+        email: true,
+        push: true,
+        sms: false,
+      },
+      privacy: {
+        profileVisibility: "friends",
+      },
+    },
+  } as User : null
+  
+  // Use backend user if available, otherwise use OAuth user (only if sync succeeded)
+  const currentUser = user || (oauthSynced && !oauthSyncFailed ? oauthUser : null)
+  
+  // Combined authentication check - only authenticated if we have a backend user
+  // OAuth-only users without backend sync are NOT considered authenticated
+  const isAuthenticated = !!user || (oauthSynced && !oauthSyncFailed && !!oauthUser)
 
   // Utility function to normalize user object
   const normalizeUser = (userData: any) => {
@@ -42,7 +171,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Ensure user object has the correct id field
     if (userData._id && !userData.id) {
       userData.id = userData._id
-      console.log('AuthContext: Normalized user - Added id field from _id:', userData.id)
+      
     }
     
     // Ensure preferences exist
@@ -59,13 +188,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         notifications: {
           email: true,
           push: true,
-          whatsapp: false,
+          sms: false,
         },
         privacy: {
           profileVisibility: "friends",
         },
       }
-      console.log('AuthContext: Normalized user - Added default preferences')
+      
     }
     
     return userData
@@ -86,43 +215,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     
     const attemptAuth = async (): Promise<any> => {
       try {
-        console.log(`AuthContext: Attempting authentication (attempt ${retryCount + 1})...`)
         const response = await authAPI.me()
-        console.log('AuthContext: API response:', response)
-        console.log('AuthContext: Response data structure:', response.data)
         
         // Try different possible data structures
         let user = null
         if (response.data?.user) {
           user = response.data.user
-          console.log('AuthContext: Found user in response.data.user')
+          
         } else if (response.data?.data?.user) {
           user = response.data.data.user
-          console.log('AuthContext: Found user in response.data.data.user')
+          
         } else if (response.data?.id) {
           // If the response itself is the user object
           user = response.data
-          console.log('AuthContext: Response data is the user object')
-        } else {
-          console.log('AuthContext: No user found in response, data keys:', Object.keys(response.data || {}))
+          
         }
         
         // Ensure user object has the correct id field
         if (user && user._id && !user.id) {
           user.id = user._id
-          console.log('AuthContext: Added id field from _id:', user.id)
+          
         }
         
         // Normalize the user object
         user = normalizeUser(user)
         
-        console.log('AuthContext: Final extracted user:', user)
         return user
       } catch (error: any) {
-        console.log(`AuthContext: Auth check error (attempt ${retryCount + 1}):`, error)
-        console.log('AuthContext: Error response:', error.response)
-        console.log('AuthContext: Error status:', error.response?.status)
-        
         // If it's a 401, don't retry
         if (error?.response?.status === 401) {
           throw error
@@ -131,7 +250,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // If we haven't exceeded max retries, try again
         if (retryCount < maxRetries) {
           retryCount++
-          console.log(`AuthContext: Retrying in ${retryDelayMs}ms... (${retryCount}/${maxRetries})`)
           await new Promise(resolve => setTimeout(resolve, retryDelayMs))
           return attemptAuth()
         }
@@ -144,11 +262,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const user = await attemptAuth()
       setUser(user)
     } catch (error: any) {
-      console.log('AuthContext: All auth attempts failed:', error)
+      
       setUser(null)
     } finally {
       setLoading(false)
-      console.log('AuthContext: Auth check completed, loading set to false')
+      
     }
   }
 
@@ -160,7 +278,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Ensure user object has the correct id field
       if (user && user._id && !user.id) {
         user.id = user._id
-        console.log('AuthContext: Login - Added id field from _id:', user.id)
+        
       }
       
       // Normalize the user object
@@ -177,12 +295,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       router.push("/")
     } catch (error: any) {
       const message = error.response?.data?.error || error.response?.data?.message || "Login failed"
-      toast({
-        title: "Login Failed",
-        description: message,
-        variant: "destructive",
-      })
-      throw new Error(message)
+      throw error
     }
   }
 
@@ -190,26 +303,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const response = await authAPI.register(userData)
       
-      toast({
-        title: "Account Created Successfully!",
-        description: "Please log in with your new account.",
-      })
 
       router.push("/login")
     } catch (error: any) {
       const message = error.response?.data?.error || error.response?.data?.message || "Registration failed"
-      toast({
-        title: "Registration Failed",
-        description: message,
-        variant: "destructive",
-      })
       throw new Error(message)
     }
   }
 
   const logout = async () => {
     try {
-      await authAPI.logout()
+      // Logout from backend if we have a backend session
+      if (user) {
+        await authAPI.logout()
+      }
+      // Logout from NextAuth if we have an OAuth session
+      if (isOAuthUser) {
+        await nextAuthSignOut({ redirect: false })
+      }
     } catch {}
     setUser(null)
 
@@ -239,14 +350,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider
       value={{
-        user,
+        user: currentUser,
         login,
         register,
         logout,
         updateUser,
         refreshAuth,
-        loading,
+        loading: loading || sessionStatus === "loading",
         isAuthenticated,
+        isOAuthUser,
       }}
     >
       {children}

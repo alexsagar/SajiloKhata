@@ -136,7 +136,7 @@ router.get("/month", async (req, res) => {
       }
     })
   } catch (error) {
-    console.error('Calendar month error:', error)
+    
     return fail(res, 'Failed to get calendar month data', 500)
   }
 })
@@ -180,7 +180,7 @@ router.get("/events", async (req, res) => {
 
     res.json({ events })
   } catch (error) {
-    console.error("Get calendar events error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -220,7 +220,7 @@ router.post(
 
       res.status(201).json({ message: "Reminder created successfully" })
     } catch (error) {
-      console.error("Create reminder error:", error)
+      
       res.status(500).json({ message: "Server error" })
     }
   },
@@ -259,7 +259,7 @@ router.get("/settings", async (req, res) => {
 
     res.json(settings)
   } catch (error) {
-    console.error("Get calendar settings error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -289,7 +289,7 @@ router.put(
 
       res.json({ message: "Calendar settings updated", settings })
     } catch (error) {
-      console.error("Update calendar settings error:", error)
+      
       res.status(500).json({ message: "Server error" })
     }
   },
@@ -320,7 +320,7 @@ router.post("/sync/:provider", async (req, res) => {
 
     res.json({ message: `${provider} calendar integration enabled` })
   } catch (error) {
-    console.error("Calendar sync error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })

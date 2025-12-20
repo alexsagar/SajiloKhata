@@ -1,4 +1,5 @@
 import { LoginForm } from "@/components/auth/login-form"
+import { SocialLoginButtons, LoginDivider } from "@/components/auth/social-login-buttons"
 import { KanbanCard, KanbanCardContent, KanbanCardDescription, KanbanCardHeader, KanbanCardTitle } from "@/components/ui/kanban-card"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
@@ -8,25 +9,39 @@ import { AuthShell } from "@/components/auth/auth-shell"
 export default function LoginPage() {
   return (
     <AuthShell>
-      <div className="space-y-6">
+      <div className="space-y-6 px-4 sm:px-0 max-w-md w-full mx-auto">
         <div className="text-center">
-          <Image src="/images/logo.svg" alt="Khutrukey" width={150} height={150} className="mx-auto mb-4" />
-          <h1 className="text-3xl font-bold">Welcome back</h1>
-          <p className="text-muted-foreground">Sign in to your account</p>
+          <Image 
+            src="/images/logo with text.png" 
+            alt="SajiloKhata" 
+            width={200} 
+            height={80} 
+            className="mx-auto mb-10 transform scale-105"
+            priority
+          />
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Welcome back</h1>
+          <p className="text-sm sm:text-base text-muted-foreground">Sign in to your account</p>
         </div>
 
         <KanbanCard>
           <KanbanCardHeader>
             <KanbanCardTitle>Sign In</KanbanCardTitle>
-            <KanbanCardDescription>Enter your email and password to access your account</KanbanCardDescription>
+            <KanbanCardDescription>Choose your preferred sign in method</KanbanCardDescription>
           </KanbanCardHeader>
           <KanbanCardContent>
+            {/* Social Login Options */}
+            <SocialLoginButtons />
+            
+            {/* Divider */}
+            <LoginDivider />
+            
+            {/* Email/Password Login */}
             <LoginForm />
           </KanbanCardContent>
         </KanbanCard>
 
         <div className="text-center">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm sm:text-base text-muted-foreground">
             Don't have an account?{" "}
             <Button variant="link" asChild className="p-0">
               <Link href="/register">Sign up</Link>

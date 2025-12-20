@@ -19,14 +19,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Upload, X } from "lucide-react"
+import { Loader2, X, Scan } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { expenseAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
-import { useDropzone } from "react-dropzone"
 import { CurrencySelector } from "@/components/currency/currency-selector"
 import { useAuth } from "@/contexts/auth-context"
 import { CreateExpenseSchema } from "@/lib/validation"
+import { SmartReceiptScanner } from "@/components/ocr/smart-receipt-scanner"
 
 type CreatePersonalExpenseFormData = z.infer<typeof CreateExpenseSchema>
 
@@ -39,6 +39,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [showCurrencySelection, setShowCurrencySelection] = useState(false)
   const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'offline'>('checking')
+  const [showReceiptScanner, setShowReceiptScanner] = useState(false)
   const queryClient = useQueryClient()
   const { user, loading: authLoading, refreshAuth } = useAuth()
 
@@ -114,7 +115,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
   if (authLoading) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-md w-auto max-h-[85vh] mx-auto">
+        <DialogContent className="w-full max-w-md sm:max-w-lg max-h-[85vh] mx-auto">
           <DialogHeader className="space-y-2">
             <DialogTitle className="text-lg font-semibold">Create Personal Expense</DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
@@ -133,7 +134,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
   if (!user) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-md w-auto max-h-[85vh] mx-auto">
+        <DialogContent className="w-full max-w-md sm:max-w-lg max-h-[85vh] mx-auto">
           <DialogHeader className="space-y-2">
             <DialogTitle className="text-lg font-semibold">Authentication Required</DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
@@ -200,6 +201,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
     reset,
     watch,
     setValue,
+    trigger,
     formState: { errors },
   } = useForm<CreatePersonalExpenseFormData>({
     resolver: zodResolver(CreateExpenseSchema),
@@ -214,16 +216,6 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
 
   const selectedCurrency = watch("currencyCode")
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    accept: {
-      'image/*': ['.png', '.jpg', '.jpeg'],
-      'application/pdf': ['.pdf']
-    },
-    maxFiles: 1,
-    onDrop: (acceptedFiles) => {
-      setSelectedFile(acceptedFiles[0])
-    }
-  })
 
   const createPersonalExpenseMutation = useMutation({
     mutationFn: async (data: CreatePersonalExpenseFormData) => {
@@ -263,27 +255,123 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
       
       return expenseAPI.createExpense(formData)
     },
-    onSuccess: () => {
-      // Invalidate all expense-related queries to ensure the list refreshes
-      queryClient.invalidateQueries({ queryKey: ["expenses"] })
-      queryClient.invalidateQueries({ queryKey: ["expenses", undefined] })
-      queryClient.invalidateQueries({ queryKey: ["expenses", null] })
+    onMutate: async (newExpenseData) => {
+      console.log("🚀 Starting optimistic update for expense:", newExpenseData.description)
       
-      toast({
-        title: "Personal expense created",
-        description: "Your personal expense has been created successfully.",
-      })
-      onOpenChange(false)
-      reset()
-      setSelectedFile(null)
-      setShowCurrencySelection(false)
+      // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
+      await queryClient.cancelQueries({ queryKey: ["expenses"] })
+      await queryClient.cancelQueries({ queryKey: ["recent-expenses"] })
+
+      // Snapshot the previous values for all queries
+      const previousData = {
+        expenses: queryClient.getQueryData(["expenses"]),
+        recentExpenses: queryClient.getQueryData(["recent-expenses"]),
+        expensesUndefined: queryClient.getQueryData(["expenses", undefined]),
+        expensesNull: queryClient.getQueryData(["expenses", null])
+      }
+
+      console.log("📊 Current query data:", previousData)
+
+      // Create the optimistic expense object
+      const tempId = `temp-${Date.now()}`
+      const optimisticExpense = {
+        _id: tempId,
+        id: tempId,
+        description: newExpenseData.description,
+        amount: newExpenseData.amount,
+        category: newExpenseData.category || 'other',
+        date: newExpenseData.date || new Date().toISOString(),
+        notes: newExpenseData.notes || '',
+        currencyCode: newExpenseData.currencyCode || user?.preferences?.currency || 'NPR',
+        createdBy: user?.id,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isPersonal: true,
+        splits: [{
+          userId: user?.id,
+          amount: newExpenseData.amount,
+          percentage: 100
+        }]
+      }
+
+      console.log("✨ Created optimistic expense:", optimisticExpense)
+
+      // Optimistically update all expense queries with better logic
+      const updateQueryData = (queryKey: any[], debugName: string) => {
+        queryClient.setQueryData(queryKey, (old: any) => {
+          console.log(`📝 Updating ${debugName} query:`, old)
+          
+          // Handle different data structures
+          if (!old) {
+            console.log(`➕ ${debugName}: Creating new data structure`)
+            return [optimisticExpense]
+          }
+          
+          if (Array.isArray(old)) {
+            console.log(`📋 ${debugName}: Direct array, adding to front`)
+            return [optimisticExpense, ...old]
+          }
+          
+          if (old.data && Array.isArray(old.data)) {
+            console.log(`📦 ${debugName}: Wrapped array, adding to front`)
+            return { ...old, data: [optimisticExpense, ...old.data] }
+          }
+          
+          if (old.expenses && Array.isArray(old.expenses)) {
+            console.log(`💼 ${debugName}: Expenses property, adding to front`)
+            return { ...old, expenses: [optimisticExpense, ...old.expenses] }
+          }
+          
+          console.log(`❓ ${debugName}: Unknown structure, returning as-is`)
+          return old
+        })
+      }
+
+      // Update all possible expense query variations
+      updateQueryData(["expenses"], "expenses")
+      updateQueryData(["expenses", undefined], "expenses-undefined")  
+      updateQueryData(["expenses", null], "expenses-null")
+      updateQueryData(["recent-expenses"], "recent-expenses")
+      
+      console.log("✅ Optimistic updates completed")
+
+      // Return a context object with the snapshotted value
+      return { previousData, optimisticExpense }
     },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to create personal expense",
-        variant: "destructive",
-      })
+    onSuccess: (data, variables, context) => {
+      console.log("✅ Expense created successfully, server response:", data)
+      
+      // Close dialog and reset form immediately
+      onOpenChange(false)
+      setTimeout(() => {
+        reset()
+        setSelectedFile(null)
+        setShowCurrencySelection(false)
+        setShowReceiptScanner(false)
+      }, 100)
+
+      // Force immediate refetch of all expense queries to get latest data
+      console.log("🔄 Force refetching all expense queries")
+      queryClient.refetchQueries({ queryKey: ["expenses"] })
+      queryClient.refetchQueries({ queryKey: ["recent-expenses"] })
+      
+      // Also invalidate analytics/dashboard queries
+      queryClient.invalidateQueries({ queryKey: ["analytics"] })
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+    },
+    onError: (error: any, variables, context) => {
+      console.log("❌ Expense creation failed, reverting optimistic updates")
+      
+      // If the mutation fails, use the context returned from onMutate to roll back
+      if (context?.previousData) {
+        // Revert all expense queries to their previous state
+        queryClient.setQueryData(["expenses"], context.previousData.expenses)
+        queryClient.setQueryData(["expenses", undefined], context.previousData.expensesUndefined)
+        queryClient.setQueryData(["expenses", null], context.previousData.expensesNull)
+        queryClient.setQueryData(["recent-expenses"], context.previousData.recentExpenses)
+        
+        console.log("🔄 Reverted all queries to previous state")
+      }
     },
   })
 
@@ -291,22 +379,14 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
     try {
       // Validate required fields
       if (!data.description || !data.amount || (typeof data.amount === 'number' && data.amount <= 0)) {
-        toast({
-          title: "Missing Information",
-          description: "Please fill in all required fields.",
-          variant: "destructive",
-        })
         return
       }
 
+      // Show immediate feedback that expense is being created
+      console.log("Creating personal expense with optimistic update...")
       createPersonalExpenseMutation.mutate(data)
     } catch (error) {
       console.error("Form submission error:", error)
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred. Please try again.",
-        variant: "destructive",
-      })
     }
   }
 
@@ -320,17 +400,60 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
       setShowCurrencySelection(false)
     } catch (error) {
       console.error("Currency selection error:", error)
-      toast({
-        title: "Error",
-        description: "Failed to set currency. Please try again.",
-        variant: "destructive",
-      })
+    }
+  }
+
+  const handleReceiptProcessed = (receiptData: any) => {
+    console.log("=== RECEIPT PROCESSING START ===")
+    console.log("Personal Expense Dialog - Received receipt data:", receiptData)
+    console.log("Dialog open state:", open)
+    console.log("User currency:", user?.preferences?.currency)
+    
+    try {
+      // Prepare the new form values
+      const newFormValues = {
+        category: receiptData.category || "other",
+        date: receiptData.date || new Date().toISOString().split('T')[0],
+        currencyCode: user?.preferences?.currency || "NPR",
+        description: receiptData.description || "",
+        amount: receiptData.amount || 0,
+      }
+      
+      console.log("Form values to set:", newFormValues)
+      
+      // Reset form with new values to ensure UI updates
+      reset(newFormValues)
+      console.log("Form reset completed")
+      
+      // Set the file separately
+      if (receiptData.receipt) {
+        console.log("Setting file:", receiptData.receipt.name)
+        setSelectedFile(receiptData.receipt)
+      }
+      
+      // Force a re-render and ensure dialog stays open
+      setTimeout(() => {
+        console.log("Triggering form validation")
+        trigger()
+        
+        // Ensure dialog stays open
+        if (!open) {
+          console.log("Dialog was closed, forcing it to stay open")
+          onOpenChange(true)
+        }
+      }, 100)
+
+      
+      console.log("=== RECEIPT PROCESSING END ===")
+    } catch (error) {
+      console.error("Error processing receipt data:", error)
+      console.error("Receipt data that caused error:", receiptData)
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md w-auto max-h-[85vh] mx-auto">
+      <DialogContent className="w-full max-w-md sm:max-w-lg max-h-[85vh] mx-auto">
         <DialogHeader className="space-y-2">
           <DialogTitle className="text-lg font-semibold">Create Personal Expense</DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground">
@@ -353,22 +476,21 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
           </div>
         )}
 
-        <div
-          {...getRootProps()}
-          className={`border-2 border-dashed rounded-lg p-2 text-center cursor-pointer transition-colors ${
-            isDragActive ? "border-primary bg-primary/10" : "border-muted-foreground/25"
-          }`}
-        >
-          <input {...getInputProps()} />
-          <Upload className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
-          <p className="text-xs text-muted-foreground">
-            {isDragActive
-              ? "Drop the receipt here..."
-              : "Drag & drop a receipt, or click to select"}
-          </p>
+        {/* Receipt Scanner */}
+        <div className="flex justify-center">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setShowReceiptScanner(true)}
+            className="h-7 px-3 text-xs"
+          >
+            <Scan className="h-3 w-3 mr-1" />
+            Smart Receipt Scanner
+          </Button>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-2">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
           <div className="space-y-1">
             <Label htmlFor="description" className="text-xs">Description</Label>
             <Input
@@ -381,7 +503,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
             {errors.description && <p className="text-xs text-destructive">{errors.description.message}</p>}
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label htmlFor="amount" className="text-xs">Amount</Label>
               <Input
@@ -459,7 +581,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
             {errors.notes && <p className="text-xs text-destructive">{errors.notes.message}</p>}
           </div>
 
-          <div className="flex justify-end gap-2 pt-1">
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-2">
             <Button
               type="button"
               variant="outline"
@@ -484,6 +606,13 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
           </div>
         </form>
       </DialogContent>
+
+      {/* Smart Receipt Scanner */}
+      <SmartReceiptScanner
+        open={showReceiptScanner}
+        onOpenChange={setShowReceiptScanner}
+        onReceiptProcessed={handleReceiptProcessed}
+      />
     </Dialog>
   )
 }

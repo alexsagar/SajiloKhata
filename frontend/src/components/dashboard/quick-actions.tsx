@@ -22,14 +22,14 @@ export function QuickActions() {
           <KanbanCardDescription>Common tasks to get you started</KanbanCardDescription>
         </KanbanCardHeader>
         <KanbanCardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
             {/* Personal Expense */}
             <div 
               className="h-24 flex flex-col items-center justify-center gap-2 rounded-xl bg-white/5 ring-1 ring-white/10 text-slate-200 hover:bg-white/7 transition-all duration-150 cursor-pointer group"
               onClick={() => setShowPersonalExpense(true)}
             >
-              <Wallet className="h-6 w-6 group-hover:text-emerald-400 transition-colors" />
-              <span className="text-sm font-medium">Personal Expense</span>
+              <Wallet className="h-7 w-7 group-hover:text-emerald-400 transition-colors" />
+              <span className="text-xs sm:text-sm font-medium text-center">Personal Expense</span>
             </div>
 
             {/* Group Expense */}
@@ -37,8 +37,8 @@ export function QuickActions() {
               className="h-24 flex flex-col items-center justify-center gap-2 rounded-xl bg-white/5 ring-1 ring-white/10 text-slate-200 hover:bg-white/7 transition-all duration-150 cursor-pointer group"
               onClick={() => setShowGroupExpense(true)}
             >
-              <Users className="h-6 w-6 group-hover:text-blue-400 transition-colors" />
-              <span className="text-sm font-medium">Group Expense</span>
+              <Users className="h-7 w-7 group-hover:text-blue-400 transition-colors" />
+              <span className="text-xs sm:text-sm font-medium text-center">Group Expense</span>
             </div>
 
             {/* Create Group */}
@@ -46,8 +46,8 @@ export function QuickActions() {
               className="h-24 flex flex-col items-center justify-center gap-2 rounded-xl bg-white/5 ring-1 ring-white/10 text-slate-200 hover:bg-white/7 transition-all duration-150 cursor-pointer group"
               onClick={() => setShowCreateGroup(true)}
             >
-              <Users className="h-6 w-6 group-hover:text-fuchsia-400 transition-colors" />
-              <span className="text-sm font-medium">Create Group</span>
+              <Users className="h-7 w-7 group-hover:text-fuchsia-400 transition-colors" />
+              <span className="text-xs sm:text-sm font-medium text-center">Create Group</span>
             </div>
 
             {/* Scan Receipt */}
@@ -55,8 +55,8 @@ export function QuickActions() {
               className="h-24 flex flex-col items-center justify-center gap-2 rounded-xl bg-white/5 ring-1 ring-white/10 text-slate-200 hover:bg-white/7 transition-all duration-150 cursor-pointer group"
               onClick={() => setShowScanReceipt(true)}
             >
-              <Scan className="h-6 w-6 group-hover:text-amber-400 transition-colors" />
-              <span className="text-sm font-medium">Scan Receipt</span>
+              <Scan className="h-7 w-7 group-hover:text-amber-400 transition-colors" />
+              <span className="text-xs sm:text-sm font-medium text-center">Scan Receipt</span>
             </div>
           </div>
 

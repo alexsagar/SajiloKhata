@@ -12,7 +12,7 @@ export function useLocalStorage<T>(key: string, initial: T) {
           setValue(JSON.parse(stored));
         }
       } catch (error) {
-        console.warn('Failed to get localStorage item:', error);
+        ;
       }
     }
   }, [key]);
@@ -23,7 +23,7 @@ export function useLocalStorage<T>(key: string, initial: T) {
       try {
         localStorage.setItem(key, JSON.stringify(val));
       } catch (error) {
-        console.warn('Failed to set localStorage item:', error);
+        ;
       }
     }
   };

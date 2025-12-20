@@ -157,7 +157,7 @@ export function copyToClipboard(text: string): Promise<void> {
     try {
       document.execCommand("copy")
     } catch (err) {
-      console.error("Fallback: Oops, unable to copy", err)
+      
     }
     document.body.removeChild(textArea)
     return Promise.resolve()

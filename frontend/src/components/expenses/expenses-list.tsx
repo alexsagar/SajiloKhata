@@ -62,9 +62,9 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
     deleteExpenseMutation.mutate(expenseId)
   }
 
-  console.log('ExpensesList - Query key:', ["expenses", groupId, filters])
-  console.log('ExpensesList - Query result:', expenses)
-  console.log('ExpensesList - Expenses count:', expenses?.data?.expenses?.length || 0)
+  
+  
+  
 
   if (isLoading) {
     return (

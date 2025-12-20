@@ -11,7 +11,7 @@ interface PendingAction {
 }
 
 class OfflineManager {
-  private storageKey = "khutrukey-pending-actions"
+  private storageKey = "SajiloKhata-pending-actions"
   private maxRetries = 3
 
   async getPendingActions(): Promise<PendingAction[]> {
@@ -22,7 +22,7 @@ class OfflineManager {
       }
       return []
     } catch (error) {
-      console.error("Failed to get pending actions:", error)
+      
       return []
     }
   }
@@ -40,7 +40,7 @@ class OfflineManager {
         localStorage.setItem(this.storageKey, JSON.stringify(actions))
       }
     } catch (error) {
-      console.error("Failed to add pending action:", error)
+      
     }
   }
 
@@ -52,7 +52,7 @@ class OfflineManager {
         localStorage.setItem(this.storageKey, JSON.stringify(filtered))
       }
     } catch (error) {
-      console.error("Failed to remove pending action:", error)
+      
     }
   }
 
@@ -64,7 +64,7 @@ class OfflineManager {
         await this.executeAction(action)
         await this.removePendingAction(action.id)
       } catch (error) {
-        console.error(`Failed to sync action ${action.id}:`, error)
+        
 
         if (action.retries < this.maxRetries) {
           action.retries++
@@ -105,7 +105,7 @@ class OfflineManager {
         await groupAPI.updateGroup(action.data.id, action.data)
         break
       default:
-        console.warn(`Unknown action type: ${action.type}`)
+        
     }
   }
 

@@ -25,7 +25,7 @@ class NotificationService {
 
       return notification
     } catch (error) {
-      console.error("Failed to create notification:", error)
+      
       throw error
     }
   }
@@ -57,7 +57,7 @@ class NotificationService {
 
       const template = emailTemplates[notification.type]
       if (!template) {
-        console.log(`No email template for notification type: ${notification.type}`)
+        
         return
       }
 
@@ -73,7 +73,7 @@ class NotificationService {
         },
       })
     } catch (error) {
-      console.error("Failed to send email notification:", error)
+      
     }
   }
 
@@ -87,7 +87,7 @@ class NotificationService {
 
       return notification
     } catch (error) {
-      console.error("Failed to mark notification as read:", error)
+      
       throw error
     }
   }
@@ -96,7 +96,7 @@ class NotificationService {
     try {
       await Notification.updateMany({ userId, read: false }, { read: true, readAt: new Date() })
     } catch (error) {
-      console.error("Failed to mark all notifications as read:", error)
+      
       throw error
     }
   }
@@ -127,7 +127,7 @@ class NotificationService {
         unreadCount,
       }
     } catch (error) {
-      console.error("Failed to get user notifications:", error)
+      
       throw error
     }
   }
@@ -136,7 +136,7 @@ class NotificationService {
     try {
       await Notification.findOneAndDelete({ _id: notificationId, userId })
     } catch (error) {
-      console.error("Failed to delete notification:", error)
+      
       throw error
     }
   }
@@ -164,7 +164,7 @@ class NotificationService {
         await this.sendEmailNotification(user, notification)
       }
     } catch (error) {
-      console.error("Failed to send bulk notifications:", error)
+      
       throw error
     }
   }
@@ -180,10 +180,10 @@ class NotificationService {
         read: true,
       })
 
-      console.log(`Cleaned up ${result.deletedCount} old notifications`)
+      
       return result.deletedCount
     } catch (error) {
-      console.error("Failed to cleanup old notifications:", error)
+      
       throw error
     }
   }

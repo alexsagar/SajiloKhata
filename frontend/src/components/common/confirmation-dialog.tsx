@@ -26,14 +26,14 @@ const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   loading = false,
 }) => (
   <Dialog open={open} onOpenChange={onCancel}>
-    <DialogContent className="max-w-sm w-auto max-h-[85vh] mx-auto">
+    <DialogContent className="w-full max-w-sm sm:max-w-md max-h-[85vh] mx-auto">
       <DialogHeader className="space-y-2">
-        <DialogTitle className="text-lg font-semibold">{title}</DialogTitle>
-        <DialogDescription className="text-xs text-muted-foreground">
+        <DialogTitle className="text-base sm:text-lg font-semibold">{title}</DialogTitle>
+        <DialogDescription className="text-xs sm:text-sm text-muted-foreground">
           {message}
         </DialogDescription>
       </DialogHeader>
-      <DialogFooter className="flex justify-end gap-2 pt-1">
+      <DialogFooter className="pt-2">
         <Button
           variant="outline"
           onClick={onCancel}

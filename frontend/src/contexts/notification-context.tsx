@@ -45,7 +45,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     } catch (error: any) {
       // Avoid spamming errors in console if the endpoint is not available
       if (process.env.NODE_ENV !== 'production') {
-        console.error("Failed to fetch notifications:", error)
+        
       }
       // Temporarily disable further fetch attempts for this session
       setDisabled(true)
@@ -61,7 +61,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       await notificationAPI.markAsRead(id)
       setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)))
     } catch (error) {
-      console.error("Failed to mark notification as read:", error)
+      
     }
   }
 
@@ -70,7 +70,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       await notificationAPI.markAllAsRead()
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
     } catch (error) {
-      console.error("Failed to mark all notifications as read:", error)
+      
     }
   }
 
@@ -79,7 +79,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       await notificationAPI.deleteNotification(id)
       setNotifications((prev) => prev.filter((n) => n.id !== id))
     } catch (error) {
-      console.error("Failed to delete notification:", error)
+      
     }
   }
 

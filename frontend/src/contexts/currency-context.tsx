@@ -7,6 +7,7 @@ interface CurrencyContextType {
   currency: string
   userCurrency: string
   setCurrency: (currency: string) => void
+  setUserCurrency: (currency: string) => void
   isUserCurrency: boolean // indicates if current currency matches user preference
 }
 
@@ -15,6 +16,16 @@ const CurrencyContext = createContext<CurrencyContextType | undefined>(undefined
 export function CurrencyProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
   const [currency, setCurrencyState] = useState<string>("USD")
+  const [overrideUserCurrency, setOverrideUserCurrency] = useState<string | null>(null)
+
+  // Initialize from localStorage on mount
+  useEffect(() => {
+    const savedCurrency = localStorage.getItem("user_currency")
+    if (savedCurrency) {
+      setCurrencyState(savedCurrency)
+      setOverrideUserCurrency(savedCurrency)
+    }
+  }, [])
 
   // Automatically set currency from user preferences
   useEffect(() => {
@@ -27,7 +38,13 @@ export function CurrencyProvider({ children }: { children: React.ReactNode }) {
     setCurrencyState(newCurrency)
   }
 
-  const userCurrency = user?.preferences?.currency || "USD"
+  // Set user currency (used during onboarding)
+  const setUserCurrency = (newCurrency: string) => {
+    setOverrideUserCurrency(newCurrency)
+    setCurrencyState(newCurrency)
+  }
+
+  const userCurrency = overrideUserCurrency || user?.preferences?.currency || "USD"
   const isUserCurrency = currency === userCurrency
 
   return (
@@ -36,6 +53,7 @@ export function CurrencyProvider({ children }: { children: React.ReactNode }) {
         currency,
         userCurrency,
         setCurrency,
+        setUserCurrency,
         isUserCurrency,
       }}
     >

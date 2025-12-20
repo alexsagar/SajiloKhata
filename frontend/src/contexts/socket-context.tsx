@@ -25,10 +25,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated } = useAuth()
 
   useEffect(() => {
-    console.log("[SOCKET] useEffect triggered - isAuthenticated:", isAuthenticated, "user:", !!user, "window:", typeof window !== 'undefined')
+    
 
     if (isAuthenticated && user && typeof window !== 'undefined') {
-      console.log("[SOCKET] Initializing socket connection with cookie authentication...")
+      
 
       const newSocket = io(process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5000", {
         transports: ["websocket", "polling"],
@@ -37,7 +37,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       })
 
       newSocket.on("connect", () => {
-        console.log("[SOCKET] ✅ Connected to server! Socket ID:", newSocket.id)
+        
         setIsConnected(true)
         // Emit presence when connected
         newSocket.emit('presence:online')
@@ -46,13 +46,13 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       })
 
       newSocket.on("disconnect", () => {
-        console.log("[SOCKET] ❌ Disconnected from server")
+        
         setIsConnected(false)
         setOnlineUsers([])
       })
 
       newSocket.on("connect_error", (error) => {
-        console.error("[SOCKET] ⚠️ Connection error:", error.message, error)
+        
         setIsConnected(false)
         setOnlineUsers([])
       })
@@ -65,6 +65,14 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         })
       })
 
+      // Listen for reminder notifications
+      newSocket.on("notification:reminder", (payload) => {
+        toast({
+          title: "Reminder",
+          description: payload?.message || "You have an upcoming reminder",
+        })
+      })
+
       // Chat message relay for UI to subscribe to
       newSocket.on("message:new", (payload) => {
         window.dispatchEvent(new CustomEvent("socket:message:new", { detail: payload }))
@@ -73,7 +81,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       // Presence handling - Update local state AND dispatch events
       newSocket.on("presence:online", (payload) => {
         const userId = String(payload.userId)
-        console.log("[SOCKET] User online:", userId)
+        
         setOnlineUsers(prev => {
           if (prev.includes(userId)) return prev
           return [...prev, userId]
@@ -83,13 +91,13 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
       newSocket.on("presence:offline", (payload) => {
         const userId = String(payload.userId)
-        console.log("[SOCKET] User offline:", userId)
+        
         setOnlineUsers(prev => prev.filter(id => id !== userId))
         window.dispatchEvent(new CustomEvent("socket:presence:offline", { detail: payload }))
       })
 
       newSocket.on("presence:state", (payload) => {
-        console.log("[SOCKET] Received presence state:", payload)
+        
         const ids = (payload.onlineUserIds || []).map((id: any) => String(id))
         setOnlineUsers(ids)
         window.dispatchEvent(new CustomEvent("socket:presence:state", { detail: payload }))
@@ -158,10 +166,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
   const joinConversations = useCallback((conversationIds: string[]) => {
     if (!socket || !isConnected) {
-      console.log("[SOCKET] Cannot join - socket:", !!socket, "isConnected:", isConnected, "ids:", conversationIds)
+      
       return
     }
-    console.log("[SOCKET] Joining conversations:", conversationIds)
+    
     conversationIds.forEach(id => socket.emit("conversation:join", { conversationId: id }))
   }, [socket, isConnected])
 

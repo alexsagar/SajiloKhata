@@ -23,6 +23,8 @@ import {
   UserPlus
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { formatCurrencyWithSymbol } from "@/lib/currency"
+import { useAuth } from "@/contexts/auth-context"
 
 interface Friend {
   id: string
@@ -57,6 +59,8 @@ const mockFriends: Friend[] = []
 const mockGroups: Group[] = []
 
 export function EnhancedCreateExpenseDialog({ children, groupId, onExpenseCreated }: CreateExpenseDialogProps) {
+  const { user } = useAuth()
+  const userCurrency = user?.preferences?.currency || "USD"
   const [isOpen, setIsOpen] = useState(false)
   const [expenseTitle, setExpenseTitle] = useState('')
   const [expenseAmount, setExpenseAmount] = useState('')
@@ -119,10 +123,6 @@ export function EnhancedCreateExpenseDialog({ children, groupId, onExpenseCreate
 
     setParticipants(prev => [...prev, ...newParticipants])
     
-    toast({
-      title: "Group members added",
-      description: `Added ${newParticipants.length} members from ${group.name}`,
-    })
   }
 
   const handleRemoveParticipant = (participantId: string) => {
@@ -151,31 +151,16 @@ export function EnhancedCreateExpenseDialog({ children, groupId, onExpenseCreate
 
   const handleCreateExpense = () => {
     if (!expenseTitle.trim()) {
-      toast({
-        title: "Title required",
-        description: "Please enter a title for the expense.",
-        variant: "destructive"
-      })
       return
     }
 
     if (!expenseAmount || parseFloat(expenseAmount) <= 0) {
-      toast({
-        title: "Amount required",
-        description: "Please enter a valid amount.",
-        variant: "destructive"
-      })
       return
     }
 
     const selectedParticipants = [currentUser, ...participants.filter(p => p.isSelected)]
     
     if (selectedParticipants.length < 2) {
-      toast({
-        title: "Add participants",
-        description: "Please add at least one other person to split the expense with.",
-        variant: "destructive"
-      })
       return
     }
 
@@ -184,11 +169,6 @@ export function EnhancedCreateExpenseDialog({ children, groupId, onExpenseCreate
     const expenseTotal = parseFloat(expenseAmount)
 
     if (splitMethod === 'custom' && Math.abs(totalSplitAmount - expenseTotal) > 0.01) {
-      toast({
-        title: "Split amounts don't match",
-        description: `Split total (${totalSplitAmount.toFixed(2)}) doesn't equal expense amount (${expenseTotal.toFixed(2)}).`,
-        variant: "destructive"
-      })
       return
     }
 
@@ -218,10 +198,6 @@ export function EnhancedCreateExpenseDialog({ children, groupId, onExpenseCreate
 
     onExpenseCreated?.(newExpense)
 
-    toast({
-      title: "Expense created!",
-      description: `Created "${newExpense.title}" for $${newExpense.amount} split between ${splits.length} people.`,
-    })
   }
 
   const splits = calculateSplit()
@@ -234,7 +210,7 @@ export function EnhancedCreateExpenseDialog({ children, groupId, onExpenseCreate
       </div>
       
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="max-w-md w-auto max-h-[85vh] mx-auto">
+        <DialogContent className="w-full max-w-md sm:max-w-lg max-h-[85vh] mx-auto">
           <DialogHeader>
             <DialogTitle>Create New Expense</DialogTitle>
             <DialogDescription>
@@ -443,7 +419,7 @@ export function EnhancedCreateExpenseDialog({ children, groupId, onExpenseCreate
                         />
                       ) : (
                         <div className="text-right">
-                          <div className="font-semibold">${participant.amount.toFixed(2)}</div>
+                          <div className="font-semibold">{formatCurrencyWithSymbol(participant.amount, userCurrency)}</div>
                         </div>
                       )}
                       
@@ -462,7 +438,7 @@ export function EnhancedCreateExpenseDialog({ children, groupId, onExpenseCreate
                   {totalAmount > 0 && (
                     <div className="flex justify-between items-center pt-2 border-t">
                       <span className="font-medium">Total:</span>
-                      <span className="font-bold text-lg">${totalAmount.toFixed(2)}</span>
+                      <span className="font-bold text-lg">{formatCurrencyWithSymbol(totalAmount, userCurrency)}</span>
                     </div>
                   )}
                 </div>

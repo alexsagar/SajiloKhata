@@ -67,7 +67,7 @@ export function ExpenseChart() {
   return (
     <div className="space-y-6">
       {/* Expense Type Overview */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
           <div className="flex items-center space-x-3">
             <div className="p-2 bg-blue-500/20 rounded-full">

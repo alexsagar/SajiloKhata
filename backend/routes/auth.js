@@ -58,7 +58,7 @@ router.post(
       try {
         await sendEmail({
           to: email,
-          subject: "Verify your Khutrukey account",
+          subject: "Verify your SajiloKhata account",
           template: "emailVerification",
           data: {
             firstName,
@@ -66,7 +66,7 @@ router.post(
           },
         })
       } catch (emailError) {
-        console.error("Failed to send verification email:", emailError)
+        
       }
 
       // Don't generate tokens - user needs to login separately
@@ -202,7 +202,7 @@ router.post("/forgot-password", [body("email").isEmail().normalizeEmail()], asyn
     try {
       await sendEmail({
         to: email,
-        subject: "Reset your Khutrukey password",
+        subject: "Reset your SajiloKhata password",
         template: "passwordReset",
         data: {
           firstName: user.firstName,
@@ -210,7 +210,7 @@ router.post("/forgot-password", [body("email").isEmail().normalizeEmail()], asyn
         },
       })
     } catch (emailError) {
-      console.error("Failed to send reset email:", emailError)
+      
     }
 
     res.json({ message: "If an account with that email exists, a password reset link has been sent." })
@@ -250,6 +250,105 @@ router.post("/logout", authenticateToken, async (req, res) => {
     .clearCookie('accessToken')
     .clearCookie('refreshToken')
     .json({ success: true })
+})
+
+// OAuth Login/Register - handles Google and Facebook OAuth users
+router.post("/oauth", async (req, res) => {
+  try {
+    const { provider, providerId, email, name, firstName, lastName, avatar, accessToken } = req.body
+
+    // Validate required fields
+    if (!provider || !providerId || !email) {
+      return res.status(400).json({ 
+        message: "Missing required OAuth fields: provider, providerId, and email are required" 
+      })
+    }
+
+    // Validate provider
+    if (!["google", "facebook"].includes(provider)) {
+      return res.status(400).json({ message: "Invalid OAuth provider" })
+    }
+
+    // Try to find existing user by OAuth provider ID or email
+    let user = await User.findOne({
+      $or: [
+        { oauthProvider: provider, oauthProviderId: providerId },
+        { email: email.toLowerCase() }
+      ]
+    })
+
+    if (user) {
+      // User exists - update OAuth info if needed
+      if (!user.oauthProvider) {
+        // User registered with email/password, now linking OAuth
+        user.oauthProvider = provider
+        user.oauthProviderId = providerId
+      }
+      
+      // Update avatar if provided and user doesn't have one
+      if (avatar && !user.avatar) {
+        user.avatar = avatar
+      }
+      
+      // Update last login
+      user.lastLogin = new Date()
+      await user.save()
+    } else {
+      // Create new OAuth user
+      const fName = firstName || name?.split(" ")[0] || "User"
+      const lName = lastName || name?.split(" ").slice(1).join(" ") || ""
+      
+      // Generate a unique username from email
+      const baseUsername = email.split("@")[0].replace(/[^a-zA-Z0-9]/g, "").toLowerCase()
+      let username = baseUsername
+      let counter = 1
+      
+      // Check if username exists and generate unique one
+      while (await User.findOne({ username })) {
+        username = `${baseUsername}${counter}`
+        counter++
+      }
+
+      user = new User({
+        email: email.toLowerCase(),
+        username,
+        firstName: fName,
+        lastName: lName,
+        avatar: avatar || null,
+        oauthProvider: provider,
+        oauthProviderId: providerId,
+        isEmailVerified: true, // OAuth emails are pre-verified
+        isActive: true,
+        lastLogin: new Date(),
+      })
+
+      await user.save()
+    }
+
+    // Generate tokens for the user
+    const { accessToken: jwtAccessToken, refreshToken } = generateTokens(user._id)
+    
+    // Set cookies
+    const inferredSecure = process.env.COOKIE_SECURE 
+      ? (process.env.COOKIE_SECURE === 'true') 
+      : (process.env.CLIENT_URL?.startsWith('https') || process.env.NODE_ENV === 'production')
+    const inferredSameSite = process.env.COOKIE_SAMESITE || (inferredSecure ? 'None' : 'Lax')
+    const common = { httpOnly: true, sameSite: inferredSameSite, secure: inferredSecure, path: '/' }
+    
+    res
+      .cookie('accessToken', jwtAccessToken, { ...common, maxAge: 15 * 60 * 1000 })
+      .cookie('refreshToken', refreshToken, { ...common, maxAge: 7 * 24 * 60 * 60 * 1000 })
+      .json({ 
+        success: true, 
+        data: { 
+          user: user.toJSON(),
+          isNewUser: !user.lastLogin || (Date.now() - new Date(user.lastLogin).getTime() < 5000)
+        } 
+      })
+  } catch (error) {
+    console.error("OAuth error:", error)
+    res.status(500).json({ message: "Server error during OAuth", error: error.message })
+  }
 })
 
 module.exports = router

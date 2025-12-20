@@ -7,11 +7,16 @@ import { Users, DollarSign, Calendar, MoreHorizontal } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { groupAPI } from "@/lib/api"
 import { LoadingSpinner } from "@/components/common/loading-spinner"
-import { formatCurrency, formatDate } from "@/lib/utils"
+import { formatDate } from "@/lib/utils"
+import { formatCurrencyWithSymbol } from "@/lib/currency"
+import { useAuth } from "@/contexts/auth-context"
 import Link from "next/link"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 export function GroupsList() {
+  const { user } = useAuth()
+  const userCurrency = user?.preferences?.currency || "USD"
+  
   const { data: groups, isLoading } = useQuery({
     queryKey: ["user-groups"],
     queryFn: () => groupAPI.getGroups(),
@@ -77,7 +82,7 @@ export function GroupsList() {
 
               <div className="flex items-center text-sm">
                 <DollarSign className="h-4 w-4 mr-2 text-muted-foreground" />
-                <span className="font-medium">{formatCurrency(group.totalExpenses || 0)}</span>
+                <span className="font-medium">{formatCurrencyWithSymbol(group.totalExpenses || 0, userCurrency)}</span>
                 <span className="text-muted-foreground ml-1">total expenses</span>
               </div>
 

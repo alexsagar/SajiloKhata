@@ -6,6 +6,7 @@ import "./globals.css"
 // Removed theme provider - now dark-only
 import { QueryProvider } from "@/components/providers/query-provider"
 import { ToastProvider } from "@/components/providers/toast-provider"
+import { SessionProvider } from "@/components/providers/session-provider"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { MobileSidebarProvider } from "@/contexts/mobile-sidebar-context"
 import { AuthProvider } from "@/contexts/auth-context"
@@ -16,18 +17,19 @@ import { OfflineProvider } from "@/contexts/offline-context"
 import { Toaster } from "@/components/ui/toaster"
 import { OfflineIndicator } from "@/components/offline/offline-indicator"
 import { ErrorBoundary } from "@/components/common/error-boundary"
+import { OnboardingProvider } from "@/components/onboarding/onboarding-provider"
 
 const inter = Inter({ subsets: ["latin"] })
 
 // ✅ This remains for SEO
 export const metadata: Metadata = {
-  title: "Khutrukey - Smart Expense Sharing",
+  title: "SajiloKhata - Smart Expense Sharing",
   description: "Split expenses with friends and family easily with AI-powered features",
   manifest: "/manifest.json",
   keywords: ["expense sharing", "split bills", "group expenses", "money management"],
-  authors: [{ name: "Khutrukey Team" }],
+  authors: [{ name: "SajiloKhata Team" }],
   openGraph: {
-    title: "Khutrukey - Smart Expense Sharing",
+    title: "SajiloKhata - Smart Expense Sharing",
     description: "Split expenses with friends and family easily",
     type: "website",
     locale: "en_US",
@@ -58,8 +60,9 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} dark`}>
         <ErrorBoundary>
-          <QueryProvider>
-            <AuthProvider>
+          <SessionProvider>
+            <QueryProvider>
+              <AuthProvider>
               <CurrencyProvider>
                 <NotificationProvider>
                   <SocketProvider>
@@ -67,7 +70,9 @@ export default function RootLayout({
                       <SidebarProvider>
                         <MobileSidebarProvider>
                           <ToastProvider>
-                            {children}
+                            <OnboardingProvider>
+                              {children}
+                            </OnboardingProvider>
                             <Toaster />
                             <OfflineIndicator />
                           </ToastProvider>
@@ -77,8 +82,9 @@ export default function RootLayout({
                   </SocketProvider>
                 </NotificationProvider>
               </CurrencyProvider>
-            </AuthProvider>
-          </QueryProvider>
+              </AuthProvider>
+            </QueryProvider>
+          </SessionProvider>
         </ErrorBoundary>
       </body>
     </html>

@@ -35,7 +35,7 @@ export default function ExpensesPage() {
         title="Expenses"
         description="View and manage all your expenses"
       />
-      <div className="flex flex-1 flex-col gap-4 p-4">
+      <div className="mt-3 sm:mt-4 flex flex-1 flex-col gap-4 w-full max-w-full overflow-x-hidden">
         <ExpenseCreationOptions />
         <ExpenseFilters onFiltersChange={handleFiltersChange} />
         <ExpensesList filters={filters} />

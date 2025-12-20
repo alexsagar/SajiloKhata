@@ -220,7 +220,7 @@ router.get("/kpis", async (req, res) => {
       baseCurrency
     })
   } catch (error) {
-    console.error('KPIs calculation error:', error)
+    
     return fail(res, 'Failed to calculate KPIs', 500)
   }
 })
@@ -281,7 +281,7 @@ router.get("/spend-over-time", async (req, res) => {
       baseCurrency
     })
   } catch (error) {
-    console.error('Spend over time error:', error)
+    
     return fail(res, 'Failed to get spend over time data', 500)
   }
 })
@@ -320,7 +320,7 @@ router.get("/category-breakdown", async (req, res) => {
       baseCurrency
     })
   } catch (error) {
-    console.error('Category breakdown error:', error)
+    
     return fail(res, 'Failed to get category breakdown', 500)
   }
 })
@@ -407,7 +407,7 @@ router.get("/top-partners", async (req, res) => {
       baseCurrency
     })
   } catch (error) {
-    console.error('Top partners error:', error)
+    
     return fail(res, 'Failed to get top partners data', 500)
   }
 })
@@ -443,7 +443,7 @@ router.get("/balance-matrix", async (req, res) => {
       groupName: group.name
     })
   } catch (error) {
-    console.error('Balance matrix error:', error)
+    
     return fail(res, 'Failed to get balance matrix', 500)
   }
 })
@@ -479,7 +479,7 @@ router.get("/simplify", async (req, res) => {
       groupName: group.name
     })
   } catch (error) {
-    console.error('Settlement suggestions error:', error)
+    
     return fail(res, 'Failed to get settlement suggestions', 500)
   }
 })
@@ -506,7 +506,7 @@ router.get("/aging", async (req, res) => {
       baseCurrency
     })
   } catch (error) {
-    console.error('Aging buckets error:', error)
+    
     return fail(res, 'Failed to get aging data', 500)
   }
 })
@@ -559,7 +559,7 @@ router.get("/ledger", async (req, res) => {
       baseCurrency
     })
   } catch (error) {
-    console.error('Ledger export error:', error)
+    
     return fail(res, 'Failed to get ledger data', 500)
   }
 })
@@ -604,7 +604,7 @@ router.get("/export/csv", async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="expenses-${new Date().toISOString().split('T')[0]}.csv"`)
     res.send(csv)
   } catch (error) {
-    console.error('CSV export error:', error)
+    
     return fail(res, 'Failed to export CSV', 500)
   }
 })
@@ -689,7 +689,7 @@ router.get("/group-health", async (req, res) => {
       groupName: group.name
     })
   } catch (error) {
-    console.error('Group health error:', error)
+    
     return fail(res, 'Failed to get group health metrics', 500)
   }
 })

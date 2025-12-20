@@ -40,7 +40,7 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       await offlineManager.syncPendingActions()
       setPendingActions([])
     } catch (error) {
-      console.error("Failed to sync pending actions:", error)
+      
     }
   }
 

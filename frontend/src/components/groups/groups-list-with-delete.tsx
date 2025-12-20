@@ -8,13 +8,17 @@ import { Users, DollarSign, Calendar, MoreHorizontal, Trash2, Settings, UserPlus
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { groupAPI } from "@/lib/api"
 import { LoadingSpinner } from "@/components/common/loading-spinner"
-import { formatCurrency, formatDate } from "@/lib/utils"
+import { formatDate } from "@/lib/utils"
+import { formatCurrencyWithSymbol } from "@/lib/currency"
+import { useAuth } from "@/contexts/auth-context"
 import Link from "next/link"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
 
 export function GroupsListWithDelete() {
+  const { user } = useAuth()
+  const userCurrency = user?.preferences?.currency || "USD"
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [groupToDelete, setGroupToDelete] = useState<any>(null)
   const { toast } = useToast()
@@ -137,7 +141,7 @@ export function GroupsListWithDelete() {
 
                 <div className="flex items-center text-sm">
                   <DollarSign className="h-4 w-4 mr-2 text-muted-foreground" />
-                  <span className="font-medium">{formatCurrency(group.totalExpenses || 0)}</span>
+                  <span className="font-medium">{formatCurrencyWithSymbol(group.totalExpenses || 0, userCurrency)}</span>
                   <span className="text-muted-foreground ml-1">total expenses</span>
                 </div>
 
@@ -196,7 +200,7 @@ export function GroupsListWithDelete() {
                 </div>
                 <div className="text-xs text-yellow-700 mt-1">
                   {groupToDelete.totalExpenses > 0 && (
-                    <p>This group has {formatCurrency(groupToDelete.totalExpenses)} in total expenses.</p>
+                    <p>This group has {formatCurrencyWithSymbol(groupToDelete.totalExpenses, userCurrency)} in total expenses.</p>
                   )}
                   {(groupToDelete.members?.length || 0) > 1 && (
                     <p>This group has {groupToDelete.members?.length || 0} members who will lose access.</p>

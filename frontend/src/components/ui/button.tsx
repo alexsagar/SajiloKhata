@@ -18,7 +18,7 @@ const buttonVariants = cva(
         secondary:
           "bg-white/5 ring-1 ring-white/10 text-slate-200 hover:bg-white/7 active:bg-white/10 rounded-xl px-3.5 py-2 font-medium focus:ring-2 focus:ring-white/20 min-h-[44px] sm:min-h-auto",
         ghost:
-          "text-slate-300 hover:bg-white/5 hover:text-white active:bg-white/10 rounded-xl px-3.5 py-2 font-medium focus:ring-2 focus:ring-white/20 min-h-[44px] sm:min-h-auto",
+          "text-slate-300 hover:bg-white/5 hover:text-white active:bg-white/10 rounded-xl px-3.5 py-2 font-medium focus:ring-2 focus:ring-white/20 min-h-[44px] sm:min-h-auto ring-1 ring-transparent hover:ring-white/10",
         link: "text-emerald-400 underline-offset-4 hover:underline hover:text-emerald-300 active:text-emerald-500 min-h-[44px] sm:min-h-auto",
       },
       size: {

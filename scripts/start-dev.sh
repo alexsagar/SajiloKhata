@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Development startup script for Khutrukey application
+# Development startup script for SajiloKhata application
 
-echo "🚀 Starting Khutrukey Development Environment"
+echo "🚀 Starting SajiloKhata Development Environment"
 echo "============================================="
 
 # Check if Node.js is installed
@@ -68,7 +68,7 @@ npm run dev &
 FRONTEND_PID=$!
 
 echo ""
-echo "✅ Khutrukey is starting up!"
+echo "✅ SajiloKhata is starting up!"
 echo "📊 Backend:  http://localhost:5000"
 echo "🌐 Frontend: http://localhost:3000"
 echo "📚 API Docs: http://localhost:5000/api/health"

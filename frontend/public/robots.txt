@@ -7,4 +7,4 @@ Disallow: /settings/
 Disallow: /api/
 
 # Sitemap
-Sitemap: https://khutrukey.app/sitemap.xml
+Sitemap: https://sajilokhata.app/sitemap.xml

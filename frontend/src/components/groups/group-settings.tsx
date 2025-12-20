@@ -52,7 +52,7 @@ export function GroupSettings({ groupId }: GroupSettingsProps) {
 
   const updateGroupMutation = useMutation({
     mutationFn: (data: any) => {
-      console.log("Updating group with data:", data)
+      
       return groupAPI.updateGroup(groupId, data)
     },
     onSuccess: () => {
@@ -64,9 +64,9 @@ export function GroupSettings({ groupId }: GroupSettingsProps) {
       })
     },
     onError: (error: any) => {
-      console.error("Group update error:", error)
-      console.error("Error response:", error.response)
-      console.error("Error data:", error.response?.data)
+      
+      
+      
       
       const errorMessage = error.response?.data?.message || 
                           error.response?.data?.error || 
@@ -103,10 +103,10 @@ export function GroupSettings({ groupId }: GroupSettingsProps) {
         },
       }
 
-      console.log("Saving group settings:", updateData)
+      
       updateGroupMutation.mutate(updateData)
     } catch (error) {
-      console.error("Error in handleSave:", error)
+      
       toast({
         title: "Error",
         description: "An unexpected error occurred while saving",

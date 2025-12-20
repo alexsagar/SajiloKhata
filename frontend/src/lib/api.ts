@@ -43,7 +43,7 @@ api.interceptors.response.use(
         return api(originalRequest)
       } catch (refreshError) {
         // Refresh token failed - session expired, redirect to login
-        console.log('[API] Session expired, redirecting to login')
+        
         if (typeof window !== 'undefined') {
           localStorage.removeItem('accessToken')
           window.location.href = '/login'
@@ -71,6 +71,16 @@ export const authAPI = {
   me: () => api.get("/auth/me"),
   forgotPassword: (email: string) => api.post("/auth/forgot-password", { email }),
   resetPassword: (token: string, password: string) => api.post("/auth/reset-password", { token, password }),
+  // OAuth login - syncs OAuth user with backend
+  oauthLogin: (data: {
+    provider: string
+    providerId: string
+    email: string
+    name?: string
+    firstName?: string
+    lastName?: string
+    avatar?: string
+  }) => api.post("/auth/oauth", data),
 }
 
 export const userAPI = {
@@ -232,7 +242,23 @@ export const calendarAPI = {
   connectProvider: (provider: string, data: any) => api.post(`/calendar/connect/${provider}`, data),
   disconnectProvider: (provider: string) => api.delete(`/calendar/disconnect/${provider}`),
   syncEvents: () => api.post("/calendar/sync"),
-  getEvents: () => api.get("/calendar/events"),
+  getEvents: (params: { start: string; end: string; groupId?: string }) =>
+    api.get("/calendar/events", { params }),
+}
+
+export const reminderAPI = {
+  create: (data: {
+    title: string
+    description?: string
+    dueDate: string // YYYY-MM-DD
+    amount?: number
+    category?: string
+  }) => api.post("/reminders", data),
+  getMonth: (params: { year: number; month: number }) =>
+    api.get("/reminders/month", { params }),
+  getAll: () => api.get("/reminders"),
+  updateStatus: (id: string, status: "pending" | "done" | "cancelled") =>
+    api.patch(`/reminders/${id}`, { status }),
 }
 
 export const adminAPI = {

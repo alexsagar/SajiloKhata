@@ -13,7 +13,7 @@ import { ChevronLeft, ChevronRight, Plus, Receipt, DollarSign, Calendar, Filter,
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { calendarAPI, expenseAPI, groupAPI } from "@/lib/api"
+import { calendarAPI, expenseAPI, groupAPI, reminderAPI } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
 import { useCurrency } from "@/contexts/currency-context"
 import { formatCurrency } from "@/lib/utils"
@@ -38,6 +38,8 @@ interface CalendarDay {
   expenses?: any[]
   totalBaseCents?: number
   count?: number
+  reminders?: any[]
+  expenseTitles?: string[]
 }
 
 interface CalendarFilters {
@@ -49,11 +51,17 @@ export function ExpenseCalendar() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false)
+  const [isAddReminderOpen, setIsAddReminderOpen] = useState(false)
+  const [entryType, setEntryType] = useState<"expense" | "reminder">("expense")
+  const [reminderTitle, setReminderTitle] = useState("")
+  const [reminderDescription, setReminderDescription] = useState("")
+  const [reminderAmount, setReminderAmount] = useState<number | undefined>(undefined)
+  const [reminderCategory, setReminderCategory] = useState<string>("utilities")
   const [filters, setFilters] = useState<CalendarFilters>({
     mode: 'all',
     groupIds: []
   })
-  
+
   const { toast } = useToast()
   const { user } = useAuth()
   const { currency: userCurrency } = useCurrency()
@@ -75,6 +83,26 @@ export function ExpenseCalendar() {
     queryFn: () => groupAPI.getGroups(),
   })
 
+  // Fetch reminders for the month
+  const { data: remindersData } = useQuery({
+    queryKey: ['calendar-reminders', year, month],
+    queryFn: () => reminderAPI.getMonth({ year, month }),
+  })
+
+  // Fetch expense events for the month (to get titles)
+  const monthStart = new Date(year, month - 1, 1).toISOString()
+  const monthEnd = new Date(year, month, 0, 23, 59, 59, 999).toISOString()
+  const { data: eventsData } = useQuery({
+    queryKey: ['calendar-events', year, month, filters],
+    queryFn: () =>
+      calendarAPI.getEvents({
+        start: monthStart,
+        end: monthEnd,
+        // only pass groupId when in group mode and a single group is selected
+        groupId: filters.mode === 'group' && filters.groupIds.length === 1 ? filters.groupIds[0] : undefined,
+      }),
+  })
+
   // Create expense mutation
   const createExpenseMutation = useMutation({
     mutationFn: async (data: CreateExpenseFormData) => {
@@ -87,14 +115,14 @@ export function ExpenseCalendar() {
       if (data.groupId) formData.append('groupId', data.groupId)
       if (data.splitType) formData.append('splitType', data.splitType)
       if (data.currencyCode) formData.append('currencyCode', data.currencyCode)
-      
+
       // Add required createdBy field
       if (user?.id) {
         formData.append('createdBy', user.id)
       } else {
         throw new Error('User not authenticated')
       }
-      
+
       return expenseAPI.createExpense(formData)
     },
     onSuccess: () => {
@@ -104,12 +132,12 @@ export function ExpenseCalendar() {
       })
       setIsAddExpenseOpen(false)
       form.reset()
-      
+
       // Invalidate all expense-related queries to ensure the list refreshes
       queryClient.invalidateQueries({ queryKey: ["expenses"] })
       queryClient.invalidateQueries({ queryKey: ["expenses", undefined] })
       queryClient.invalidateQueries({ queryKey: ["expenses", null] })
-      
+
       // Invalidate calendar and analytics queries
       queryClient.invalidateQueries({ queryKey: ['calendar-month'] })
       queryClient.invalidateQueries({ queryKey: ['analytics-kpis'] })
@@ -149,7 +177,7 @@ export function ExpenseCalendar() {
   // Update currency when group changes
   const selectedGroupId = form.watch('groupId')
   const selectedGroup = (groupsData as any)?.data?.data?.find((g: any) => g._id === selectedGroupId)
-  
+
   useEffect(() => {
     if (filters.mode === 'personal') {
       form.setValue('currencyCode', userCurrency)
@@ -172,7 +200,29 @@ export function ExpenseCalendar() {
 
   const handleDateClick = (date: string) => {
     setSelectedDate(date)
-    setIsAddExpenseOpen(true)
+
+    // Check if this date has any reminders; if so, open reminder dialog prefilled
+    const reminderList = (remindersData as any)?.data?.data || []
+    const remindersForDate = reminderList.filter((r: any) => {
+      if (!r?.dueDate) return false
+      const key = String(r.dueDate).split("T")[0]
+      return key === date
+    })
+
+    if (remindersForDate.length > 0) {
+      const first = remindersForDate[0]
+      setReminderTitle(first.title || "")
+      setReminderDescription(first.description || "")
+      setReminderAmount(typeof first.amount === "number" ? first.amount : undefined)
+      setReminderCategory(first.category || "utilities")
+      setEntryType("reminder")
+      setIsAddExpenseOpen(false)
+      setIsAddReminderOpen(true)
+    } else {
+      setEntryType("expense")
+      setIsAddReminderOpen(false)
+      setIsAddExpenseOpen(true)
+    }
   }
 
   const handleAddExpense = (data: CreateExpenseFormData) => {
@@ -185,7 +235,7 @@ export function ExpenseCalendar() {
       })
       return
     }
-    
+
     createExpenseMutation.mutate(data)
   }
 
@@ -199,41 +249,70 @@ export function ExpenseCalendar() {
     const daysInMonth = new Date(year, month, 0).getDate()
     const daysInPrevMonth = new Date(year, month - 1, 0).getDate()
 
+    // Map reminders by date (YYYY-MM-DD)
+    const remindersByDate = new Map<string, any[]>()
+    const reminderList = (remindersData as any)?.data?.data || []
+    reminderList.forEach((r: any) => {
+      if (!r?.dueDate) return
+      const dateKey = String(r.dueDate).split('T')[0]
+      if (!remindersByDate.has(dateKey)) remindersByDate.set(dateKey, [])
+      remindersByDate.get(dateKey)!.push(r)
+    })
+
+    // Map expense events by date (YYYY-MM-DD) to capture titles
+    const expensesByDate = new Map<string, any[]>()
+    const eventsList = (eventsData as any)?.data?.events || []
+    eventsList.forEach((ev: any) => {
+      if (!ev?.start) return
+      const dateKey = new Date(ev.start).toISOString().split('T')[0]
+      if (!expensesByDate.has(dateKey)) expensesByDate.set(dateKey, [])
+      expensesByDate.get(dateKey)!.push(ev)
+    })
+
     const calendarDays: CalendarDay[] = []
-    
+
     // Previous month days
     for (let i = firstDay - 1; i >= 0; i--) {
       const day = daysInPrevMonth - i
       const date = `${year}-${String(month - 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      const expenseTitles = (expensesByDate.get(date) || []).map((e: any) => e.title).slice(0, 2)
       calendarDays.push({
         day,
         isCurrentMonth: false,
-        date
+        date,
+        reminders: remindersByDate.get(date) || [],
+        expenseTitles,
       })
     }
-    
+
     // Current month days
     for (let day = 1; day <= daysInMonth; day++) {
       const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
       const dayData = monthData?.data?.days?.find((d: any) => d.date === date)
-      
+      const expenseTitles = (expensesByDate.get(date) || []).map((e: any) => e.title).slice(0, 2)
+
       calendarDays.push({
         day,
         isCurrentMonth: true,
         date,
         totalBaseCents: dayData?.totalBaseCents || 0,
-        count: dayData?.count || 0
+        count: dayData?.count || 0,
+        reminders: remindersByDate.get(date) || [],
+        expenseTitles,
       })
     }
-    
+
     // Next month days to fill the grid
     const remainingDays = 42 - calendarDays.length
     for (let day = 1; day <= remainingDays; day++) {
       const date = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      const expenseTitles = (expensesByDate.get(date) || []).map((e: any) => e.title).slice(0, 2)
       calendarDays.push({
         day,
         isCurrentMonth: false,
-        date
+        date,
+        reminders: remindersByDate.get(date) || [],
+        expenseTitles,
       })
     }
 
@@ -244,22 +323,20 @@ export function ExpenseCalendar() {
   const monthTotals = monthData?.data?.monthTotals || { totalBaseCents: 0, count: 0 }
   const isToday = new Date().toISOString().split('T')[0]
 
-     if (monthLoading) {
-     return (
-       <div className="loading-responsive flex items-center justify-center">
-         <div className="text-center">
-           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-           <h3 className="text-responsive-lg font-semibold mb-2">Loading Calendar</h3>
-           <p className="text-responsive-sm text-muted-foreground">Please wait while we load your calendar data...</p>
-         </div>
-       </div>
-     )
-   }
+  if (monthLoading) {
+    return (
+      <div className="loading-responsive flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+          <h3 className="text-responsive-lg font-semibold mb-2">Loading Calendar</h3>
+          <p className="text-responsive-sm text-muted-foreground">Please wait while we load your calendar data...</p>
+        </div>
+      </div>
+    )
+  }
 
-
-
-     return (
-     <div className="space-y-responsive-lg">
+  return (
+    <div className="space-y-responsive-lg">
       {/* Top Bar with Filters */}
       <Card className="mb-6">
         <CardHeader className="p-responsive-4">
@@ -393,6 +470,9 @@ export function ExpenseCalendar() {
                   const isTodayDate = calendarDay.date === isToday
                   const isSelected = selectedDate === calendarDay.date
                   const hasExpenses = calendarDay.count && calendarDay.count > 0
+                  const reminderCount = calendarDay.reminders?.length ?? 0
+
+                  const firstReminder = reminderCount > 0 ? calendarDay.reminders?.[0] : null
 
                   return (
                                          <button
@@ -427,6 +507,17 @@ export function ExpenseCalendar() {
                            </div>
                          </div>
                        ) : null}
+
+                       {firstReminder && firstReminder.title && (
+                         <div className="mt-1 text-[10px] text-amber-600 line-clamp-1">
+                           {firstReminder.title}
+                           {reminderCount > 1 && (
+                             <span className="ml-1 text-[9px] text-amber-500">
+                               (+{reminderCount - 1})
+                             </span>
+                           )}
+                         </div>
+                       )}
                      </button>
                   )
                 })}
@@ -446,10 +537,31 @@ export function ExpenseCalendar() {
              <Button 
                className="w-full touch-friendly" 
                size="sm"
-               onClick={() => setIsAddExpenseOpen(true)}
+               onClick={() => {
+                 setEntryType("expense")
+                 setIsAddReminderOpen(false)
+                 setIsAddExpenseOpen(true)
+               }}
              >
                <Plus className="h-4 w-4 mr-2" />
                Add Expense
+             </Button>
+             <Button
+               className="w-full touch-friendly"
+               size="sm"
+               variant="outline"
+               onClick={() => {
+                 if (!selectedDate) {
+                   const today = new Date().toISOString().split("T")[0]
+                   setSelectedDate(today)
+                 }
+                 setEntryType("reminder")
+                 setIsAddExpenseOpen(false)
+                 setIsAddReminderOpen(true)
+               }}
+             >
+               <Calendar className="h-4 w-4 mr-2" />
+               Add Reminder
              </Button>
            </CardContent>
          </Card>
@@ -501,24 +613,54 @@ export function ExpenseCalendar() {
            form.reset()
          }
        }}>
-         <DialogContent className="max-w-md w-auto max-h-[85vh] mx-auto bg-white dark:bg-[#12151c] ring-1 ring-black/10 dark:ring-white/10 shadow-xl">
-                     <DialogHeader className="p-responsive-3">
-             <DialogTitle className="text-responsive-lg">
-               Add expense — {selectedDate ? new Date(selectedDate).toLocaleDateString('en-US', { 
-                 day: 'numeric', 
-                 month: 'short', 
-                 year: 'numeric' 
-               }) : 'New Expense'}
-             </DialogTitle>
-             <DialogDescription className="text-responsive-sm">
-               {selectedDate 
-                 ? `Add an expense for ${new Date(selectedDate).toLocaleDateString()}`
-                 : "Add a new expense"
-               }
-             </DialogDescription>
-           </DialogHeader>
-           
-           <form onSubmit={form.handleSubmit(handleAddExpense)} className="form-responsive space-y-4 p-responsive-3">
+         <DialogContent className="w-full max-w-md sm:max-w-lg max-h-[85vh] mx-auto bg-white dark:bg-[#12151c] ring-1 ring-black/10 dark:ring-white/10 shadow-xl">
+          <DialogHeader className="p-responsive-3">
+            <DialogTitle className="text-responsive-lg">
+              {entryType === "expense" ? "Add Personal Expense" : "Add Reminder"}
+            </DialogTitle>
+            <DialogDescription className="text-responsive-sm">
+              {selectedDate
+                ? `Selected date: ${new Date(selectedDate).toLocaleDateString()}`
+                : "Select a date from the calendar to prefill."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Entry type toggle */}
+          <div className="px-responsive-3 flex gap-2 mb-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={entryType === "expense" ? "default" : "outline"}
+              className="touch-friendly flex-1"
+              onClick={() => {
+                setEntryType("expense")
+                setIsAddReminderOpen(false)
+                if (!isAddExpenseOpen) setIsAddExpenseOpen(true)
+              }}
+            >
+              Personal Expense
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={entryType === "reminder" ? "default" : "outline"}
+              className="touch-friendly flex-1"
+              onClick={() => {
+                setEntryType("reminder")
+                setIsAddExpenseOpen(false)
+                if (!selectedDate) {
+                  const today = new Date().toISOString().split("T")[0]
+                  setSelectedDate(today)
+                }
+                setIsAddReminderOpen(true)
+              }}
+            >
+              Reminder
+            </Button>
+          </div>
+
+          {/* Expense form */}
+          <form onSubmit={form.handleSubmit(handleAddExpense)} className="form-responsive space-y-4 p-responsive-3">
                          <div className="form-group">
                <Label htmlFor="description" className="form-responsive">Description *</Label>
                <Input
@@ -654,6 +796,127 @@ export function ExpenseCalendar() {
                </Button>
              </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Reminder Dialog */}
+      <Dialog open={isAddReminderOpen} onOpenChange={setIsAddReminderOpen}>
+        <DialogContent className="w-full max-w-md sm:max-w-lg max-h-[85vh] mx-auto bg-white dark:bg-[#12151c] ring-1 ring-black/10 dark:ring-white/10 shadow-xl">
+          <DialogHeader className="p-responsive-3">
+            <DialogTitle className="text-responsive-lg">
+              Add reminder — {selectedDate ? new Date(selectedDate).toLocaleDateString() : "Select a date"}
+            </DialogTitle>
+            <DialogDescription className="text-responsive-sm">
+              Create a reminder like a bill or subscription; you'll be notified a few days before it is due.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 p-responsive-3">
+            <div className="form-group">
+              <Label htmlFor="reminder-title" className="form-responsive">Title *</Label>
+              <Input
+                id="reminder-title"
+                value={reminderTitle}
+                onChange={(e) => setReminderTitle(e.target.value)}
+                placeholder="WiFi bill"
+                className="form-responsive touch-friendly"
+              />
+            </div>
+
+            <div className="form-group">
+              <Label htmlFor="reminder-description" className="form-responsive">Notes</Label>
+              <Textarea
+                id="reminder-description"
+                value={reminderDescription}
+                onChange={(e) => setReminderDescription(e.target.value)}
+                placeholder="Optional details (account number, etc.)"
+                className="form-responsive touch-friendly"
+              />
+            </div>
+
+            <div className="form-group">
+              <Label htmlFor="reminder-amount" className="form-responsive">Amount (optional)</Label>
+              <Input
+                id="reminder-amount"
+                type="number"
+                step="0.01"
+                value={reminderAmount ?? ""}
+                onChange={(e) => setReminderAmount(e.target.value ? Number(e.target.value) : undefined)}
+                placeholder="0.00"
+                className="form-responsive touch-friendly"
+              />
+            </div>
+
+            <div className="form-group">
+              <Label htmlFor="reminder-category" className="form-responsive">Category</Label>
+              <Select 
+                value={reminderCategory} 
+                onValueChange={(value) => setReminderCategory(value)}
+              >
+                <SelectTrigger className="form-responsive touch-friendly">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="food">Food & Dining</SelectItem>
+                  <SelectItem value="transportation">Transportation</SelectItem>
+                  <SelectItem value="accommodation">Accommodation</SelectItem>
+                  <SelectItem value="entertainment">Entertainment</SelectItem>
+                  <SelectItem value="utilities">Bills & Utilities</SelectItem>
+                  <SelectItem value="shopping">Shopping</SelectItem>
+                  <SelectItem value="healthcare">Healthcare</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter className="p-responsive-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsAddReminderOpen(false)}
+              className="touch-friendly"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={!reminderTitle || !selectedDate}
+              onClick={() => {
+                if (!selectedDate || !reminderTitle) return
+                reminderAPI.create({
+                  title: reminderTitle,
+                  description: reminderDescription || undefined,
+                  dueDate: selectedDate,
+                  amount: reminderAmount,
+                  category: reminderCategory,
+                })
+                  .then(() => {
+                    setReminderTitle("")
+                    setReminderDescription("")
+                    setReminderAmount(undefined)
+                    setIsAddReminderOpen(false)
+                    queryClient.invalidateQueries({ queryKey: ['calendar-reminders'] })
+                    queryClient.invalidateQueries({ queryKey: ['calendar-month'] })
+                    queryClient.invalidateQueries({ queryKey: ['calendar-events'] })
+                    toast({
+                      title: 'Reminder created',
+                      description: 'We will notify you before this reminder is due.',
+                    })
+                  })
+                  .catch((err: any) => {
+                    toast({
+                      title: 'Error',
+                      description: err?.message || 'Failed to create reminder',
+                      variant: 'destructive',
+                    })
+                  })
+              }}
+              className="touch-friendly"
+            >
+              Save Reminder
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

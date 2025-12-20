@@ -66,10 +66,6 @@ router.get("/", async (req, res) => {
         { groupId: { $in: userGroups.map(g => g._id) } },
         { groupId: null, paidBy: req.user._id } // Personal expenses
       ]
-      
-      console.log('Expense query for user:', req.user._id)
-      console.log('User groups:', userGroups.map(g => g._id))
-      console.log('Final query:', JSON.stringify(query, null, 2))
     }
 
     if (category) query.category = category
@@ -100,7 +96,7 @@ router.get("/", async (req, res) => {
       }
     })
   } catch (error) {
-    console.error('Get expenses failed:', error)
+    
     return fail(res, "Server error", 500)
   }
 })
@@ -145,7 +141,7 @@ router.get("/group/:groupId", async (req, res) => {
       }
     })
   } catch (error) {
-    console.error('Get group expenses failed:', error)
+    
     return fail(res, "Server error", 500)
   }
 })
@@ -179,12 +175,10 @@ router.get("/:id", async (req, res) => {
 
 // Test route to debug FormData parsing
 router.post("/test", upload.single("receipt"), async (req, res) => {
-  console.log('=== TEST ROUTE WITH FILE ===')
-  console.log('Headers:', req.headers)
-  console.log('Body:', req.body)
-  console.log('File:', req.file)
-  console.log('Body keys:', Object.keys(req.body))
-  console.log('createdBy value:', req.body.createdBy)
+  
+  
+  
+  
   res.json({ 
     message: 'Test successful',
     body: req.body,
@@ -194,11 +188,9 @@ router.post("/test", upload.single("receipt"), async (req, res) => {
 
 // Test route without file upload
 router.post("/test-no-file", async (req, res) => {
-  console.log('=== TEST ROUTE WITHOUT FILE ===')
-  console.log('Headers:', req.headers)
-  console.log('Body:', req.body)
-  console.log('Body keys:', Object.keys(req.body))
-  console.log('createdBy value:', req.body.createdBy)
+  
+  
+  
   res.json({ 
     message: 'Test successful (no file)',
     body: req.body
@@ -208,8 +200,8 @@ router.post("/test-no-file", async (req, res) => {
 // Test route to check expense storage and retrieval
 router.get("/test-storage", async (req, res) => {
   try {
-    console.log('=== TESTING EXPENSE STORAGE ===')
-    console.log('Current user:', req.user._id)
+    
+    
     
     // Check if any expenses exist for this user
     const userExpenses = await Expense.find({
@@ -220,8 +212,8 @@ router.get("/test-storage", async (req, res) => {
       ]
     }).select('_id description amountCents paidBy createdBy groupId status')
     
-    console.log('Found expenses for user:', userExpenses.length)
-    console.log('Expenses:', userExpenses)
+    
+    
     
     // Check personal expenses specifically
     const personalExpenses = await Expense.find({
@@ -230,8 +222,8 @@ router.get("/test-storage", async (req, res) => {
       status: "active"
     }).select('_id description amountCents paidBy createdBy status')
     
-    console.log('Personal expenses:', personalExpenses.length)
-    console.log('Personal expenses:', personalExpenses)
+    
+    
     
     res.json({
       message: 'Storage test complete',
@@ -240,7 +232,7 @@ router.get("/test-storage", async (req, res) => {
       expenses: userExpenses
     })
   } catch (error) {
-    console.error('Storage test failed:', error)
+    
     res.status(500).json({ message: 'Storage test failed', error: error.message })
   }
 })
@@ -248,11 +240,6 @@ router.get("/test-storage", async (req, res) => {
 // Create expense (personal or group)
 router.post("/", upload.single("receipt"), async (req, res) => {
   try {
-    console.log('Creating expense with data:', req.body)
-    console.log('Request body keys:', Object.keys(req.body))
-    console.log('createdBy from request:', req.body.createdBy)
-    console.log('Current user ID:', req.user.id)
-    console.log('Full request body:', JSON.stringify(req.body, null, 2))
     
     const { groupId, description, amount, category, splits, date, notes, splitType, currencyCode, createdBy } = req.body
 
@@ -267,9 +254,9 @@ router.post("/", upload.single("receipt"), async (req, res) => {
 
     // Ensure createdBy is available
     const expenseCreator = createdBy || req.user._id
-    console.log('Using createdBy:', expenseCreator)
-    console.log('Current user _id:', req.user._id)
-    console.log('Current user id:', req.user.id)
+    
+    
+    
 
     const isGroup = !!(groupId && String(groupId).trim())
     let group = null
@@ -353,7 +340,7 @@ router.post("/", upload.single("receipt"), async (req, res) => {
           url: ocrResult.url || null,
         }
       } catch (ocrError) {
-        console.warn('OCR processing failed:', ocrError)
+        
         // Continue without OCR data
         receiptData = {
           filename: req.file.originalname,
@@ -392,14 +379,14 @@ router.post("/", upload.single("receipt"), async (req, res) => {
     await expense.populate("paidBy", "firstName lastName username avatar")
     await expense.populate("splits.user", "firstName lastName username")
 
-    console.log('Expense saved to database:')
-    console.log('  _id:', expense._id)
-    console.log('  description:', expense.description)
-    console.log('  amountCents:', expense.amountCents)
-    console.log('  paidBy:', expense.paidBy)
-    console.log('  createdBy:', expense.createdBy)
-    console.log('  groupId:', expense.groupId)
-    console.log('  splits:', expense.splits)
+    
+    
+    
+    
+    
+    
+    
+    
 
     // Create notifications for group expenses
     if (isGroup) {
@@ -428,10 +415,10 @@ router.post("/", upload.single("receipt"), async (req, res) => {
       }
     }
 
-    console.log('Expense created successfully:', expense._id)
+    
     return ok(res, expense, 201)
   } catch (error) {
-    console.error('Create expense failed:', error)
+    
     return fail(res, error.message || "Create expense failed", 400)
   }
 })
@@ -522,7 +509,7 @@ router.put("/:id", async (req, res) => {
 
     return ok(res, expense)
   } catch (error) {
-    console.error('Update expense failed:', error)
+    
     return fail(res, error.message || "Update expense failed", 500)
   }
 })
@@ -572,7 +559,7 @@ router.delete("/:id", async (req, res) => {
 
     return ok(res, { message: "Expense deleted successfully" })
   } catch (error) {
-    console.error('Delete expense failed:', error)
+    
     return fail(res, error.message || "Delete expense failed", 500)
   }
 })
@@ -630,7 +617,7 @@ router.patch("/:id/settle", async (req, res) => {
 
     return ok(res, { message: "Split settled successfully" })
   } catch (error) {
-    console.error('Settle split failed:', error)
+    
     return fail(res, error.message || "Settle split failed", 500)
   }
 })

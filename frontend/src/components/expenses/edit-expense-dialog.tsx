@@ -91,12 +91,12 @@ export function EditExpenseDialog({ expense, open, onOpenChange }: EditExpenseDi
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md w-auto max-h-[85vh] mx-auto">
+      <DialogContent className="w-full max-w-md sm:max-w-lg max-h-[85vh] mx-auto">
         <DialogHeader className="space-y-2">
           <DialogTitle className="text-lg font-semibold">Edit Expense</DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground">Update the details of your expense.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-2">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
           <div className="space-y-1">
             <Label htmlFor="description" className="text-xs">Description</Label>
             <Input
@@ -109,7 +109,7 @@ export function EditExpenseDialog({ expense, open, onOpenChange }: EditExpenseDi
             {errors.description && <p className="text-xs text-destructive">{errors.description.message}</p>}
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label htmlFor="amount" className="text-xs">Amount</Label>
               <Input
@@ -170,7 +170,7 @@ export function EditExpenseDialog({ expense, open, onOpenChange }: EditExpenseDi
             />
           </div>
 
-          <div className="flex justify-end space-x-2 pt-1">
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-2">
             <Button
               type="button"
               variant="outline"

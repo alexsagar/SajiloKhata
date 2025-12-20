@@ -9,7 +9,7 @@ export function KanbanCard({ className = "", children, ...props }: KanbanCardPro
   return (
     <section
       className={cn(
-        "rounded-2xl bg-[var(--card)] ring-1 ring-white/5 shadow-soft transition-kanban duration-150",
+        "rounded-2xl bg-[var(--card)] ring-1 ring-white/5 shadow-soft transition-kanban duration-150 w-full min-w-0 overflow-hidden",
         className
       )}
       {...props}
@@ -41,7 +41,7 @@ interface KanbanCardContentProps extends React.HTMLAttributes<HTMLDivElement> {
 export function KanbanCardContent({ className = "", children, ...props }: KanbanCardContentProps) {
   return (
     <div
-      className={cn("p-4 md:p-5 pt-0", className)}
+      className={cn("p-4 md:p-5 pt-0 w-full min-w-0 overflow-hidden", className)}
       {...props}
     >
       {children}

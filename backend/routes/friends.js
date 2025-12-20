@@ -53,11 +53,11 @@ router.post(
         const inviter = await User.findById(req.user._id).select("firstName")
         await sendEmail({
           to: req.body.inviteeEmail,
-          subject: "You're invited to join Khutrukey",
+          subject: "You're invited to join SajiloKhata",
           template: "groupInvite",
           data: {
             firstName: "Friend",
-            message: `${inviter?.firstName || "Your friend"} invited you to connect on Khutrukey`,
+            message: `${inviter?.firstName || "Your friend"} invited you to connect on SajiloKhata`,
             inviteUrl,
           },
         })
@@ -65,6 +65,7 @@ router.post(
 
       res.json({ code, inviteUrl, expiresAt })
     } catch (e) {
+      console.error("Error in POST /friends/invites:", e)
       res.status(500).json({ message: "Server error" })
     }
   },

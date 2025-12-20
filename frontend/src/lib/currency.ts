@@ -98,7 +98,7 @@ export function formatCurrency(amount: number, currencyCode = 'USD', locale = 'e
       maximumFractionDigits: currency.decimals,
     }).format(amount)
   } catch (error) {
-    console.error('Currency formatting error:', error, 'for currency:', currencyCode, 'amount:', amount)
+    
     // Fallback to basic formatting if Intl.NumberFormat fails
     return `${getCurrencySymbol(currencyCode)}${amount.toFixed(currency.decimals)}`
   }

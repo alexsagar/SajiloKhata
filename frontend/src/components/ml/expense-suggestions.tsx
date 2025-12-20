@@ -71,7 +71,7 @@ export function ExpenseSuggestions() {
 
   const provideFeedback = (id: string, helpful: boolean) => {
     // In a real app, this would send feedback to the ML service
-    console.log(`Feedback for suggestion ${id}: ${helpful ? 'helpful' : 'not helpful'}`)
+    
   }
 
   const getTypeIcon = (type: string) => {

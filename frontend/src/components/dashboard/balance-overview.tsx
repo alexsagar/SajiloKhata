@@ -98,7 +98,7 @@ export function BalanceOverview() {
       <KanbanCard>
         <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <KanbanCardTitle className="text-sm font-medium text-slate-400">Total Balance</KanbanCardTitle>
-          <DollarSign className="h-4 w-4 text-slate-400" />
+          <DollarSign className="h-5 w-5 sm:h-4 sm:w-4 text-slate-400" />
         </KanbanCardHeader>
         <KanbanCardContent>
           <div className="text-2xl font-bold text-slate-100">
@@ -111,7 +111,7 @@ export function BalanceOverview() {
       <KanbanCard>
         <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <KanbanCardTitle className="text-sm font-medium text-slate-400">You're Owed</KanbanCardTitle>
-          <TrendingUp className="h-4 w-4 text-emerald-400" />
+          <TrendingUp className="h-5 w-5 sm:h-4 sm:w-4 text-emerald-400" />
         </KanbanCardHeader>
         <KanbanCardContent>
           <div className="text-2xl font-bold text-emerald-400">
@@ -124,7 +124,7 @@ export function BalanceOverview() {
       <KanbanCard>
         <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <KanbanCardTitle className="text-sm font-medium text-slate-400">You Owe</KanbanCardTitle>
-          <TrendingDown className="h-4 w-4 text-rose-400" />
+          <TrendingDown className="h-5 w-5 sm:h-4 sm:w-4 text-rose-400" />
         </KanbanCardHeader>
         <KanbanCardContent>
           <div className="text-2xl font-bold text-rose-400">
@@ -137,7 +137,7 @@ export function BalanceOverview() {
       <KanbanCard>
         <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <KanbanCardTitle className="text-sm font-medium text-slate-400">Personal Expenses</KanbanCardTitle>
-          <CreditCard className="h-4 w-4 text-slate-400" />
+          <CreditCard className="h-5 w-5 sm:h-4 sm:w-4 text-slate-400" />
         </KanbanCardHeader>
         <KanbanCardContent>
           <div className="text-2xl font-bold text-slate-100">
@@ -152,7 +152,7 @@ export function BalanceOverview() {
       <KanbanCard>
         <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <KanbanCardTitle className="text-sm font-medium text-slate-400">Group Expenses</KanbanCardTitle>
-          <Users className="h-4 w-4 text-slate-400" />
+          <Users className="h-5 w-5 sm:h-4 sm:w-4 text-slate-400" />
         </KanbanCardHeader>
         <KanbanCardContent>
           <div className="text-2xl font-bold text-slate-100">
@@ -167,7 +167,7 @@ export function BalanceOverview() {
       <KanbanCard>
         <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <KanbanCardTitle className="text-sm font-medium text-slate-400">Total Expenses</KanbanCardTitle>
-          <PiggyBank className="h-4 w-4 text-slate-400" />
+          <PiggyBank className="h-5 w-5 sm:h-4 sm:w-4 text-slate-400" />
         </KanbanCardHeader>
         <KanbanCardContent>
           <div className="text-2xl font-bold text-slate-100">

@@ -10,11 +10,11 @@ async function seedData() {
 
   try {
     await client.connect()
-    console.log("✅ Connected to MongoDB for seeding")
+    
     const db = client.db()
 
     // Clear existing data
-    console.log("🧹 Clearing existing data...")
+    
     await db.collection("users").deleteMany({})
     await db.collection("groups").deleteMany({})
     await db.collection("expenses").deleteMany({})
@@ -23,7 +23,7 @@ async function seedData() {
     await db.collection("messages").deleteMany({})
 
     // Create sample users
-    console.log("👥 Creating sample users...")
+    
     const hashedPassword = await bcrypt.hash("password123", 10)
 
     const users = [
@@ -162,10 +162,10 @@ async function seedData() {
     ]
 
     await db.collection("users").insertMany(users)
-    console.log(`✅ Created ${users.length} sample users`)
+    
 
     // Create sample groups
-    console.log("👥 Creating sample groups...")
+    
     const groups = [
       {
         _id: new ObjectId(),
@@ -233,10 +233,10 @@ async function seedData() {
     ]
 
     await db.collection("groups").insertMany(groups)
-    console.log(`✅ Created ${groups.length} sample groups`)
+    
 
     // Create sample expenses
-    console.log("💰 Creating sample expenses...")
+    
     const expenses = [
       {
         _id: new ObjectId(),
@@ -327,10 +327,10 @@ async function seedData() {
     ]
 
     await db.collection("expenses").insertMany(expenses)
-    console.log(`✅ Created ${expenses.length} sample expenses`)
+    
 
     // Create sample notifications
-    console.log("🔔 Creating sample notifications...")
+    
     const notifications = [
       {
         _id: new ObjectId(),
@@ -380,10 +380,10 @@ async function seedData() {
     ]
 
     await db.collection("notifications").insertMany(notifications)
-    console.log(`✅ Created ${notifications.length} sample notifications`)
+    
 
     // Create sample messages
-    console.log("💬 Creating sample messages...")
+    
     const messages = [
       {
         _id: new ObjectId(),
@@ -421,10 +421,10 @@ async function seedData() {
     ]
 
     await db.collection("messages").insertMany(messages)
-    console.log(`✅ Created ${messages.length} sample messages`)
+    
 
     // Update group stats
-    console.log("📊 Updating group statistics...")
+    
     for (const group of groups) {
       const groupExpenses = expenses.filter((e) => e.groupId.equals(group._id))
       const totalExpenses = groupExpenses.reduce((sum, expense) => sum + expense.amount, 0)
@@ -440,20 +440,20 @@ async function seedData() {
       )
     }
 
-    console.log("✅ Database seeded successfully!")
-    console.log("📊 Summary:")
-    console.log(`   👥 Users: ${users.length}`)
-    console.log(`   🏠 Groups: ${groups.length}`)
-    console.log(`   💰 Expenses: ${expenses.length}`)
-    console.log(`   🔔 Notifications: ${notifications.length}`)
-    console.log(`   💬 Messages: ${messages.length}`)
-    console.log("\n🔑 Test Credentials:")
-    console.log("   Email: john@example.com | Password: password123")
-    console.log("   Email: sarah@example.com | Password: password123")
-    console.log("   Email: mike@example.com | Password: password123")
-    console.log("   Email: admin@splitwise.com | Password: password123 (Admin)")
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    ")
   } catch (error) {
-    console.error("❌ Error seeding database:", error)
+    
     process.exit(1)
   } finally {
     await client.close()

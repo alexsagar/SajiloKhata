@@ -188,7 +188,7 @@ export function ExchangeRates() {
       
       setLastRefresh(new Date())
     } catch (error) {
-      console.error('Failed to refresh rates:', error)
+      
     } finally {
       setIsLoading(false)
     }

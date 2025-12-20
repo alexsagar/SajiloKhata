@@ -164,10 +164,6 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
         }
       } catch {}
       
-      toast({
-        title: "Expense created",
-        description: "Your expense has been created successfully.",
-      })
       onOpenChange?.(false)
       reset()
       setSelectedFile(null)
@@ -177,11 +173,6 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
       setShowCurrencySelection(false)
     },
     onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to create expense",
-        variant: "destructive",
-      })
     },
   })
 
@@ -189,32 +180,17 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
     try {
       // Ensure we have valid data before proceeding
       if (!data.description || !data.amount || (typeof data.amount === 'number' && data.amount <= 0) || !data.groupId) {
-        toast({
-          title: "Missing Information",
-          description: "Please fill in all required fields including group selection.",
-          variant: "destructive",
-        })
         return
       }
 
       // For group expenses, ensure we have members selected
       if (selectedMembers.length === 0) {
-        toast({
-          title: "No Members Selected",
-          description: "Please select at least one member to split the expense with.",
-          variant: "destructive",
-        })
         return
       }
 
       createExpenseMutation.mutate(data)
     } catch (error) {
-      console.error("Form submission error:", error)
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred. Please try again.",
-        variant: "destructive",
-      })
+      
     }
   }
 
@@ -229,13 +205,13 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
   const handleCurrencySelect = (currency: string) => {
     try {
       if (!currency) {
-        console.warn("No currency selected")
+        
         return
       }
       setValue("currencyCode", currency)
       setShowCurrencySelection(false)
     } catch (error) {
-      console.error("Currency selection error:", error)
+      
       toast({
         title: "Error",
         description: "Failed to set currency. Please try again.",
@@ -251,7 +227,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
           {children}
         </DialogTrigger>
       )}
-      <DialogContent className="max-w-md w-auto max-h-[85vh] mx-auto">
+      <DialogContent className="w-full max-w-md sm:max-w-lg max-h-[85vh] mx-auto">
         <DialogHeader className="space-y-2">
           <DialogTitle className="text-lg font-semibold">Create New Expense</DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground">Add a new expense to split with your group.</DialogDescription>
@@ -287,7 +263,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
           </p>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-2">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
           <div className="space-y-2">
             <Label htmlFor="description">Description</Label>
             <Input
@@ -299,7 +275,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
             {errors.description && <p className="text-sm text-destructive">{errors.description.message}</p>}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="amount">Amount</Label>
               <Input
@@ -458,7 +434,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
             {errors.notes && <p className="text-sm text-destructive">{errors.notes.message}</p>}
           </div>
 
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-2">
             <Button
               type="button"
               variant="outline"

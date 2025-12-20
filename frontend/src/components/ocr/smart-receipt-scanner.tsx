@@ -21,6 +21,7 @@ import { useMutation } from "@tanstack/react-query"
 import { receiptAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 import { formatCurrency } from "@/lib/utils"
+import { useAuth } from "@/contexts/auth-context"
 
 interface SmartReceiptScannerProps {
   open: boolean
@@ -43,9 +44,11 @@ interface OCRResult {
 }
 
 export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: SmartReceiptScannerProps) {
+  const { user } = useAuth()
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null)
   const [processingStep, setProcessingStep] = useState<'upload' | 'processing' | 'results'>('upload')
+  const [uploadProgress, setUploadProgress] = useState(0)
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: {
@@ -59,41 +62,51 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
   })
 
   const processReceiptMutation = useMutation({
-    mutationFn: (file: File) => {
+    mutationFn: async (file: File) => {
       const formData = new FormData()
       formData.append('receipt', file)
-      return receiptAPI.uploadReceipt(formData)
+      
+      // Simulate progress updates during upload
+      setUploadProgress(10)
+      
+      const response = await receiptAPI.uploadReceipt(formData)
+      
+      // Simulate OCR processing progress
+      setUploadProgress(50)
+      await new Promise(resolve => setTimeout(resolve, 500))
+      setUploadProgress(80)
+      await new Promise(resolve => setTimeout(resolve, 500))
+      setUploadProgress(100)
+      
+      return response
     },
     onSuccess: (response) => {
       const data = (response as any)?.data?.data || (response as any)?.data || {}
-      const parsed = data.parsedData || {}
+      
+      // Use the direct fields from the response (updated backend format)
       const mapped: OCRResult = {
-        merchantName: parsed.merchant || "",
-        date: parsed.date || null,
-        total: parsed.total || 0,
-        subtotal: parsed.subtotal || parsed.total || 0,
-        tax: parsed.tax || 0,
-        items: Array.isArray(parsed.items) ? parsed.items.map((it: any) => ({
+        merchantName: data.merchant || "",
+        date: data.date || null,
+        total: data.total || 0,
+        subtotal: data.subtotal || data.total || 0,
+        tax: data.tax || 0,
+        items: Array.isArray(data.items) ? data.items.map((it: any) => ({
           description: it.description || "Item",
-          amount: it.totalPrice || it.amount || it.unitPrice || 0,
+          amount: it.amount || 0,
         })) : [],
-        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : (data.confidence || 0),
-        suggestedCategory: parsed.suggestedCategory || parsed.category || 'other',
+        confidence: data.confidence || 0,
+        suggestedCategory: 'other', // Could be enhanced based on merchant
       }
+      
       setOcrResult(mapped)
       setProcessingStep('results')
-      toast({
-        title: "Receipt processed",
-        description: "Your receipt has been successfully scanned and processed.",
-      })
+      setUploadProgress(0) // Reset progress
+      
     },
     onError: (error: any) => {
-      toast({
-        title: "Processing failed",
-        description: error.response?.data?.message || "Failed to process receipt",
-        variant: "destructive",
-      })
+      console.error("Receipt processing error:", error)
       setProcessingStep('upload')
+      setUploadProgress(0)
     },
   })
 
@@ -106,6 +119,16 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
 
   const handleUseResults = () => {
     if (ocrResult && onReceiptProcessed) {
+      console.log("Smart Receipt Scanner - Sending data:", {
+        description: ocrResult.merchantName || "Receipt expense",
+        amount: ocrResult.total,
+        category: ocrResult.suggestedCategory,
+        date: ocrResult.date,
+        receipt: selectedFile,
+        ocrData: ocrResult,
+      })
+      
+      // Process the receipt data first
       onReceiptProcessed({
         description: ocrResult.merchantName || "Receipt expense",
         amount: ocrResult.total,
@@ -114,9 +137,17 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
         receipt: selectedFile,
         ocrData: ocrResult,
       })
+      
+      // Close dialog with a delay to ensure parent dialog stays open
+      setTimeout(() => {
+        console.log("Smart Receipt Scanner - Closing dialog")
+        onOpenChange(false)
+        resetState()
+      }, 200)
+    } else {
+      onOpenChange(false)
+      resetState()
     }
-    onOpenChange(false)
-    resetState()
   }
 
   const resetState = () => {
@@ -211,10 +242,15 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
             
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span>Processing...</span>
-                <span>Please wait</span>
+                <span>
+                  {uploadProgress < 30 ? 'Uploading...' : 
+                   uploadProgress < 70 ? 'Scanning text...' : 
+                   uploadProgress < 95 ? 'Parsing data...' : 
+                   'Finalizing...'}
+                </span>
+                <span>{uploadProgress}%</span>
               </div>
-              <Progress value={75} className="h-2" />
+              <Progress value={uploadProgress} className="h-2" />
             </div>
 
             <div className="text-center">
@@ -261,19 +297,19 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
                   <div>
                     <p className="text-sm font-medium">Subtotal</p>
                     <p className="text-sm text-muted-foreground">
-                      {ocrResult.subtotal ? formatCurrency(ocrResult.subtotal) : "N/A"}
+                      {ocrResult.subtotal ? formatCurrency(ocrResult.subtotal, user?.preferences?.currency || "NPR") : "N/A"}
                     </p>
                   </div>
                   <div>
                     <p className="text-sm font-medium">Tax</p>
                     <p className="text-sm text-muted-foreground">
-                      {ocrResult.tax ? formatCurrency(ocrResult.tax) : "N/A"}
+                      {ocrResult.tax ? formatCurrency(ocrResult.tax, user?.preferences?.currency || "NPR") : "N/A"}
                     </p>
                   </div>
                   <div>
                     <p className="text-sm font-medium">Total</p>
                     <p className="text-lg font-bold text-primary">
-                      {formatCurrency(ocrResult.total)}
+                      {formatCurrency(ocrResult.total, user?.preferences?.currency || "NPR")}
                     </p>
                   </div>
                 </div>
@@ -290,7 +326,7 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
                       {ocrResult.items.map((item, index) => (
                         <div key={index} className="flex justify-between text-sm">
                           <span className="truncate">{item.description}</span>
-                          <span className="font-medium">{formatCurrency(item.amount)}</span>
+                          <span className="font-medium">{formatCurrency(item.amount, user?.preferences?.currency || "NPR")}</span>
                         </div>
                       ))}
                     </div>

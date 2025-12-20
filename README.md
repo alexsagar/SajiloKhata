@@ -1,4 +1,4 @@
-# Khutrukey - Smart Expense Sharing
+# SajiloKhata - Smart Expense Sharing
 
 A modern expense sharing application built with MERN stack and Next.js, featuring AI-powered features, real-time collaboration, and comprehensive analytics.
 
@@ -247,6 +247,6 @@ For support and questions:
 
 ---
 
-**Khutrukey** - Making expense sharing simple, smart, and secure.
+**SajiloKhata** - Making expense sharing simple, smart, and secure.
 
 

@@ -10,7 +10,7 @@ let vision = null
 try {
   vision = require("@google-cloud/vision")
 } catch (error) {
-  console.log("Google Vision API not available. Using Tesseract.js only.")
+  
 }
 
 class OCRService {
@@ -33,7 +33,7 @@ class OCRService {
     try {
       await fs.mkdir(this.tempDir, { recursive: true })
     } catch (error) {
-      console.error("Error creating temp directory:", error)
+      
     }
   }
 
@@ -53,7 +53,7 @@ class OCRService {
 
       return processedBuffer
     } catch (error) {
-      console.error("Error preprocessing image:", error)
+      
       return imageBuffer // Return original if preprocessing fails
     }
   }
@@ -61,7 +61,7 @@ class OCRService {
   // Extract text from image using Tesseract.js
   async extractTextTesseract(imageBuffer) {
     try {
-      console.log("Starting Tesseract OCR processing...")
+      
 
       // Preprocess image for better accuracy
       const processedBuffer = await this.preprocessImage(imageBuffer)
@@ -71,16 +71,16 @@ class OCRService {
       } = await Tesseract.recognize(processedBuffer, "eng", {
         logger: (m) => {
           if (m.status === "recognizing text") {
-            console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`)
+            }%`)
           }
         },
         tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,/$-: \n",
       })
 
-      console.log(`Tesseract OCR completed with confidence: ${confidence}%`)
+      
       return this.parseReceiptText(text, confidence)
     } catch (error) {
-      console.error("Tesseract OCR error:", error)
+      
       throw new Error("Failed to extract text from image using Tesseract")
     }
   }
@@ -92,7 +92,7 @@ class OCRService {
     }
 
     try {
-      console.log("Starting Google Vision OCR processing...")
+      
 
       const [result] = await this.visionClient.textDetection({
         image: { content: imageBuffer },
@@ -104,10 +104,10 @@ class OCRService {
       // Calculate confidence based on detection quality
       const confidence = detections.length > 0 ? Math.min(detections[0].confidence * 100 || 85, 95) : 0
 
-      console.log(`Google Vision OCR completed with confidence: ${confidence}%`)
+      
       return this.parseReceiptText(text, confidence)
     } catch (error) {
-      console.error("Google Vision API error:", error)
+      
       throw new Error("Failed to extract text from image using Google Vision")
     }
   }
@@ -118,7 +118,7 @@ class OCRService {
       try {
         return await this.extractTextGoogleVision(imageBuffer)
       } catch (error) {
-        console.log("Google Vision failed, falling back to Tesseract...")
+        
         return await this.extractTextTesseract(imageBuffer)
       }
     } else {
@@ -501,7 +501,7 @@ class OCRService {
         await fs.unlink(`${this.tempDir}/${file}`)
       }
     } catch (error) {
-      console.error("Error cleaning up temp files:", error)
+      
     }
   }
 }

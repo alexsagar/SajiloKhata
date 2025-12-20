@@ -26,7 +26,9 @@ const errorHandler = require("./middleware/errorHandler")
 const { authenticateToken } = require("./middleware/auth")
 const calendarRoutes = require("./routes/calendar")
 const analyticsRoutes = require("./routes/analytics")
+const reminderRoutes = require("./routes/reminders")
 const { handleMulterError } = require("./middleware/upload")
+const { initReminderNotifications } = require("./jobs/reminderNotifications")
 
 const app = express()
 // Track online users by userId
@@ -52,14 +54,26 @@ app.use(
   }),
 )
 
-// // Rate limiting
+// // Rate limiting - general API limiter
 // const limiter = rateLimit({
 //   windowMs: 15 * 60 * 1000, // 15 minutes
-//   max: 100, // limit each IP to 100 requests per windowMs
+//   max: 500, // limit each IP to 500 requests per windowMs
 //   message: "Too many requests from this IP, please try again later.",
 // })
 
+// More lenient rate limiter for auth routes (login, register, oauth)
+// const authLimiter = rateLimit({
+//   windowMs: 15 * 60 * 1000, // 15 minutes
+//   max: 50, // limit each IP to 50 auth requests per windowMs
+//   message: "Too many authentication attempts, please try again later.",
+//   skip: (req) => {
+//     // Skip rate limiting for OAuth callback (it's already protected by OAuth flow)
+//     return req.path === '/oauth' || req.path.includes('callback')
+//   }
+// })
+
 // app.use("/api", limiter)
+// app.use("/api/auth", authLimiter)
 
 // Body parsing middleware
 app.use(express.json({ limit: "10mb" }))
@@ -102,6 +116,7 @@ app.use("/api/friends", authenticateToken, verifyCsrf, friendsRoutes)
 app.use("/api/conversations", authenticateToken, verifyCsrf, conversationsRoutes)
 app.use("/api/calendar", authenticateToken, verifyCsrf, calendarRoutes)
 app.use("/api/analytics", authenticateToken, analyticsRoutes)
+app.use("/api/reminders", authenticateToken, verifyCsrf, reminderRoutes)
 
 // Health check
 app.get("/api/health", (req, res) => {
@@ -112,8 +127,8 @@ app.get("/api/health", (req, res) => {
 io.use((socket, next) => {
   try {
     const cookieHeader = socket.handshake.headers.cookie || ''
-    console.log(`[SOCKET] Handshake from ${socket.id}`)
-    console.log(`[SOCKET] Cookie header: ${cookieHeader ? 'Present' : 'Missing'}`)
+    
+    
 
     const cookies = Object.fromEntries(cookieHeader.split(';').filter(Boolean).map(c => {
       const [k, ...rest] = c.trim().split('=')
@@ -124,9 +139,9 @@ io.use((socket, next) => {
     const authToken = socket.handshake.auth && socket.handshake.auth.token
     const token = cookies['accessToken'] || authToken
 
-    console.log(`[SOCKET] Auth token found: ${!!token}`)
+    
     if (!token) {
-      console.log('[SOCKET] Authentication failed: No token')
+      
       return next(new Error('Authentication error'))
     }
 
@@ -145,7 +160,7 @@ io.use((socket, next) => {
 })
 
 io.on("connection", (socket) => {
-  console.log(`User ${socket.userId} connected`)
+  
 
   // Join user to their personal room
   socket.join(`user_${socket.userId}`)
@@ -181,7 +196,7 @@ io.on("connection", (socket) => {
   socket.broadcast.emit("presence:online", { userId: String(socket.userId) })
 
   socket.on("disconnect", () => {
-    console.log(`User ${socket.userId} disconnected`)
+    
     try { onlineUsers.delete(String(socket.userId)) } catch (_) { }
     socket.broadcast.emit("presence:offline", { userId: String(socket.userId) })
   })
@@ -201,7 +216,7 @@ app.use("*", (req, res) => {
 const PORT = process.env.PORT || 5000
 
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`)
+  initReminderNotifications(io)
 })
 
 module.exports = { app, io }

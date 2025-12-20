@@ -25,13 +25,13 @@ class EmailService {
       // Verify connection configuration
       this.transporter.verify((error, success) => {
         if (error) {
-          console.error("Email service configuration error:", error)
+          
         } else {
-          console.log("Email service is ready to send messages")
+          
         }
       })
     } else {
-      console.log("Email service: No SMTP credentials configured, emails will be logged only")
+      
       this.transporter = null
     }
   }
@@ -40,7 +40,7 @@ class EmailService {
     try {
       // If no transporter (no SMTP configuration), log and return
       if (!this.transporter) {
-        console.log("📧 Email would be sent:", { 
+        ("📧 Email would be sent:", { 
           to, 
           subject, 
           template: template || 'custom',
@@ -62,7 +62,7 @@ class EmailService {
         emailText = this.htmlToText(emailHtml)
       }
 
-      const fromAddress = `${process.env.APP_NAME || "Khutrukey"} <${process.env.SMTP_FROM || process.env.SMTP_USER}>`
+      const fromAddress = `${process.env.APP_NAME || "SajiloKhata"} <${process.env.SMTP_FROM || process.env.SMTP_USER}>`
       const replyTo = (process.env.SMTP_FROM && process.env.SMTP_FROM !== process.env.SMTP_USER)
         ? process.env.SMTP_FROM
         : undefined
@@ -91,7 +91,7 @@ class EmailService {
       })
       return result
     } catch (error) {
-      console.error("Failed to send email:", error)
+      
       throw error
     }
   }
@@ -134,19 +134,19 @@ class EmailService {
       <body>
         <div class="container">
           <div class="header">
-            <h1>Welcome to Khutrukey!</h1>
+            <h1>Welcome to SajiloKhata!</h1>
           </div>
           <div class="content">
             <h2>Hi ${data.firstName},</h2>
-            <p>Thank you for signing up for Khutrukey! To complete your registration, please verify your email address by clicking the button below:</p>
+            <p>Thank you for signing up for SajiloKhata! To complete your registration, please verify your email address by clicking the button below:</p>
             <a href="${data.verificationUrl}" class="button">Verify Email Address</a>
             <p>If the button doesn't work, you can copy and paste this link into your browser:</p>
             <p><a href="${data.verificationUrl}">${data.verificationUrl}</a></p>
             <p>This link will expire in 24 hours for security reasons.</p>
-            <p>If you didn't create an account with Khutrukey, you can safely ignore this email.</p>
+            <p>If you didn't create an account with SajiloKhata, you can safely ignore this email.</p>
           </div>
           <div class="footer">
-            <p>&copy; 2024 Khutrukey. All rights reserved.</p>
+            <p>&copy; 2024 SajiloKhata. All rights reserved.</p>
           </div>
         </div>
       </body>
@@ -177,7 +177,7 @@ class EmailService {
           </div>
           <div class="content">
             <h2>Hi ${data.firstName},</h2>
-            <p>We received a request to reset your password for your Khutrukey account. Click the button below to reset your password:</p>
+            <p>We received a request to reset your password for your SajiloKhata account. Click the button below to reset your password:</p>
             <a href="${data.resetUrl}" class="button">Reset Password</a>
             <p>If the button doesn't work, you can copy and paste this link into your browser:</p>
             <p><a href="${data.resetUrl}">${data.resetUrl}</a></p>
@@ -185,7 +185,7 @@ class EmailService {
             <p>If you didn't request a password reset, you can safely ignore this email. Your password will remain unchanged.</p>
           </div>
           <div class="footer">
-            <p>&copy; 2024 Khutrukey. All rights reserved.</p>
+            <p>&copy; 2024 SajiloKhata. All rights reserved.</p>
           </div>
         </div>
       </body>
@@ -222,10 +222,10 @@ class EmailService {
               <p><strong>Amount:</strong> $${data.amount}</p>
               <p><strong>Description:</strong> ${data.title}</p>
             </div>
-            <p>You can view the full details and manage your expenses in the Khutrukey app.</p>
+            <p>You can view the full details and manage your expenses in the SajiloKhata app.</p>
           </div>
           <div class="footer">
-            <p>&copy; 2024 Khutrukey. All rights reserved.</p>
+            <p>&copy; 2024 SajiloKhata. All rights reserved.</p>
           </div>
         </div>
       </body>
@@ -265,10 +265,10 @@ class EmailService {
               <h2>Hi ${data.firstName},</h2>
               <p>${data.message}</p>
               <a href="${process.env.CLIENT_URL}/expenses" class="button">View Expenses</a>
-              <p class="muted">You received this because you have pending balances in Khutrukey.</p>
+              <p class="muted">You received this because you have pending balances in SajiloKhata.</p>
             </div>
           </div>
-          <p class="muted" style="text-align:center; margin-top:12px;">&copy; 2024 Khutrukey. All rights reserved.</p>
+          <p class="muted" style="text-align:center; margin-top:12px;">&copy; 2024 SajiloKhata. All rights reserved.</p>
         </div>
       </body>
       </html>
@@ -281,7 +281,7 @@ class EmailService {
       <html>
       <head>
         <meta charset="utf-8">
-        <title>Khutrukey Invitation</title>
+        <title>SajiloKhata Invitation</title>
         <style>
           body { margin:0; padding:0; background:#f6f9fc; font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
           .wrapper { padding: 24px; }
@@ -297,7 +297,7 @@ class EmailService {
         <div class="wrapper">
           <div class="container">
             <div class="header">
-              <h1>You're invited to Khutrukey!</h1>
+              <h1>You're invited to SajiloKhata!</h1>
             </div>
             <div class="content">
               <h2>Hi ${data.firstName},</h2>
@@ -307,7 +307,7 @@ class EmailService {
               <p><a href="${data.inviteUrl}">${data.inviteUrl}</a></p>
             </div>
           </div>
-          <p class="muted" style="text-align:center; margin-top:12px;">&copy; 2024 Khutrukey. All rights reserved.</p>
+          <p class="muted" style="text-align:center; margin-top:12px;">&copy; 2024 SajiloKhata. All rights reserved.</p>
         </div>
       </body>
       </html>

@@ -128,10 +128,10 @@ export function Header({
   }
 
   return (
-    <header className="sticky top-0 z-40 h-14 sm:h-16 bg-[var(--panel)]/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b border-white/5">
-      <div className="flex items-center h-full px-3 sm:px-4 gap-2 sm:gap-3 py-2">
+    <header className="sticky top-0 z-40 h-auto bg-[var(--panel)]/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b border-white/5">
+      <div className="flex items-center sm:items-center h-full px-3 sm:px-4 gap-2 sm:gap-3 py-1.5 sm:py-2">
         {/* Left Section - Mobile Menu & Title */}
-        <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 sm:flex-none">
           {/* Mobile Menu Button */}
           <Button
             variant="ghost"
@@ -155,8 +155,11 @@ export function Header({
           </div>
         </div>
 
-        {/* Center Section - Search */}
-        <div className="flex items-center gap-2 flex-1 justify-center max-w-md" ref={searchRef}>
+        {/* Center Section - Search (desktop/tablet only) */}
+        <div
+          className="hidden sm:flex items-center gap-2 sm:flex-1 sm:justify-center sm:max-w-md"
+          ref={searchRef}
+        >
           {showSearch && (
             <div className="relative w-full max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -269,7 +272,7 @@ export function Header({
         </div>
 
         {/* Right Section - Notifications + User Profile */}
-        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0 ml-auto">
           {/* Notifications */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

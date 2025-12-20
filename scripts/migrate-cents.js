@@ -8,7 +8,7 @@ const Expense = require('../backend/models/Expense')
 async function run() {
   const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/splitwise'
   await mongoose.connect(uri)
-  console.log('Connected to MongoDB')
+  
 
   const batchSize = 500
   let migrated = 0
@@ -60,17 +60,17 @@ async function run() {
       await doc.save()
       migrated += 1
       if (migrated % batchSize === 0) {
-        console.log(`Migrated ${migrated} expenses...`)
+        
       }
     }
   }
 
-  console.log(`Migration complete. Updated ${migrated} documents.`)
+  
   await mongoose.disconnect()
 }
 
 run().catch((e) => {
-  console.error(e)
+  
   process.exit(1)
 })
 

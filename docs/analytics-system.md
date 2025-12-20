@@ -460,8 +460,8 @@ expenseSchema.index({ status: 1, date: -1 })
 ### Debug Mode
 Enable debug logging in backend:
 ```javascript
-console.log('Query:', matchQuery)
-console.log('Results:', results)
+
+
 ```
 
 ## Support

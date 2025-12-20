@@ -8,6 +8,7 @@ const Tesseract = require("tesseract.js")
 const pdfParse = require("pdf-parse")
 const Receipt = require("../models/Receipt")
 const Expense = require("../models/Expense")
+const OCRService = require("../services/ocrService")
 
 const router = express.Router()
 
@@ -74,126 +75,27 @@ async function extractTextFromImage(filePath, mimetype) {
     // Otherwise treat as image and run through sharp + Tesseract
     const processedPath = await processImageForOCR(filePath)
     const { data: { text } } = await Tesseract.recognize(processedPath, "eng", {
-      logger: (m) => console.log(m),
+      logger: (m) => {
+        // Optional: inspect OCR progress here, currently a no-op to avoid noisy logs
+      },
     })
     if (processedPath !== filePath && fs.existsSync(processedPath)) {
       fs.unlinkSync(processedPath)
     }
     return text
   } catch (error) {
-    console.error("OCR extraction error:", error)
+    console.error("Error extracting text from image:", error)
     return ""
   }
 }
 
-// Helper function to parse receipt data from text
-function parseReceiptData(text) {
-  const lines = text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-
-  let total = 0
-  let merchant = ""
-  let date = null
-  const items = []
-
-  // Patterns for common receipt elements
-  // Support comma decimals (e.g., 405,90) and dot decimals
-  const amountCapture = "([0-9]{1,3}(?:[.,][0-9]{3})*(?:[.,][0-9]{1,2})|[0-9]+(?:[.,][0-9]{1,2})?)"
-  const totalPatterns = [
-    new RegExp(`\\btotal\\b[:\	\s]*[A-Z]*\s*${amountCapture}`, 'i'),
-    new RegExp(`\\bamount\\b[:\	\s]*${amountCapture}`, 'i'),
-    new RegExp(`\\bsum\\b[:\	\s]*${amountCapture}`, 'i')
-  ]
-
-  const datePatterns = [/(\d{1,2}\/\d{1,2}\/\d{2,4})/, /(\d{1,2}-\d{1,2}-\d{2,4})/, /(\d{4}-\d{1,2}-\d{1,2})/]
-
-  const pricePattern = new RegExp(amountCapture)
-
-  const toNumber = (val) => {
-    if (!val) return 0
-    // If both separators appear, assume last one is decimal
-    let s = String(val).trim()
-    // Replace NPR or currency labels
-    s = s.replace(/[A-Z]{2,}\s*/g, '')
-    // If contains ',' and not '.', treat ',' as decimal
-    if (s.includes(',') && !s.includes('.')) s = s.replace(',', '.')
-    // Remove thousands separators like '1,234.56' or '1.234,56' conservatively
-    // Replace all commas with nothing if we already have a dot decimal
-    if (s.includes('.') && s.indexOf('.') < s.length - 3) {
-      s = s.replace(/,/g, '')
-    }
-    // Replace thousands dots if comma is decimal
-    if (s.includes(',') && s.lastIndexOf(',') > s.length - 4) {
-      s = s.replace(/\./g, '').replace(',', '.')
-    }
-    const n = parseFloat(s)
-    return isNaN(n) ? 0 : n
-  }
-
-  // Extract merchant (usually first few lines)
-  if (lines.length > 0) {
-    merchant = lines[0]
-    // If first line looks like an address or phone, try second line
-    if (/\d{3}-\d{3}-\d{4}|\d{5}/.test(merchant) && lines.length > 1) {
-      merchant = lines[1]
-    }
-  }
-
-  // Extract date
-  for (const line of lines) {
-    for (const pattern of datePatterns) {
-      const match = line.match(pattern)
-      if (match) {
-        date = new Date(match[1])
-        if (!isNaN(date.getTime())) {
-          break
-        }
-      }
-    }
-    if (date) break
-  }
-
-  // Extract total
-  for (const line of lines) {
-    for (const pattern of totalPatterns) {
-      const match = line.match(pattern)
-      if (match) {
-        const amount = toNumber(match[1])
-        if (amount > total) {
-          total = amount
-        }
-      }
-    }
-  }
-
-  // Extract line items (description + last amount on the line)
-  const itemLineRe = new RegExp(`^(.*?)(?:\s+)${amountCapture}\s*$`)
-  for (const line of lines) {
-    if (/(subtotal|service\s*charge|vat|tax|cashier|server|receipt|order\s*details|payment\s*method)/i.test(line)) continue
-    const m = line.match(itemLineRe)
-    if (!m) continue
-    const desc = (m[1] || '').trim()
-    const amt = toNumber(m[m.length - 1])
-    if (desc.length > 2 && amt > 0 && amt <= (total || amt)) {
-      items.push({ description: desc, amount: amt })
-    }
-  }
-
-  return {
-    merchant: merchant || "Unknown Merchant",
-    total,
-    date: date || new Date(),
-    items,
-    rawText: text,
-    confidence: total > 0 ? 0.8 : 0.3,
-  }
-}
 
 // Upload and process receipt
 router.post("/upload", upload.single("receipt"), async (req, res) => {
   try {
+    console.log("Receipt upload - User:", req.user ? req.user._id : "No user")
+    console.log("Receipt upload - File:", req.file ? req.file.filename : "No file")
+    
     if (!req.file) {
       return res.status(400).json({ message: "No file uploaded" })
     }
@@ -201,12 +103,47 @@ router.post("/upload", upload.single("receipt"), async (req, res) => {
     const receiptUrl = `/uploads/receipts/${req.file.filename}`
     const filePath = req.file.path
 
-    // Extract text using OCR / PDF parser
-    console.log("Starting receipt processing...")
-    const extractedText = await extractTextFromImage(filePath, req.file.mimetype)
+    // Initialize OCR service
+    const ocrService = new OCRService()
 
-    // Parse receipt data
-    const parsedData = parseReceiptData(extractedText)
+    console.log("Starting OCR processing for file:", req.file.filename, "Type:", req.file.mimetype)
+    console.log("DEBUG: About to process OCR")
+    
+    let ocrResult
+    if (req.file.mimetype === "application/pdf") {
+      // Handle PDF files
+      const buffer = fs.readFileSync(filePath)
+      const pdfResult = await pdfParse(buffer)
+      const parsedData = ocrService.parseReceiptText(pdfResult.text || "")
+      ocrResult = {
+        rawText: pdfResult.text || "",
+        ...parsedData,
+      }
+    } else {
+      // Handle image files - use OCR service
+      const imageBuffer = fs.readFileSync(filePath)
+      console.log("Image buffer size:", imageBuffer.length, "bytes")
+      console.log("File exists:", fs.existsSync(filePath))
+      console.log("File stats:", fs.statSync(filePath))
+      ocrResult = await ocrService.extractText(imageBuffer)
+    }
+    
+    console.log("OCR extraction completed. Text length:", ocrResult.rawText ? ocrResult.rawText.length : 0)
+    console.log("OCR Results - Merchant:", ocrResult.merchantName, "Total:", ocrResult.total, "Items:", ocrResult.items ? ocrResult.items.length : 0)
+    console.log("OCR Raw text preview:", ocrResult.rawText ? ocrResult.rawText.substring(0, 200) + "..." : "No text")
+    
+    // Test parsing with known text
+    if (ocrResult.rawText && ocrResult.rawText.includes("Total Payable")) {
+      console.log("=== MANUAL TEST ===")
+      const testLine = "Total Payable: NPR 7,011"
+      console.log("Testing line:", testLine)
+      const testAmount = ocrService.extractAmount(testLine)
+      console.log("Manual test result:", testAmount)
+      console.log("=== END TEST ===")
+    }
+
+    // Calculate confidence score
+    const confidence = ocrService.calculateConfidence(ocrResult)
 
     // Create receipt record (align with schema fields)
     const receipt = new Receipt({
@@ -217,22 +154,22 @@ router.post("/upload", upload.single("receipt"), async (req, res) => {
       fileSize: req.file.size,
       mimeType: req.file.mimetype,
       ocrData: {
-        rawText: extractedText,
-        confidence: parsedData?.confidence ? Math.round(parsedData.confidence * 100) / 100 : undefined,
+        rawText: ocrResult.rawText || "",
+        confidence: Math.round(confidence),
         parsedData: {
-          merchant: parsedData?.merchant || undefined,
-          total: parsedData?.total || undefined,
-          date: parsedData?.date || undefined,
-          currency: parsedData?.currency || undefined,
-          items: Array.isArray(parsedData?.items) ? parsedData.items.map((it) => ({
+          merchant: ocrResult.merchantName || undefined,
+          total: ocrResult.total || undefined,
+          date: ocrResult.date || undefined,
+          currency: "NPR", // Update to NPR for this receipt format
+          items: Array.isArray(ocrResult.items) ? ocrResult.items.map((it) => ({
             description: it.description,
-            quantity: it.quantity || 1,
-            unitPrice: it.unitPrice || it.amount || undefined,
-            totalPrice: it.totalPrice || it.amount || undefined,
+            quantity: 1,
+            unitPrice: it.amount || undefined,
+            totalPrice: it.amount || undefined,
           })) : undefined,
-          tax: parsedData?.tax || undefined,
-          tip: parsedData?.tip || undefined,
-          paymentMethod: parsedData?.paymentMethod || undefined,
+          tax: ocrResult.tax || undefined,
+          tip: ocrResult.tip || undefined,
+          paymentMethod: undefined, // Could be enhanced to detect payment method
         },
         processingStatus: "completed",
         lastProcessedAt: new Date(),
@@ -247,13 +184,21 @@ router.post("/upload", upload.single("receipt"), async (req, res) => {
         id: receipt._id,
         filename: receipt.filename,
         path: receipt.filePath,
+        confidence: receipt.ocrData?.confidence || 0,
         parsedData: receipt.ocrData?.parsedData || {},
         extractedText: receipt.ocrData?.rawText || "",
+        // Include the parsed data in the expected format for frontend
+        merchant: ocrResult.merchantName || "",
+        total: ocrResult.total || 0,
+        date: ocrResult.date || null,
+        items: ocrResult.items || [],
+        tax: ocrResult.tax || 0,
+        subtotal: ocrResult.subtotal || 0,
       },
     })
   } catch (error) {
-    console.error("Receipt upload error:", error)
-    res.status(500).json({ message: "Error processing receipt" })
+    console.error("Error processing receipt:", error)
+    res.status(500).json({ message: "Error processing receipt", error: error.message })
   }
 })
 
@@ -290,7 +235,7 @@ router.get("/", async (req, res) => {
       }
     })
   } catch (error) {
-    console.error("Get receipts error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -309,7 +254,7 @@ router.get("/:id", async (req, res) => {
 
     res.json({ receipt })
   } catch (error) {
-    console.error("Get receipt error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -342,7 +287,7 @@ router.put("/:id", [body("parsedData").isObject().withMessage("Parsed data must 
       receipt,
     })
   } catch (error) {
-    console.error("Update receipt error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -391,7 +336,7 @@ router.put(
         receipt,
       })
     } catch (error) {
-      console.error("Link receipt to expense error:", error)
+      
       res.status(500).json({ message: "Server error" })
     }
   },
@@ -453,7 +398,7 @@ router.post("/:id/reprocess", async (req, res) => {
       throw processingError
     }
   } catch (error) {
-    console.error("Reprocess receipt error:", error)
+    
     res.status(500).json({ message: "Error reprocessing receipt" })
   }
 })
@@ -488,7 +433,7 @@ router.delete("/:id", async (req, res) => {
 
     res.json({ message: "Receipt deleted successfully" })
   } catch (error) {
-    console.error("Delete receipt error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -526,7 +471,7 @@ router.get("/stats/summary", async (req, res) => {
       recentReceipts,
     })
   } catch (error) {
-    console.error("Get receipt stats error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })

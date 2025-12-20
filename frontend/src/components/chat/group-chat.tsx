@@ -95,7 +95,7 @@ export function GroupChat() {
           joinGroups(groupIds)
         }
       } catch (e) {
-        console.error("Failed to fetch groups", e)
+        
         toast({ title: "Error", description: "Failed to load groups", variant: "destructive" })
       }
     }
@@ -153,7 +153,7 @@ export function GroupChat() {
           setSelectedGroup(prev => prev ? { ...prev, messages: formattedMsgs, conversationId: convId } : null)
         }
       } catch (e) {
-        console.error("Failed to load messages", e)
+        
       }
     }
 

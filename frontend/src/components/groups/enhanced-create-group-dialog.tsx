@@ -266,7 +266,7 @@ export function EnhancedCreateGroupDialog({ children, onGroupCreated }: CreateGr
                       className="min-h-[120px]"
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      These people will receive email invitations to join Khutrukey and this group
+                      These people will receive email invitations to join SajiloKhata and this group
                     </p>
                   </div>
                   

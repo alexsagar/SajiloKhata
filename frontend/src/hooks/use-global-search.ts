@@ -33,7 +33,7 @@ export function useGlobalSearch() {
         })
         return response.data.expenses || []
       } catch (error) {
-        console.error('Error searching expenses:', error)
+        
         return []
       }
     },
@@ -53,7 +53,7 @@ export function useGlobalSearch() {
         })
         return response.data.groups || []
       } catch (error) {
-        console.error('Error searching groups:', error)
+        
         return []
       }
     },
@@ -73,7 +73,7 @@ export function useGlobalSearch() {
         })
         return response.data.users || []
       } catch (error) {
-        console.error('Error searching users:', error)
+        
         return []
       }
     },

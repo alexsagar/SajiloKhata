@@ -44,7 +44,7 @@ export function InviteFriendDialog({ open, onOpenChange }: { open: boolean; onOp
           </div>
           <div>
             <Label>Message (optional)</Label>
-            <Textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Join me on Khutrukey!" />
+            <Textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Join me on SajiloKhata!" />
           </div>
           <div className="flex gap-2 justify-end">
             {link && (

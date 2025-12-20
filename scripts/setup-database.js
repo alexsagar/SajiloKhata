@@ -10,7 +10,7 @@ async function setupDatabase() {
 
   try {
     await client.connect()
-    console.log("✅ Connected to MongoDB")
+    
 
     const db = client.db()
 
@@ -35,10 +35,10 @@ async function setupDatabase() {
     for (const collectionName of collections) {
       try {
         await db.createCollection(collectionName)
-        console.log(`📁 Created collection: ${collectionName}`)
+        
       } catch (error) {
         if (error.code === 48) {
-          console.log(`📁 Collection ${collectionName} already exists`)
+          
         } else {
           throw error
         }
@@ -46,7 +46,7 @@ async function setupDatabase() {
     }
 
     // Create indexes for better performance
-    console.log("🔍 Creating indexes...")
+    
 
     // Users collection indexes
     await db.collection("users").createIndex({ email: 1 }, { unique: true })
@@ -118,11 +118,11 @@ async function setupDatabase() {
     await db.collection("analytics").createIndex({ date: -1 })
     await db.collection("analytics").createIndex({ type: 1 })
 
-    console.log("✅ Database setup completed successfully!")
-    console.log("📊 Collections created:", collections.length)
-    console.log("🔍 Indexes created for optimal performance")
+    
+    
+    
   } catch (error) {
-    console.error("❌ Error setting up database:", error)
+    
     process.exit(1)
   } finally {
     await client.close()

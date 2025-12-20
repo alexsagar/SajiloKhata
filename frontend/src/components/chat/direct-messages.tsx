@@ -73,8 +73,10 @@ export function DirectMessages() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    console.log("DirectMessages component mounted")
-    return () => console.log("DirectMessages component unmounted")
+    // Component mount effect
+    return () => {
+      // Cleanup
+    }
   }, [])
 
   // Deduplicate messages in conversations on mount
@@ -199,7 +201,7 @@ export function DirectMessages() {
   useEffect(() => {
     if (isConnected && conversations.length > 0) {
       const idsToJoin = conversations.map((c) => c.id).filter((id) => !String(id).startsWith("local-"))
-      console.log("[JOIN] Attempting to join conversations:", idsToJoin)
+      
       if (idsToJoin.length > 0) {
         joinConversations(idsToJoin)
       }
@@ -215,7 +217,7 @@ export function DirectMessages() {
   // Update the handler refs when dependencies change
   useEffect(() => {
     handleNewMessageRef.current = (e: any) => {
-      console.log("[SOCKET] Message event received:", e.detail)
+      
       const detail = e.detail || {}
       const convId = String(detail.conversationId || '')
       const msg = detail.message || {}
@@ -223,12 +225,12 @@ export function DirectMessages() {
       if (!convId || !msgId) return
 
       if (processedMessageIds.has(msgId)) {
-        console.log("[SOCKET] Duplicate ignored:", msgId)
+        
         return
       }
       processedMessageIds.add(msgId)
 
-      console.log("[SOCKET] Processing message:", msgId, "from:", msg.sender)
+      
 
       // Determine if this message is from the current user
       const currentUserId = String((user as any)?._id || (user as any)?.id || '')
@@ -304,14 +306,8 @@ export function DirectMessages() {
   // Sync online status from SocketContext
   useEffect(() => {
     // Always run this, even if onlineUsers is empty, to ensure we clear status if needed
-    console.log("[PRESENCE] Syncing online users:", onlineUsers)
-    console.log("[PRESENCE] Current friends:", friends.map(f => ({ id: f.id, name: f.name })))
-
     setConversations(prev => prev.map(c => {
       const isOnline = onlineUsers.includes(String(c.friend.id))
-      if (isOnline !== c.friend.isOnline) {
-        console.log(`[PRESENCE] Updating ${c.friend.name} (${c.friend.id}) to ${isOnline ? 'Online' : 'Offline'}`)
-      }
       return {
         ...c,
         friend: {
@@ -447,7 +443,7 @@ export function DirectMessages() {
 
     const loadMessages = async () => {
       try {
-        console.log("[MESSAGES] Loading messages for conversation:", selectedConversation.id)
+        
         const res = await conversationAPI.getMessages(selectedConversation.id)
         const messagesData = res.data?.data || []
 
@@ -461,7 +457,7 @@ export function DirectMessages() {
           isCurrentUser: String(msg.sender) === String((user as any)?._id || (user as any)?.id),
         }))
 
-        console.log("[MESSAGES] Loaded", loadedMessages.length, "messages")
+        
 
         setSelectedConversation(prev => prev ? {
           ...prev,
@@ -474,7 +470,7 @@ export function DirectMessages() {
             : conv
         ))
       } catch (error) {
-        console.error("[MESSAGES] Failed to load messages:", error)
+        
       }
     }
 

@@ -26,7 +26,7 @@ router.get("/", async (req, res) => {
       pagination: result.pagination || { page: pageNum, limit: limitNum, total: 0, pages: 0 },
     })
   } catch (error) {
-    console.error("Get notifications error:", error)
+    
     return res.status(500).json({ message: "Server error" })
   }
 })
@@ -51,7 +51,7 @@ router.put("/:id/read", async (req, res) => {
 
     res.json({ notification })
   } catch (error) {
-    console.error("Mark notification read error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -72,7 +72,7 @@ router.put("/read-all", async (req, res) => {
       modifiedCount: result.modifiedCount,
     })
   } catch (error) {
-    console.error("Mark all notifications read error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -96,7 +96,7 @@ router.delete("/:id", async (req, res) => {
 
     res.json({ message: "Notification deleted successfully" })
   } catch (error) {
-    console.error("Delete notification error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -117,7 +117,7 @@ router.delete("/read", async (req, res) => {
       deletedCount: result.deletedCount,
     })
   } catch (error) {
-    console.error("Delete read notifications error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -161,7 +161,7 @@ router.get("/preferences", async (req, res) => {
 
     res.json({ preferences })
   } catch (error) {
-    console.error("Get notification preferences error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -195,7 +195,7 @@ router.put(
         preferences: updatedUser.preferences.notifications,
       })
     } catch (error) {
-      console.error("Update notification preferences error:", error)
+      
       res.status(500).json({ message: "Server error" })
     }
   },
@@ -247,7 +247,7 @@ router.post(
         notification,
       })
     } catch (error) {
-      console.error("Create notification error:", error)
+      
       res.status(500).json({ message: "Server error" })
     }
   },
@@ -302,7 +302,7 @@ router.post(
         count: notifications.length,
       })
     } catch (error) {
-      console.error("Bulk notification error:", error)
+      
       res.status(500).json({ message: "Server error" })
     }
   },
@@ -370,7 +370,7 @@ router.get("/stats", async (req, res) => {
       period: `${days} days`,
     })
   } catch (error) {
-    console.error("Get notification stats error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })

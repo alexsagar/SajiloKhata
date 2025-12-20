@@ -75,7 +75,7 @@ router.get("/profile", async (req, res) => {
       stats: userStats,
     })
   } catch (error) {
-    console.error("Get profile error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -135,7 +135,7 @@ router.put(
 
       res.json({ user: updatedUser })
     } catch (error) {
-      console.error("Update profile error:", error)
+      
       if (error.code === 11000) {
         return res.status(400).json({ message: "Username already taken" })
       }
@@ -173,7 +173,7 @@ router.post("/avatar", upload.single("avatar"), async (req, res) => {
       avatarUrl,
     })
   } catch (error) {
-    console.error("Avatar upload error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -224,7 +224,7 @@ router.put(
         user: updatedUser,
       })
     } catch (error) {
-      console.error("Update preferences error:", error)
+      
       res.status(500).json({ message: "Server error" })
     }
   },
@@ -275,7 +275,7 @@ router.put(
 
       res.json({ message: "Password updated successfully" })
     } catch (error) {
-      console.error("Change password error:", error)
+      
       res.status(500).json({ message: "Server error" })
     }
   },
@@ -312,7 +312,7 @@ router.get("/groups", async (req, res) => {
 
     res.json({ groups: groupsWithStats })
   } catch (error) {
-    console.error("Get user groups error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -350,7 +350,7 @@ router.get("/expenses/recent", async (req, res) => {
       },
     })
   } catch (error) {
-    console.error("Get recent expenses error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -385,7 +385,7 @@ router.get("/search", async (req, res) => {
 
     res.json({ users })
   } catch (error) {
-    console.error("Search users error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -450,7 +450,7 @@ router.get("/balance", async (req, res) => {
       balanceByGroup: Object.values(balanceByGroup),
     })
   } catch (error) {
-    console.error("Get balance error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -506,7 +506,7 @@ router.delete(
 
       res.json({ message: "Account deleted successfully" })
     } catch (error) {
-      console.error("Delete account error:", error)
+      
       res.status(500).json({ message: "Server error" })
     }
   },
@@ -552,7 +552,7 @@ router.get("/admin/all", requireRole(["admin"]), async (req, res) => {
       },
     })
   } catch (error) {
-    console.error("Admin get users error:", error)
+    
     res.status(500).json({ message: "Server error" })
   }
 })

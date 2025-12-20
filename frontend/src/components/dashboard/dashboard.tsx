@@ -21,8 +21,8 @@ export function Dashboard() {
       </div>
 
       {/* Chart Section - Responsive Grid */}
-      <div className="dashboard-grid-full grid gap-4 md:gap-6 md:grid-cols-2 lg:grid-cols-7 w-full" style={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
-        <KanbanCard className="col-span-4">
+      <div className="dashboard-grid-full grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-7 w-full" style={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
+        <KanbanCard className="col-span-1 md:col-span-1 lg:col-span-4">
           <KanbanCardHeader>
             <KanbanCardTitle>Expense Overview</KanbanCardTitle>
             <KanbanCardDescription>Your spending patterns over the last 6 months</KanbanCardDescription>
@@ -32,7 +32,7 @@ export function Dashboard() {
           </KanbanCardContent>
         </KanbanCard>
 
-        <KanbanCard className="col-span-3">
+        <KanbanCard className="col-span-1 md:col-span-1 lg:col-span-3 w-full overflow-hidden">
           <KanbanCardHeader>
             <KanbanCardTitle>Recent Transactions</KanbanCardTitle>
             <KanbanCardDescription>Your latest expense activities</KanbanCardDescription>

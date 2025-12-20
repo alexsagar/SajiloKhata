@@ -5,8 +5,7 @@ import { expenseAPI } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
 import { formatCurrencyWithSymbol } from "@/lib/currency"
 import { formatDistanceToNow } from "date-fns"
-import { CreditCard, Users, Calendar, Tag } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { CreditCard, Users } from "lucide-react"
 
 export function RecentTransactions() {
   const { user } = useAuth()
@@ -54,65 +53,39 @@ export function RecentTransactions() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-3 max-h-[400px] overflow-y-auto">
+    <div className="space-y-4 w-full">
+      <div className="space-y-2 max-h-[400px] overflow-y-auto w-full">
         {recentExpenses.map((expense: any) => {
           const isPersonal = !expense.groupId
-          // For relative "recent" display, prefer createdAt; fallback to updatedAt/date; if invalid, use now
           const dateStr = expense?.createdAt || expense?.updatedAt || expense?.date
           const parsed = dateStr ? new Date(dateStr) : new Date()
           const expenseDate = isNaN(parsed.getTime()) ? new Date() : parsed
           
           return (
-            <div key={expense._id} className="flex items-center justify-between p-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors">
-              <div className="flex items-center space-x-3 flex-1 min-w-0">
-                {/* Expense Type Icon */}
-                <div className={`p-2 rounded-full ${
+            <div
+              key={expense._id}
+              className="flex items-center justify-between p-2.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors"
+            >
+              {/* Left: Icon + Info */}
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div className={`p-1.5 rounded-full shrink-0 ${
                   isPersonal 
                     ? 'bg-blue-500/20 text-blue-400' 
                     : 'bg-green-500/20 text-green-400'
                 }`}>
-                  {isPersonal ? (
-                    <CreditCard className="h-4 w-4" />
-                  ) : (
-                    <Users className="h-4 w-4" />
-                  )}
+                  {isPersonal ? <CreditCard className="h-3.5 w-3.5" /> : <Users className="h-3.5 w-3.5" />}
                 </div>
-
-                {/* Expense Details */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2">
-                    <p className="text-sm font-medium text-white truncate leading-tight">
-                      {expense.description}
-                    </p>
-                    <Badge variant={isPersonal ? "secondary" : "default"} className="text-xs leading-none py-0.5">
-                      {isPersonal ? "Personal" : "Group"}
-                    </Badge>
-                  </div>
-                  
-                  <div className="flex items-center gap-4 mt-1.5 text-xs text-muted-foreground">
-                    <div className="flex items-center space-x-1">
-                      <Tag className="h-3 w-3" />
-                      <span className="capitalize">{expense.category || 'other'}</span>
-                    </div>
-                    <div className="flex items-center space-x-1">
-                      <Calendar className="h-3 w-3" />
-                      <span>{formatDistanceToNow(expenseDate, { addSuffix: true })}</span>
-                    </div>
-                  </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-white truncate">{expense.description}</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {expense.category || 'other'} · {formatDistanceToNow(expenseDate, { addSuffix: true })}
+                  </p>
                 </div>
               </div>
-
-              {/* Amount */}
-              <div className="text-right ml-4">
-                <div className="text-sm font-semibold text-white">
-                  {formatCurrencyWithSymbol(
-                    (expense.amountCents || 0) / 100,
-                    expense.currencyCode || userCurrency
-                  )}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {expense.currencyCode || userCurrency}
+              {/* Right: Amount */}
+              <div className="text-right shrink-0 ml-2">
+                <div className="text-sm font-semibold text-white whitespace-nowrap">
+                  {formatCurrencyWithSymbol((expense.amountCents || 0) / 100, expense.currencyCode || userCurrency)}
                 </div>
               </div>
             </div>

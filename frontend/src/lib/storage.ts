@@ -13,7 +13,7 @@ export function setItem(key: string, value: any) {
     try {
       localStorage.setItem(key, JSON.stringify(value));
     } catch (error) {
-      console.warn('Failed to set localStorage item:', error);
+      ;
     }
   }
 }
@@ -24,7 +24,7 @@ export function getItem<T>(key: string): T | null {
       const item = localStorage.getItem(key);
       return item ? JSON.parse(item) : null;
     } catch (error) {
-      console.warn('Failed to get localStorage item:', error);
+      ;
       return null;
     }
   }
@@ -36,7 +36,7 @@ export function removeItem(key: string): void {
     try {
       localStorage.removeItem(key);
     } catch (error) {
-      console.warn('Failed to remove localStorage item:', error);
+      ;
     }
   }
 }
@@ -46,7 +46,7 @@ export function clear(): void {
     try {
       localStorage.clear();
     } catch (error) {
-      console.warn('Failed to clear localStorage:', error);
+      ;
     }
   }
 }

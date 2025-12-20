@@ -29,6 +29,8 @@ import {
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { friendsAPI, conversationAPI } from "@/lib/api"
+import { formatCurrencyWithSymbol } from "@/lib/currency"
+import { useAuth } from "@/contexts/auth-context"
 
 interface Friend {
   id: string
@@ -54,19 +56,21 @@ const mockFriends: Friend[] = []
 const mockPendingInvitations: PendingInvitation[] = []
 
 export function FriendInvitationWithDelete() {
+  const { user } = useAuth()
+  const userCurrency = user?.preferences?.currency || "USD"
   const [friends, setFriends] = useState<Friend[]>(mockFriends)
   const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>(mockPendingInvitations)
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [friendToDelete, setFriendToDelete] = useState<Friend | null>(null)
   const [inviteEmails, setInviteEmails] = useState('')
-  const [inviteMessage, setInviteMessage] = useState('Hey! Join me on Khutrukey to easily split and track our shared expenses. It makes managing group expenses so much simpler!')
+  const [inviteMessage, setInviteMessage] = useState('Hey! Join me on SajiloKhata to easily split and track our shared expenses. It makes managing group expenses so much simpler!')
   const [copiedLink, setCopiedLink] = useState(false)
   const [sending, setSending] = useState(false)
   const { toast } = useToast()
   const router = useRouter()
 
-  const inviteLink = "https://khutrukey.app/invite/abc123"
+  const inviteLink = "https://SajiloKhata.app/invite/abc123"
 
   useEffect(() => {
     friendsAPI
@@ -128,7 +132,7 @@ export function FriendInvitationWithDelete() {
     }
 
     try {
-      console.log('[Friends] Sending invitations', { emails, message: inviteMessage })
+      
       const results = await Promise.allSettled(
         newEmails.map(email => friendsAPI.createInvite({ inviteeEmail: email, message: inviteMessage }))
       )
@@ -160,9 +164,9 @@ export function FriendInvitationWithDelete() {
       if (failed.length) {
         toast({ title: "Some invites failed", description: failed.join(', '), variant: 'destructive' })
       }
-      console.log('[Friends] Invite results', { succeeded, failed })
+      
     } catch (e: any) {
-      console.error('[Friends] Failed to send invites', e)
+      
       toast({ title: "Failed to send invites", description: e?.message || '', variant: 'destructive' })
     }
     setSending(false)
@@ -265,7 +269,7 @@ export function FriendInvitationWithDelete() {
         <div>
           <h2 className="text-2xl font-bold">Friends & Invitations</h2>
           <p className="text-muted-foreground">
-            Invite friends to join Khutrukey and manage shared expenses together
+            Invite friends to join SajiloKhata and manage shared expenses together
           </p>
         </div>
         <Button onClick={() => setIsInviteDialogOpen(true)}>
@@ -298,7 +302,7 @@ export function FriendInvitationWithDelete() {
           </KanbanCardHeader>
           <KanbanCardContent>
             <div className="text-2xl font-bold text-green-600">
-              ${friends.reduce((sum, f) => sum + f.balance, 0).toFixed(2)}
+              {formatCurrencyWithSymbol(friends.reduce((sum, f) => sum + f.balance, 0), userCurrency)}
             </div>
           </KanbanCardContent>
         </KanbanCard>
@@ -350,7 +354,7 @@ export function FriendInvitationWithDelete() {
                         <div className="text-right">
                           <div className="text-sm text-muted-foreground">Balance</div>
                           <div className={`font-semibold ${friend.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            ${Math.abs(friend.balance).toFixed(2)}
+                            {formatCurrencyWithSymbol(Math.abs(friend.balance), userCurrency)}
                             <span className="text-xs ml-1">
                               {friend.balance >= 0 ? 'owes you' : 'you owe'}
                             </span>
@@ -510,7 +514,7 @@ export function FriendInvitationWithDelete() {
       <Dialog open={isInviteDialogOpen} onOpenChange={setIsInviteDialogOpen}>
         <DialogContent className="max-w-sm w-auto max-h-[85vh] mx-auto">
           <DialogHeader className="space-y-2">
-            <DialogTitle className="text-lg font-semibold">Invite Friends to Khutrukey</DialogTitle>
+            <DialogTitle className="text-lg font-semibold">Invite Friends to SajiloKhata</DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
               Send invitations via email or share your personal invite link
             </DialogDescription>
@@ -563,7 +567,7 @@ export function FriendInvitationWithDelete() {
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Share this link with friends so they can join Khutrukey and connect with you
+                  Share this link with friends so they can join SajiloKhata and connect with you
                 </p>
               </div>
             </TabsContent>
@@ -618,8 +622,8 @@ export function FriendInvitationWithDelete() {
                 </div>
                 <p className="text-xs text-red-700 mt-1">
                   {friendToDelete.balance > 0 
-                    ? `${friendToDelete.name} owes you $${Math.abs(friendToDelete.balance).toFixed(2)}`
-                    : `You owe ${friendToDelete.name} $${Math.abs(friendToDelete.balance).toFixed(2)}`
+                    ? `${friendToDelete.name} owes you ${formatCurrencyWithSymbol(Math.abs(friendToDelete.balance), userCurrency)}`
+                    : `You owe ${friendToDelete.name} ${formatCurrencyWithSymbol(Math.abs(friendToDelete.balance), userCurrency)}`
                   }
                 </p>
                 <p className="text-xs text-red-600 mt-1">

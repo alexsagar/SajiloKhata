@@ -5,8 +5,12 @@ const userSchema = new mongoose.Schema(
   {
     username: {
       type: String,
-      required: true,
+      required: function() {
+        // Username is required only if not using OAuth
+        return !this.oauthProvider;
+      },
       unique: true,
+      sparse: true, // Allow multiple null values for OAuth users
       trim: true,
       minlength: 3,
       maxlength: 30,
@@ -20,8 +24,21 @@ const userSchema = new mongoose.Schema(
     },
     password: {
       type: String,
-      required: true,
+      required: function() {
+        // Password is required only if not using OAuth
+        return !this.oauthProvider;
+      },
       minlength: 6,
+    },
+    // OAuth fields
+    oauthProvider: {
+      type: String,
+      enum: ["google", "facebook", null],
+      default: null,
+    },
+    oauthProviderId: {
+      type: String,
+      default: null,
     },
     firstName: {
       type: String,

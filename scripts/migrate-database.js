@@ -20,17 +20,17 @@ class DatabaseMigrator {
   async connect() {
     await this.client.connect()
     this.db = this.client.db()
-    console.log("✅ Connected to MongoDB for migration")
+    
   }
 
   async disconnect() {
     await this.client.close()
-    console.log("✅ Disconnected from MongoDB")
+    
   }
 
   // Migration 001: Add user preferences
   async migration_001_add_user_preferences() {
-    console.log("Running migration 001: Add user preferences")
+    
 
     const users = await this.db.collection("users").find({}).toArray()
 
@@ -61,32 +61,32 @@ class DatabaseMigrator {
       }
     }
 
-    console.log(`✅ Updated ${users.length} users with preferences`)
+    
   }
 
   // Migration 002: Add tags to expenses
   async migration_002_add_expense_tags() {
-    console.log("Running migration 002: Add expense tags")
+    
 
     const result = await this.db.collection("expenses").updateMany({ tags: { $exists: false } }, { $set: { tags: [] } })
 
-    console.log(`✅ Added tags field to ${result.modifiedCount} expenses`)
+    
   }
 
   // Migration 003: Add recurring expense support
   async migration_003_add_recurring_expenses() {
-    console.log("Running migration 003: Add recurring expenses")
+    
 
     const result = await this.db
       .collection("expenses")
       .updateMany({ recurring: { $exists: false } }, { $set: { recurring: null } })
 
-    console.log(`✅ Added recurring field to ${result.modifiedCount} expenses`)
+    
   }
 
   // Migration 004: Add team features
   async migration_004_add_team_features() {
-    console.log("Running migration 004: Add team features")
+    
 
     // Add subscription field to users
     const userResult = await this.db.collection("users").updateMany(
@@ -103,19 +103,19 @@ class DatabaseMigrator {
       },
     )
 
-    console.log(`✅ Added subscription to ${userResult.modifiedCount} users`)
+    
 
     // Add role field to users
     const roleResult = await this.db
       .collection("users")
       .updateMany({ role: { $exists: false } }, { $set: { role: "user" } })
 
-    console.log(`✅ Added role to ${roleResult.modifiedCount} users`)
+    
   }
 
   // Migration 005: Add receipt processing fields
   async migration_005_add_receipt_processing() {
-    console.log("Running migration 005: Add receipt processing")
+    
 
     // Ensure receipts collection exists
     try {
@@ -129,7 +129,7 @@ class DatabaseMigrator {
       .collection("expenses")
       .updateMany({ receipt: { $exists: false } }, { $set: { receipt: null } })
 
-    console.log(`✅ Added receipt field to ${result.modifiedCount} expenses`)
+    
   }
 
   // Get migration status
@@ -161,7 +161,7 @@ class DatabaseMigrator {
 
   // Run all pending migrations
   async runMigrations() {
-    console.log("🔄 Starting database migrations...")
+    
 
     const completedMigrations = await this.getMigrationStatus()
 
@@ -173,27 +173,27 @@ class DatabaseMigrator {
         try {
           await migration.call(this)
           await this.markMigrationCompleted(migrationName)
-          console.log(`✅ Completed ${migrationName}`)
+          
         } catch (error) {
-          console.error(`❌ Failed ${migrationName}:`, error)
+          
           throw error
         }
       } else {
-        console.log(`⏭️  Skipped ${migrationName} (already completed)`)
+        `)
       }
     }
 
-    console.log("✅ All migrations completed successfully!")
+    
   }
 
   // Rollback a specific migration (if needed)
   async rollbackMigration(migrationName) {
-    console.log(`🔄 Rolling back ${migrationName}...`)
+    
 
     // Remove migration record
     await this.db.collection("migrations").deleteOne({ name: migrationName })
 
-    console.log(`✅ Rolled back ${migrationName}`)
+    
   }
 }
 
@@ -205,7 +205,7 @@ async function runMigrations() {
     await migrator.connect()
     await migrator.runMigrations()
   } catch (error) {
-    console.error("❌ Migration failed:", error)
+    
     process.exit(1)
   } finally {
     await migrator.disconnect()
