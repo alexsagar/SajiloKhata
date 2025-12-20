@@ -21,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Loader2, Upload, X } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { expenseAPI, receiptAPI } from "@/lib/api"
+import { expenseAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 import { useDropzone } from "react-dropzone"
 import { CurrencySelector } from "@/components/currency/currency-selector"
@@ -214,7 +214,6 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
 
   const selectedCurrency = watch("currencyCode")
 
-
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: {
       'image/*': ['.png', '.jpg', '.jpeg'],
@@ -222,110 +221,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
     },
     maxFiles: 1,
     onDrop: (acceptedFiles) => {
-      const file = acceptedFiles[0]
-      setSelectedFile(file)
-      // Auto-upload and OCR for personal expense to prefill fields
-      if (file) {
-        const fd = new FormData()
-        fd.append('receipt', file)
-        receiptAPI.uploadReceipt(fd as any)
-          .then((res: any) => {
-            const data = res?.data?.data || {}
-            const parsed = data.parsedData || {}
-            const extracted: string = data.extractedText || ''
-            // Only set amount (total) and notes (items list)
-            let totalNum: number | null = null
-            const toNumber = (val: any): number => {
-              if (val == null) return NaN
-              let s = String(val).trim()
-              // Remove currency codes
-              s = s.replace(/[A-Z]{2,}\s*/g, '')
-              // Decide if comma is decimal or thousands
-              const lastComma = s.lastIndexOf(',')
-              const lastDot = s.lastIndexOf('.')
-              if (lastComma !== -1 && lastDot === -1) {
-                // If comma within last 3 chars, treat as decimal, else thousands
-                if (s.length - lastComma <= 3) {
-                  s = s.replace(',', '.')
-                } else {
-                  s = s.replace(/,/g, '')
-                }
-              } else if (lastComma !== -1 && lastDot !== -1) {
-                // If both exist and comma is thousands (before dot), drop commas
-                if (lastComma < lastDot) s = s.replace(/,/g, '')
-              }
-              // Remove any remaining thousands separators
-              s = s.replace(/\s/g, '')
-              const n = Number(s)
-              return Number.isFinite(n) ? n : NaN
-            }
-
-            if (parsed.total) {
-              totalNum = toNumber(parsed.total)
-            } else if (extracted) {
-              const totalRegexes = [
-                /\btotal\s*payable\b[:\s-]*[A-Z]{2,}?\s*([-]?[0-9][0-9.,]*)/i,
-                /\bgrand\s*total\b[:\s-]*[A-Z]{2,}?\s*([-]?[0-9][0-9.,]*)/i,
-                /\btotal\b[:\s-]*[A-Z]{2,}?\s*([-]?[0-9][0-9.,]*)/i,
-                /\btotal\s*payable\b[:\s-]*([-]?[0-9][0-9.,]*)/i,
-                /\bgrand\s*total\b[:\s-]*([-]?[0-9][0-9.,]*)/i,
-                /\btotal\b[:\s-]*([-]?[0-9][0-9.,]*)/i,
-              ]
-              let m: RegExpMatchArray | null = null
-              for (const r of totalRegexes) { m = extracted.match(r); if (m) break }
-              if (m && m[1]) totalNum = toNumber(m[1])
-            }
-            if (typeof totalNum === 'number' && !Number.isNaN(totalNum) && totalNum > 0) {
-              if (!Number.isNaN(totalNum) && totalNum > 0) {
-                setValue('amount', totalNum)
-              }
-            }
-            let itemNames = ''
-            if (Array.isArray(parsed.items) && parsed.items.length > 0) {
-              itemNames = parsed.items
-                .map((it: any) => String(it.description || '').trim())
-                .filter((s: string) => s.length > 0)
-                .join(', ')
-            } else if (extracted) {
-              const lines = extracted.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
-              const startIdx = lines.findIndex(l => /order\s*details|^item(\s+qty)?/i.test(l))
-              const stopIdx = lines.findIndex(l => /(subtotal|service\s*charge|vat|discount|total\s*payable|\btotal\b)/i.test(l))
-              const range = lines.slice(startIdx >= 0 ? startIdx + 1 : 0, stopIdx > 0 ? stopIdx : undefined)
-              const amountCapture = /([0-9]{1,3}(?:[.,][0-9]{3})*(?:[.,][0-9]{1,2})|[0-9]+(?:[.,][0-9]{1,2})?)/
-              const items: string[] = []
-              for (const ln of range) {
-                if (/(subtotal|service\s*charge|vat|tax|cashier|server|receipt|phone|date|discount)/i.test(ln)) continue
-                // Try to match lines ending with an amount first
-                const m = ln.match(new RegExp(`^(.*?)(?:\\s+)${amountCapture.source}\\s*$`))
-                if (m) {
-                  let desc = (m[1] || '').trim()
-                  // Strip trailing numbers (qty/rate) to keep only item name
-                  desc = desc.replace(/\s+\d.*$/, '')
-                  if (desc && desc.length > 2) items.push(desc)
-                  continue
-                }
-                // Fallback: treat first token as item name if line contains numbers
-                const tokens = ln.split(/\s+/)
-                const first = tokens[0]
-                if (first && tokens.length >= 2 && tokens.some(t => amountCapture.test(t))) {
-                  items.push(first)
-                }
-              }
-              if (items.length) {
-                itemNames = items.join(', ')
-              }
-            }
-            if (itemNames) {
-              const existing = watch('notes') || ''
-              const newNotes = existing ? `${existing}\nItems: ${itemNames}` : `Items: ${itemNames}`
-              setValue('notes', newNotes)
-            }
-            toast({ title: 'Receipt processed', description: 'Total and items were added. Please verify before saving.' })
-          })
-          .catch(() => {
-            toast({ variant: 'destructive', title: 'Processing failed', description: 'Failed to process receipt. You can still enter details manually.' })
-          })
-      }
+      setSelectedFile(acceptedFiles[0])
     }
   })
 
@@ -367,52 +263,11 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
       
       return expenseAPI.createExpense(formData)
     },
-    onSuccess: async (resp) => {
-      // Try to extract the created expense from various possible response shapes
-      const createdExpense = (resp as any)?.data?.data?.expense || (resp as any)?.data?.expense || (resp as any)?.data
-
-      // Optimistically update recent-expenses list
-      queryClient.setQueryData(["recent-expenses"], (old: any) => {
-        if (!old) return old
-        const oldExpenses = old?.data?.expenses || old?.expenses
-        if (Array.isArray(oldExpenses)) {
-          const updated = [createdExpense, ...oldExpenses]
-          if (old.data && Array.isArray(old.data.expenses)) {
-            return { ...old, data: { ...old.data, expenses: updated } }
-          }
-          return { ...(old || {}), expenses: updated }
-        }
-        return old
-      })
-
-      // Optimistically update any expenses queries
-      queryClient.setQueriesData({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "expenses" }, (old: any) => {
-        if (!old) return old
-        const payload = (old?.data && old.data.data) ? old.data.data : old.data
-        if (payload && Array.isArray(payload.expenses)) {
-          const updated = [createdExpense, ...payload.expenses]
-          if (old.data && old.data.data) {
-            return { ...old, data: { ...old.data, data: { ...old.data.data, expenses: updated } } }
-          }
-          if (old.data) {
-            return { ...old, data: { ...old.data, expenses: updated } }
-          }
-        }
-        return old
-      })
-
-      // Invalidate all expense-related queries to ensure the lists and dashboard refresh
-      queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "expenses" })
-      queryClient.invalidateQueries({ queryKey: ["recent-expenses"] })
-      queryClient.invalidateQueries({ queryKey: ["expense-summary"] })
-      queryClient.invalidateQueries({ queryKey: ["expense-chart-data"] })
-
-      // Proactively refetch the most visible widgets immediately
-      await Promise.all([
-        queryClient.refetchQueries({ queryKey: ["recent-expenses"] }),
-        queryClient.refetchQueries({ queryKey: ["expense-summary"] }),
-        queryClient.refetchQueries({ queryKey: ["expense-chart-data"] }),
-      ])
+    onSuccess: () => {
+      // Invalidate all expense-related queries to ensure the list refreshes
+      queryClient.invalidateQueries({ queryKey: ["expenses"] })
+      queryClient.invalidateQueries({ queryKey: ["expenses", undefined] })
+      queryClient.invalidateQueries({ queryKey: ["expenses", null] })
       
       toast({
         title: "Personal expense created",
