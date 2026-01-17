@@ -2,12 +2,35 @@ const express = require("express")
 const bcrypt = require("bcryptjs")
 const crypto = require("crypto")
 const User = require("../models/User")
+const PendingSignup = require("../models/PendingSignup")
 const { generateTokens, verifyRefreshToken, authenticateToken } = require("../middleware/auth")
 const cookie = require('cookie')
 const { sendEmail } = require("../services/emailService")
 const { body, validationResult } = require("express-validator")
 
 const router = express.Router()
+
+const inferCookieSecure = (req) => {
+  if (typeof process.env.COOKIE_SECURE === 'string') {
+    return process.env.COOKIE_SECURE === 'true'
+  }
+  const xfProto = String(req.headers['x-forwarded-proto'] || '').toLowerCase()
+  if (xfProto) return xfProto.includes('https')
+  return !!req.secure
+}
+
+const OTP_LENGTH = 6
+const OTP_TTL_MS = 10 * 60 * 1000
+const PENDING_TTL_MS = 24 * 60 * 60 * 1000
+const OTP_MAX_ATTEMPTS = 8
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000
+const OTP_MAX_RESENDS = 5
+
+const generateOtp = () => {
+  const max = Math.pow(10, OTP_LENGTH)
+  const n = crypto.randomInt(0, max)
+  return String(n).padStart(OTP_LENGTH, "0")
+}
 
 // Register
 router.post(
@@ -28,52 +51,183 @@ router.post(
 
       const { username, email, password, firstName, lastName } = req.body
 
+      const normalizedEmail = String(email || "").toLowerCase()
+
       // Check if user already exists
       const existingUser = await User.findOne({
-        $or: [{ email }, { username }],
+        $or: [{ email: normalizedEmail }, { username }],
       })
 
       if (existingUser) {
+        return res.status(400).json({
+          message: existingUser.email === normalizedEmail ? "Email already registered" : "Username already taken",
+        })
+      }
+
+      const existingPendingUsername = await PendingSignup.findOne({ username })
+      if (existingPendingUsername) {
+        return res.status(400).json({ message: "Username already taken" })
+      }
+
+      const existingPending = await PendingSignup.findOne({ email: normalizedEmail })
+      if (existingPending) {
+        const tooSoon = existingPending.otpSentAt && (Date.now() - new Date(existingPending.otpSentAt).getTime() < OTP_RESEND_COOLDOWN_MS)
+        if (tooSoon) {
+          return res.status(429).json({ message: "Please wait before requesting another OTP" })
+        }
+        if ((existingPending.resendCount || 0) >= OTP_MAX_RESENDS) {
+          return res.status(429).json({ message: "Too many OTP requests. Please try again later." })
+        }
+      }
+
+      const otp = generateOtp()
+      const otpHash = await bcrypt.hash(otp, 12)
+      const passwordEncrypted = await bcrypt.hash(password, 12)
+
+      const now = new Date()
+      const otpExpiresAt = new Date(Date.now() + OTP_TTL_MS)
+      const expiresAt = new Date(Date.now() + PENDING_TTL_MS)
+
+      await PendingSignup.findOneAndUpdate(
+        { email: normalizedEmail },
+        {
+          email: normalizedEmail,
+          username,
+          firstName,
+          lastName,
+          passwordEncrypted,
+          otpHash,
+          otpExpiresAt,
+          otpSentAt: now,
+          otpAttempts: 0,
+          resendCount: existingPending ? (existingPending.resendCount || 0) + 1 : 0,
+          expiresAt,
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true },
+      )
+
+      await sendEmail({
+        to: normalizedEmail,
+        subject: "Your SajiloKhata verification code",
+        html: `<!DOCTYPE html><html><body><p>Hi ${firstName},</p><p>Your verification code is:</p><h2 style="letter-spacing:2px;">${otp}</h2><p>This code expires in 10 minutes.</p></body></html>`,
+        text: `Hi ${firstName},\n\nYour verification code is: ${otp}\n\nThis code expires in 10 minutes.`,
+      })
+
+      res.status(200).json({
+        message: "OTP sent to your email. Please verify to complete registration.",
+        email: normalizedEmail,
+      })
+    } catch (error) {
+      res.status(500).json({ message: "Server error", error: error.message })
+    }
+  },
+)
+
+router.post(
+  "/register/verify-otp",
+  [body("email").isEmail().normalizeEmail(), body("otp").isLength({ min: OTP_LENGTH, max: OTP_LENGTH })],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req)
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() })
+      }
+
+      const email = String(req.body.email || "").toLowerCase()
+      const otp = String(req.body.otp || "")
+
+      const pending = await PendingSignup.findOne({ email })
+      if (!pending) {
+        return res.status(400).json({ message: "No pending signup found for this email" })
+      }
+
+      if (pending.otpExpiresAt && new Date(pending.otpExpiresAt).getTime() < Date.now()) {
+        return res.status(400).json({ message: "OTP expired" })
+      }
+
+      if ((pending.otpAttempts || 0) >= OTP_MAX_ATTEMPTS) {
+        return res.status(429).json({ message: "Too many attempts. Please request a new OTP." })
+      }
+
+      const ok = await bcrypt.compare(otp, pending.otpHash)
+      if (!ok) {
+        pending.otpAttempts = (pending.otpAttempts || 0) + 1
+        await pending.save()
+        return res.status(400).json({ message: "Invalid OTP" })
+      }
+
+      const existingUser = await User.findOne({ $or: [{ email }, { username: pending.username }] })
+      if (existingUser) {
+        await PendingSignup.deleteOne({ _id: pending._id })
         return res.status(400).json({
           message: existingUser.email === email ? "Email already registered" : "Username already taken",
         })
       }
 
-      // Generate email verification token
-      const emailVerificationToken = crypto.randomBytes(32).toString("hex")
-
-      // Create user
       const user = new User({
-        username,
+        username: pending.username,
         email,
-        password,
-        firstName,
-        lastName,
-        emailVerificationToken,
+        password: pending.passwordEncrypted,
+        firstName: pending.firstName,
+        lastName: pending.lastName,
+        isEmailVerified: true,
       })
 
       await user.save()
+      await PendingSignup.deleteOne({ _id: pending._id })
 
-      // Send verification email
-      try {
-        await sendEmail({
-          to: email,
-          subject: "Verify your SajiloKhata account",
-          template: "emailVerification",
-          data: {
-            firstName,
-            verificationUrl: `${process.env.CLIENT_URL}/verify-email?token=${emailVerificationToken}`,
-          },
-        })
-      } catch (emailError) {
-        
-      }
-
-      // Don't generate tokens - user needs to login separately
       res.status(201).json({
-        message: "User registered successfully. Please check your email for verification.",
+        message: "Registration complete. You can now log in.",
         user: user.toJSON(),
       })
+    } catch (error) {
+      res.status(500).json({ message: "Server error", error: error.message })
+    }
+  },
+)
+
+router.post(
+  "/register/resend-otp",
+  [body("email").isEmail().normalizeEmail()],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req)
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() })
+      }
+
+      const email = String(req.body.email || "").toLowerCase()
+
+      const pending = await PendingSignup.findOne({ email })
+      if (!pending) {
+        return res.status(400).json({ message: "No pending signup found for this email" })
+      }
+
+      const tooSoon = pending.otpSentAt && (Date.now() - new Date(pending.otpSentAt).getTime() < OTP_RESEND_COOLDOWN_MS)
+      if (tooSoon) {
+        return res.status(429).json({ message: "Please wait before requesting another OTP" })
+      }
+
+      if ((pending.resendCount || 0) >= OTP_MAX_RESENDS) {
+        return res.status(429).json({ message: "Too many OTP requests. Please try again later." })
+      }
+
+      const otp = generateOtp()
+      pending.otpHash = await bcrypt.hash(otp, 12)
+      pending.otpExpiresAt = new Date(Date.now() + OTP_TTL_MS)
+      pending.otpSentAt = new Date()
+      pending.otpAttempts = 0
+      pending.resendCount = (pending.resendCount || 0) + 1
+      await pending.save()
+
+      await sendEmail({
+        to: email,
+        subject: "Your SajiloKhata verification code",
+        html: `<!DOCTYPE html><html><body><p>Hi ${pending.firstName},</p><p>Your verification code is:</p><h2 style="letter-spacing:2px;">${otp}</h2><p>This code expires in 10 minutes.</p></body></html>`,
+        text: `Hi ${pending.firstName},\n\nYour verification code is: ${otp}\n\nThis code expires in 10 minutes.`,
+      })
+
+      res.status(200).json({ message: "OTP resent" })
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message })
     }
@@ -108,7 +262,7 @@ router.post("/login", [body("email").isEmail().normalizeEmail(), body("password"
 
     // Generate tokens
     const { accessToken, refreshToken } = generateTokens(user._id)
-    const inferredSecure = process.env.COOKIE_SECURE ? (process.env.COOKIE_SECURE === 'true') : (process.env.CLIENT_URL?.startsWith('https') || process.env.NODE_ENV === 'production')
+    const inferredSecure = inferCookieSecure(req)
     const inferredSameSite = process.env.COOKIE_SAMESITE || (inferredSecure ? 'None' : 'Lax')
     const common = { httpOnly: true, sameSite: inferredSameSite, secure: inferredSecure, path: '/' }
     res
@@ -150,7 +304,7 @@ router.post("/refresh", async (req, res) => {
     }
 
     const { accessToken, refreshToken: newRefreshToken } = generateTokens(user._id)
-    const inferredSecure = process.env.COOKIE_SECURE ? (process.env.COOKIE_SECURE === 'true') : (process.env.CLIENT_URL?.startsWith('https') || process.env.NODE_ENV === 'production')
+    const inferredSecure = inferCookieSecure(req)
     const inferredSameSite = process.env.COOKIE_SAMESITE || (inferredSecure ? 'None' : 'Lax')
     const common = { httpOnly: true, sameSite: inferredSameSite, secure: inferredSecure, path: '/' }
     res
@@ -284,12 +438,12 @@ router.post("/oauth", async (req, res) => {
         user.oauthProvider = provider
         user.oauthProviderId = providerId
       }
-      
-      // Update avatar if provided and user doesn't have one
-      if (avatar && !user.avatar) {
+
+      // Always update avatar to the latest value from the OAuth provider if provided
+      if (avatar) {
         user.avatar = avatar
       }
-      
+
       // Update last login
       user.lastLogin = new Date()
       await user.save()
@@ -329,9 +483,7 @@ router.post("/oauth", async (req, res) => {
     const { accessToken: jwtAccessToken, refreshToken } = generateTokens(user._id)
     
     // Set cookies
-    const inferredSecure = process.env.COOKIE_SECURE 
-      ? (process.env.COOKIE_SECURE === 'true') 
-      : (process.env.CLIENT_URL?.startsWith('https') || process.env.NODE_ENV === 'production')
+    const inferredSecure = inferCookieSecure(req)
     const inferredSameSite = process.env.COOKIE_SAMESITE || (inferredSecure ? 'None' : 'Lax')
     const common = { httpOnly: true, sameSite: inferredSameSite, secure: inferredSecure, path: '/' }
     

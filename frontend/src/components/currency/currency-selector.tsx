@@ -174,7 +174,11 @@ export function CurrencySelector({
         </SelectTrigger>
         <SelectContent>
           {popularCurrencies.map((currency) => (
-            <SelectItem key={currency.code} value={currency.code}>
+            <SelectItem
+              key={currency.code}
+              value={currency.code}
+              className={cn(value === currency.code && "bg-accent text-accent-foreground")}
+            >
               {renderCurrencyOption(currency)}
             </SelectItem>
           ))}
@@ -189,7 +193,11 @@ export function CurrencySelector({
                 {region}
               </div>
               {regionCurrencies.map((currency) => (
-                <SelectItem key={currency.code} value={currency.code}>
+                <SelectItem
+                  key={currency.code}
+                  value={currency.code}
+                  className={cn(value === currency.code && "bg-accent text-accent-foreground")}
+                >
                   {renderCurrencyOption(currency)}
                 </SelectItem>
               ))}
@@ -249,7 +257,10 @@ export function CurrencySelector({
                         onValueChange?.(v === value ? "" : v)
                         setOpen(false)
                       }}
-                      className="flex items-center justify-between"
+                      className={cn(
+                        "flex items-center justify-between",
+                        value === currency.code && "bg-accent text-accent-foreground"
+                      )}
                     >
                       {renderCurrencyOption(currency)}
                       <Check
@@ -279,7 +290,10 @@ export function CurrencySelector({
                       onValueChange?.(v === value ? "" : v)
                       setOpen(false)
                     }}
-                    className="flex items-center justify-between"
+                    className={cn(
+                      "flex items-center justify-between",
+                      value === currency.code && "bg-accent text-accent-foreground"
+                    )}
                   >
                     {renderCurrencyOption(currency)}
                     <Check

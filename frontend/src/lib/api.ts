@@ -34,7 +34,7 @@ api.interceptors.response.use(
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       const url = (originalRequest.url || '') as string
-      if (url.includes('/auth/refresh') || url.includes('/auth/login') || url.includes('/auth/register') || url.includes('/auth/me')) {
+      if (url.includes('/auth/refresh') || url.includes('/auth/login') || url.includes('/auth/register')) {
         return Promise.reject(error)
       }
       originalRequest._retry = true
@@ -43,10 +43,11 @@ api.interceptors.response.use(
         return api(originalRequest)
       } catch (refreshError) {
         // Refresh token failed - session expired, redirect to login
-        
+
+
         if (typeof window !== 'undefined') {
           localStorage.removeItem('accessToken')
-          window.location.href = '/login'
+          // window.location.href = '/login'
         }
         return Promise.reject(refreshError)
       }
@@ -66,6 +67,8 @@ api.interceptors.response.use(
 export const authAPI = {
   login: (email: string, password: string) => api.post("/auth/login", { email, password }),
   register: (userData: any) => api.post("/auth/register", userData),
+  registerVerifyOtp: (email: string, otp: string) => api.post("/auth/register/verify-otp", { email, otp }),
+  registerResendOtp: (email: string) => api.post("/auth/register/resend-otp", { email }),
   logout: () => api.post("/auth/logout"),
   refreshToken: (refreshToken: string) => api.post("/auth/refresh", { refreshToken }),
   me: () => api.get("/auth/me"),
@@ -110,7 +113,10 @@ export const friendsAPI = {
   getInvite: (code: string) => api.get(`/friends/invites/${code}`),
   acceptInvite: (code: string) => api.post(`/friends/invites/${code}/accept`),
   revokeInvite: (code: string) => api.post(`/friends/invites/${code}/revoke`),
+  declineInvite: (code: string) => api.post(`/friends/invites/${code}/decline`),
+  myInvites: () => api.get("/friends/my-invites"),
   list: () => api.get("/friends"),
+  remove: (friendId: string) => api.delete(`/friends/${friendId}`),
 }
 
 export const conversationAPI = {
@@ -141,6 +147,7 @@ export const groupAPI = {
     api.get(`/groups/${groupId}/expenses`, { params }),
   getGroupBalance: (groupId: string) => api.get(`/groups/${groupId}/balance`),
   getGroupSettlements: (groupId: string) => api.get(`/groups/${groupId}/settlements`),
+  settleUp: (groupId: string) => api.post(`/groups/${groupId}/settle-up`),
   createGroupInvite: (groupId: string, data: any) =>
     api.post(`/groups/${groupId}/invites`, data),
   getGroupInvites: (groupId: string) => api.get(`/groups/${groupId}/invites`),
@@ -150,6 +157,10 @@ export const groupAPI = {
   getBalances: (groupId: string) => api.get(`/groups/${groupId}/balances`),
   getEligibleFriends: (groupId: string) => api.get(`/groups/${groupId}/friends-eligible`),
   get: (url: string) => api.get(url),
+}
+
+export const settlementAPI = {
+  confirm: (id: string) => api.patch(`/settlements/${id}/confirm`),
 }
 
 export const expenseAPI = {

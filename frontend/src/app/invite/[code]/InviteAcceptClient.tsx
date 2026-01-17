@@ -14,6 +14,7 @@ export function InviteAcceptClient({ code }: { code: string }) {
   const router = useRouter()
   const [invite, setInvite] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     let mounted = true
@@ -28,12 +29,30 @@ export function InviteAcceptClient({ code }: { code: string }) {
   }, [code])
 
   const accept = async () => {
+    if (submitting) return
+    setSubmitting(true)
     try {
       await friendsAPI.acceptInvite(code)
       toast({ title: "You're now friends!" })
       router.push("/friends")
     } catch (e: any) {
       toast({ title: "Failed to accept", description: e?.response?.data?.message || "", variant: "destructive" })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const decline = async () => {
+    if (submitting) return
+    setSubmitting(true)
+    try {
+      await friendsAPI.declineInvite(code)
+      toast({ title: "Invite declined" })
+      router.push("/dashboard")
+    } catch (e: any) {
+      toast({ title: "Failed to decline", description: e?.response?.data?.message || "", variant: "destructive" })
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -70,9 +89,16 @@ export function InviteAcceptClient({ code }: { code: string }) {
         <CardContent className="space-y-4">
           <p>Expires: {new Date(invite.expiresAt).toLocaleString()}</p>
           {!isAuthenticated ? (
-            <Button onClick={() => router.push("/login?redirect=/invite/" + code)}>Login to accept</Button>
+            <Button onClick={() => router.push("/login?redirect=/invite/" + code)}>Login to respond</Button>
           ) : (
-            <Button onClick={accept}>Accept invite</Button>
+            <div className="flex gap-3">
+              <Button onClick={accept} disabled={submitting}>
+                Accept invite
+              </Button>
+              <Button variant="outline" onClick={decline} disabled={submitting}>
+                Decline
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

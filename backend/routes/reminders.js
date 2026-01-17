@@ -9,7 +9,8 @@ router.post(
   "/",
   [
     body("title").notEmpty().trim().withMessage("Title is required"),
-    body("dueDate").isISO8601().withMessage("Valid due date is required"),
+    // Accept simple YYYY-MM-DD date string from the calendar UI
+    body("dueDate").notEmpty().withMessage("Due date is required"),
     body("amount").optional().isFloat({ min: 0 }).withMessage("Amount must be positive"),
     body("category").optional().isIn([
       "food", "transportation", "accommodation", "entertainment", 
@@ -25,8 +26,22 @@ router.post(
 
       const { title, description, dueDate, amount, category } = req.body
 
-      // Normalize dueDate to start of day in UTC
-      const dueDateObj = new Date(dueDate + "T00:00:00.000Z")
+      // Normalize dueDate to start of day (local) then store as Date
+      // Accepts either a YYYY-MM-DD string or a full ISO string
+      const parsed = new Date(dueDate)
+      if (isNaN(parsed.getTime())) {
+        return res.status(400).json({ message: "Invalid due date format" })
+      }
+
+      const dueDateObj = new Date(
+        parsed.getFullYear(),
+        parsed.getMonth(),
+        parsed.getDate(),
+        0,
+        0,
+        0,
+        0,
+      )
 
       const reminder = new Reminder({
         user: req.user._id,

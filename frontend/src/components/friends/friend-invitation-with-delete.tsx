@@ -44,11 +44,17 @@ interface Friend {
 }
 
 interface PendingInvitation {
-  id: string
-  email: string
+  code: string
   invitedDate: string
-  status: 'sent' | 'opened' | 'expired'
+  expiresAt: string
   message?: string
+  inviter: {
+    id: string
+    firstName: string
+    lastName: string
+    email: string
+    avatar?: string
+  }
 }
 
 // Empty initial data - will be populated from API
@@ -90,6 +96,14 @@ export function FriendInvitationWithDelete() {
         setFriends(mapped)
       })
       .catch(() => {})
+
+    friendsAPI
+      .myInvites()
+      .then((res) => {
+        const items = Array.isArray(res.data?.data) ? res.data.data : []
+        setPendingInvitations(items)
+      })
+      .catch(() => {})
   }, [])
 
   const handleSendInvitations = async () => {
@@ -110,10 +124,9 @@ export function FriendInvitationWithDelete() {
       return
     }
 
-    // Check for duplicates
+    // Check for duplicates (friends only; pending received invites don't matter here)
     const existingEmails = [
       ...friends.map(f => f.email),
-      ...pendingInvitations.map(p => p.email)
     ]
     
     const newEmails = emails.filter(email => !existingEmails.includes(email))
@@ -144,16 +157,7 @@ export function FriendInvitationWithDelete() {
         else failed.push(newEmails[i])
       })
 
-      if (succeeded.length) {
-        const newInvitations = succeeded.map(email => ({
-          id: Date.now().toString() + Math.random(),
-          email,
-          invitedDate: new Date().toISOString().split('T')[0],
-          status: 'sent' as const,
-          message: inviteMessage
-        }))
-        setPendingInvitations(prev => [...prev, ...newInvitations])
-      }
+      // Sent invites are tracked via backend; no need to add to received-pending list
 
       setInviteEmails('')
       setIsInviteDialogOpen(false)
@@ -190,26 +194,47 @@ export function FriendInvitationWithDelete() {
     }
   }
 
-  const handleResendInvitation = (invitationId: string) => {
-    setPendingInvitations(prev => prev.map(inv => 
-      inv.id === invitationId 
-        ? { ...inv, status: 'sent' as const, invitedDate: new Date().toISOString().split('T')[0] }
-        : inv
-    ))
-    
-    toast({
-      title: "Invitation resent",
-      description: "The invitation has been sent again.",
-    })
+  const handleAcceptInvite = async (code: string) => {
+    try {
+      await friendsAPI.acceptInvite(code)
+      setPendingInvitations(prev => prev.filter(inv => inv.code !== code))
+      toast({ title: "You're now friends!" })
+      // Optionally refresh friends list
+      friendsAPI.list().then((res) => {
+        const items = Array.isArray(res.data?.data) ? res.data.data : []
+        const mapped: Friend[] = items.map((u: any) => ({
+          id: u._id,
+          name: [u.firstName, u.lastName].filter(Boolean).join(" "),
+          email: u.email,
+          avatar: u.avatar || undefined,
+          status: 'active',
+          joinedDate: u.joinedAt || new Date().toISOString(),
+          totalExpenses: 0,
+          balance: 0,
+        }))
+        setFriends(mapped)
+      }).catch(() => {})
+    } catch (e: any) {
+      toast({
+        title: "Failed to accept invite",
+        description: e?.response?.data?.message || e?.message || "",
+        variant: "destructive",
+      })
+    }
   }
 
-  const handleCancelInvitation = (invitationId: string) => {
-    setPendingInvitations(prev => prev.filter(inv => inv.id !== invitationId))
-    
-    toast({
-      title: "Invitation cancelled",
-      description: "The invitation has been cancelled.",
-    })
+  const handleDeclineInvite = async (code: string) => {
+    try {
+      await friendsAPI.declineInvite(code)
+      setPendingInvitations(prev => prev.filter(inv => inv.code !== code))
+      toast({ title: "Invite declined" })
+    } catch (e: any) {
+      toast({
+        title: "Failed to decline invite",
+        description: e?.response?.data?.message || e?.message || "",
+        variant: "destructive",
+      })
+    }
   }
 
   const handleDeleteFriend = (friend: Friend) => {
@@ -217,13 +242,23 @@ export function FriendInvitationWithDelete() {
     setIsDeleteDialogOpen(true)
   }
 
-  const confirmDeleteFriend = () => {
-    if (friendToDelete) {
+  const confirmDeleteFriend = async () => {
+    if (!friendToDelete) return
+
+    try {
+      await friendsAPI.remove(friendToDelete.id)
       setFriends(prev => prev.filter(f => f.id !== friendToDelete.id))
       toast({
         title: "Friend removed",
         description: `${friendToDelete.name} has been removed from your friends list.`,
       })
+    } catch (e: any) {
+      toast({
+        title: "Failed to remove friend",
+        description: e?.response?.data?.message || e?.message || "An error occurred while removing the friend.",
+        variant: "destructive",
+      })
+    } finally {
       setFriendToDelete(null)
       setIsDeleteDialogOpen(false)
     }
@@ -438,45 +473,43 @@ export function FriendInvitationWithDelete() {
           {pendingInvitations.length > 0 ? (
             <div className="grid gap-4">
               {pendingInvitations.map((invitation) => (
-                <KanbanCard key={invitation.id}>
+                <KanbanCard key={invitation.code}>
                   <KanbanCardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <Avatar className="h-12 w-12">
+                          <AvatarImage src={invitation.inviter.avatar} />
                           <AvatarFallback>
-                            <Mail className="h-6 w-6" />
+                            {invitation.inviter.firstName[0]}
                           </AvatarFallback>
                         </Avatar>
                         <div>
-                          <h3 className="font-semibold">{invitation.email}</h3>
+                          <h3 className="font-semibold">
+                            {invitation.inviter.firstName} {invitation.inviter.lastName}
+                          </h3>
+                          <p className="text-sm text-muted-foreground">{invitation.inviter.email}</p>
                           <p className="text-sm text-muted-foreground">
                             Invited on {new Date(invitation.invitedDate).toLocaleDateString()}
                           </p>
-                          <div className="flex items-center gap-2 mt-1">
-                            {getStatusBadge(invitation.status)}
-                            {invitation.status === 'opened' && (
-                              <span className="text-xs text-muted-foreground">
-                                <Clock className="h-3 w-3 inline mr-1" />
-                                Waiting for signup
-                              </span>
-                            )}
-                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Expires {new Date(invitation.expiresAt).toLocaleString()}
+                          </p>
                         </div>
                       </div>
                       
                       <div className="flex gap-2">
                         <Button
-                          variant="outline"
+                          variant="default"
                           size="sm"
-                          onClick={() => handleResendInvitation(invitation.id)}
+                          onClick={() => handleAcceptInvite(invitation.code)}
                         >
-                          <Send className="h-4 w-4 mr-2" />
-                          Resend
+                          <Check className="h-4 w-4 mr-2" />
+                          Accept
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleCancelInvitation(invitation.id)}
+                          onClick={() => handleDeclineInvite(invitation.code)}
                         >
                           <X className="h-4 w-4" />
                         </Button>
@@ -498,12 +531,8 @@ export function FriendInvitationWithDelete() {
                 <Mail className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                 <h3 className="text-lg font-medium mb-2">No pending invitations</h3>
                 <p className="text-muted-foreground mb-4">
-                  All your invitations have been accepted or you haven't sent any yet
+                  You don't have any incoming friend invites right now.
                 </p>
-                <Button onClick={() => setIsInviteDialogOpen(true)}>
-                  <UserPlus className="h-4 w-4 mr-2" />
-                  Send Invitations
-                </Button>
               </KanbanCardContent>
             </KanbanCard>
           )}

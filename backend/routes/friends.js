@@ -28,6 +28,69 @@ router.get("/", async (req, res) => {
   }
 })
 
+// List pending invites for the logged-in user (invitee)
+router.get("/my-invites", async (req, res) => {
+  try {
+    const me = await User.findById(req.user._id).select("email")
+    if (!me || !me.email) {
+      return res.json({ data: [] })
+    }
+
+    const invites = await FriendInvite.find({
+      inviteeEmail: me.email,
+      status: "pending",
+      expiresAt: { $gt: new Date() },
+    })
+      .populate("inviter", "firstName lastName username avatar email")
+      .lean()
+
+    const mapped = invites.map((inv) => ({
+      code: inv.code,
+      invitedDate: inv.createdAt,
+      expiresAt: inv.expiresAt,
+      message: inv.metadata?.message || null,
+      inviter: {
+        id: inv.inviter._id,
+        firstName: inv.inviter.firstName,
+        lastName: inv.inviter.lastName,
+        username: inv.inviter.username,
+        email: inv.inviter.email,
+        avatar: inv.inviter.avatar,
+      },
+    }))
+
+    res.json({ data: mapped })
+  } catch (e) {
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
+// Decline invite (invitee only)
+router.post("/invites/:code/decline", async (req, res) => {
+  try {
+    const now = new Date()
+
+    // Atomically mark invite as declined only if it's still pending and not expired
+    const result = await FriendInvite.updateOne(
+      { code: req.params.code, status: "pending", expiresAt: { $gt: now } },
+      { $set: { status: "declined" } },
+    )
+
+    if (result.matchedCount === 0 && result.modifiedCount === 0) {
+      // Either invite doesn't exist, is already handled, or expired
+      const exists = await FriendInvite.exists({ code: req.params.code })
+      if (!exists) {
+        return res.status(404).json({ message: "Invite not found" })
+      }
+      return res.status(400).json({ message: "Invite invalid or already handled" })
+    }
+
+    return res.json({ success: true })
+  } catch (e) {
+    return res.status(500).json({ message: "Server error" })
+  }
+})
+
 // Create invite
 router.post(
   "/invites",
@@ -61,6 +124,18 @@ router.post(
             inviteUrl,
           },
         })
+
+        // If the invitee already has an account, notify them in real time
+        const existingUser = await User.findOne({ email: req.body.inviteeEmail }).select("_id")
+        if (existingUser) {
+          req.io.to(`user_${existingUser._id}`).emit("friend:invited", {
+            code,
+            inviter: {
+              id: req.user._id,
+              firstName: inviter?.firstName || null,
+            },
+          })
+        }
       }
 
       res.json({ code, inviteUrl, expiresAt })
@@ -151,6 +226,24 @@ router.post("/invites/:code/revoke", async (req, res) => {
   }
 })
 
+// Remove friend (unfriend permanently from both sides)
+router.delete("/:friendId", async (req, res) => {
+  try {
+    const meId = req.user._id.toString()
+    const friendId = req.params.friendId
+
+    if (!friendId) {
+      return res.status(400).json({ message: "Friend id is required" })
+    }
+
+    // Remove each other from friends arrays
+    await User.updateOne({ _id: meId }, { $pull: { friends: friendId } })
+    await User.updateOne({ _id: friendId }, { $pull: { friends: meId } })
+
+    return res.json({ success: true })
+  } catch (e) {
+    return res.status(500).json({ message: "Server error" })
+  }
+})
+
 module.exports = router
-
-

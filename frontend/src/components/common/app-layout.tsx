@@ -38,8 +38,10 @@ function AppLayoutInner({ children, className = "" }: AppLayoutProps) {
 
       {/* Main content column */}
       <main className="flex-1 flex flex-col w-full min-w-0 max-w-full overflow-x-hidden overflow-y-auto">
-        <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 lg:px-6 flex-1 flex flex-col">
-          {children}
+        <div className="w-full flex-1 flex flex-col px-0">
+          <div className="w-full max-w-none pl-3 sm:pl-4 lg:pl-6 pr-0 flex-1 flex flex-col">
+            {children}
+          </div>
         </div>
       </main>
     </div>

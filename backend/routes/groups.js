@@ -2,8 +2,10 @@ const express = require("express")
 const Group = require("../models/Group")
 const User = require("../models/User")
 const Expense = require("../models/Expense")
+const Settlement = require("../models/Settlement")
 const { body, validationResult } = require("express-validator")
 const { ExpenseCalculator } = require("../utils/expenseCalculator")
+const { ok, fail } = require("../utils/http")
 
 const router = express.Router()
 // Return friends eligible to be added to this group (not already members)
@@ -61,7 +63,7 @@ router.get("/", async (req, res) => {
       "members.user": req.user._id,
       isActive: true,
     })
-      .select('name description members createdBy category updatedAt')
+      .select('name description members createdBy category updatedAt isActive')
       .populate({ path: 'members.user', select: 'firstName lastName username avatar' })
       .populate({ path: 'createdBy', select: 'firstName lastName username' })
       .sort({ updatedAt: -1 })
@@ -317,12 +319,152 @@ router.get("/:id/balances", async (req, res) => {
   }
 })
 
-// Delete group
-router.delete("/:id", async (req, res) => {
+// Generate and persist a settle-up plan using a greedy algorithm
+router.post("/:id/settle-up", async (req, res) => {
   try {
     const group = await Group.findOne({
       _id: req.params.id,
       "members.user": req.user._id,
+      isActive: true,
+    }).populate("members.user", "firstName lastName username avatar")
+
+    if (!group) {
+      return fail(res, "Group not found", 404)
+    }
+
+    const expenses = await Expense.find({
+      groupId: group._id,
+      status: "active",
+    }).select("amountCents paidBy")
+
+    const memberIds = group.members.map((m) => m.user._id.toString())
+    const memberCount = memberIds.length
+    if (memberCount === 0) {
+      return ok(res, { settlements: [], totals: { pendingCents: 0, confirmedCents: 0 } })
+    }
+
+    // Total paid per member (cents)
+    const paidByUserCents = new Map(memberIds.map((id) => [id, 0]))
+    let totalGroupExpenseCents = 0
+
+    for (const exp of expenses) {
+      const cents = Math.round(Number(exp.amountCents || 0))
+      if (cents <= 0) continue
+      totalGroupExpenseCents += cents
+
+      const payerId = exp.paidBy?.toString?.()
+      if (payerId && paidByUserCents.has(payerId)) {
+        paidByUserCents.set(payerId, paidByUserCents.get(payerId) + cents)
+      }
+    }
+
+    // Equal share per member using integer cents; adjust remainder so nets sum to 0
+    const baseShare = Math.floor(totalGroupExpenseCents / memberCount)
+    const remainder = totalGroupExpenseCents - baseShare * memberCount
+
+    const sortedMemberIds = [...memberIds].sort() // deterministic remainder assignment
+    const shareByUserCents = new Map(sortedMemberIds.map((id) => [id, baseShare]))
+    if (remainder !== 0) {
+      const lastId = sortedMemberIds[sortedMemberIds.length - 1]
+      shareByUserCents.set(lastId, shareByUserCents.get(lastId) + remainder)
+    }
+
+    // Net balance = paid - share (cents). >0 creditor, <0 debtor.
+    const creditors = []
+    const debtors = []
+    for (const uid of sortedMemberIds) {
+      const paid = paidByUserCents.get(uid) || 0
+      const share = shareByUserCents.get(uid) || 0
+      const net = paid - share
+      if (net > 0) creditors.push({ userId: uid, netCents: net })
+      else if (net < 0) debtors.push({ userId: uid, netCents: net })
+    }
+
+    creditors.sort((a, b) => b.netCents - a.netCents)
+    debtors.sort((a, b) => a.netCents - b.netCents) // more negative first
+
+    // Avoid duplicates: remove previous pending settlements for this group
+    await Settlement.deleteMany({ groupId: group._id, status: "PENDING" })
+
+    const settlementsToCreate = []
+    let i = 0
+    let j = 0
+    while (i < creditors.length && j < debtors.length) {
+      const creditor = creditors[i]
+      const debtor = debtors[j]
+
+      const debtorOwes = Math.abs(debtor.netCents)
+      const amountCents = Math.min(debtorOwes, creditor.netCents)
+      if (amountCents > 0) {
+        settlementsToCreate.push({
+          groupId: group._id,
+          fromUserId: debtor.userId,
+          toUserId: creditor.userId,
+          amountCents,
+          status: "PENDING",
+        })
+      }
+
+      creditor.netCents -= amountCents
+      debtor.netCents += amountCents
+
+      if (creditor.netCents === 0) i++
+      if (debtor.netCents === 0) j++
+    }
+
+    if (settlementsToCreate.length === 0) {
+      return ok(res, { settlements: [], totals: { pendingCents: 0, confirmedCents: 0 } })
+    }
+
+    const created = await Settlement.insertMany(settlementsToCreate)
+    const populated = await Settlement.find({ _id: { $in: created.map((s) => s._id) } })
+      .populate("fromUserId", "firstName lastName username avatar")
+      .populate("toUserId", "firstName lastName username avatar")
+      .sort({ createdAt: 1 })
+      .lean()
+
+    const pendingCents = populated.reduce((sum, s) => sum + (s.status === "PENDING" ? s.amountCents : 0), 0)
+    const confirmedCents = populated.reduce((sum, s) => sum + (s.status === "CONFIRMED" ? s.amountCents : 0), 0)
+
+    return ok(res, { settlements: populated, totals: { pendingCents, confirmedCents } })
+  } catch (error) {
+    return fail(res, error.message || "Server error", 500)
+  }
+})
+
+// Get persisted settlements for a group
+router.get("/:id/settlements", async (req, res) => {
+  try {
+    const group = await Group.findOne({
+      _id: req.params.id,
+      "members.user": req.user._id,
+      isActive: true,
+    }).select("_id")
+
+    if (!group) {
+      return fail(res, "Group not found", 404)
+    }
+
+    const settlements = await Settlement.find({ groupId: group._id })
+      .populate("fromUserId", "firstName lastName username avatar")
+      .populate("toUserId", "firstName lastName username avatar")
+      .sort({ createdAt: -1 })
+      .lean()
+
+    const pendingCents = settlements.reduce((sum, s) => sum + (s.status === "PENDING" ? s.amountCents : 0), 0)
+    const confirmedCents = settlements.reduce((sum, s) => sum + (s.status === "CONFIRMED" ? s.amountCents : 0), 0)
+
+    return ok(res, { settlements, totals: { pendingCents, confirmedCents } })
+  } catch (error) {
+    return fail(res, error.message || "Server error", 500)
+  }
+})
+
+// Delete group (only creator can delete, regardless of active expenses)
+router.delete("/:id", async (req, res) => {
+  try {
+    const group = await Group.findOne({
+      _id: req.params.id,
       isActive: true,
     })
 
@@ -330,49 +472,26 @@ router.delete("/:id", async (req, res) => {
       return res.status(404).json({ message: "Group not found" })
     }
 
-    // Check if user is admin
-    const userMember = group.members.find((member) => member.user.toString() === req.user._id.toString())
-
-    if (userMember.role !== "admin") {
-      return res.status(403).json({ message: "Only group admins can delete the group" })
+    // Only the user who created the group can delete it
+    if (group.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "Only the group creator can delete this group" })
     }
 
-    // Check if group has active expenses
-    const activeExpenses = await Expense.countDocuments({
+    // Permanently remove all related expenses
+    await Expense.deleteMany({
       groupId: group._id,
-      status: "active",
     })
 
-    if (activeExpenses > 0) {
-      return res.status(400).json({ 
-        message: "Cannot delete group with active expenses. Please settle all expenses first.",
-        activeExpenses: activeExpenses
-      })
-    }
+    // Permanently remove the group itself
+    await Group.deleteOne({ _id: group._id })
 
-    // Soft delete the group (mark as inactive)
-    group.isActive = false
-    group.deletedAt = new Date()
-    group.deletedBy = req.user._id
-    await group.save()
-
-    // Also mark all related expenses as deleted
-    await Expense.updateMany(
-      { groupId: group._id },
-      { 
-        status: "deleted",
-        deletedAt: new Date(),
-        deletedBy: req.user._id
-      }
-    )
-
-    // Emit to group members
+    // Emit to group members so clients can update their UI
     req.io.to(`group_${group._id}`).emit("group_deleted", {
       groupId: group._id,
       deletedBy: req.user._id,
     })
 
-    res.json({ message: "Group deleted successfully" })
+    res.json({ message: "Group deleted permanently" })
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message })
   }

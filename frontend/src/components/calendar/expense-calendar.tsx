@@ -57,6 +57,7 @@ export function ExpenseCalendar() {
   const [reminderDescription, setReminderDescription] = useState("")
   const [reminderAmount, setReminderAmount] = useState<number | undefined>(undefined)
   const [reminderCategory, setReminderCategory] = useState<string>("utilities")
+  const [selectedReminderId, setSelectedReminderId] = useState<string | null>(null)
   const [filters, setFilters] = useState<CalendarFilters>({
     mode: 'all',
     groupIds: []
@@ -211,6 +212,7 @@ export function ExpenseCalendar() {
 
     if (remindersForDate.length > 0) {
       const first = remindersForDate[0]
+      setSelectedReminderId(first._id || null)
       setReminderTitle(first.title || "")
       setReminderDescription(first.description || "")
       setReminderAmount(typeof first.amount === "number" ? first.amount : undefined)
@@ -219,6 +221,7 @@ export function ExpenseCalendar() {
       setIsAddExpenseOpen(false)
       setIsAddReminderOpen(true)
     } else {
+      setSelectedReminderId(null)
       setEntryType("expense")
       setIsAddReminderOpen(false)
       setIsAddExpenseOpen(true)
@@ -245,9 +248,10 @@ export function ExpenseCalendar() {
 
   // Generate calendar days
   const generateCalendarDays = (): CalendarDay[] => {
-    const firstDay = new Date(year, month - 1, 1).getDay()
-    const daysInMonth = new Date(year, month, 0).getDate()
-    const daysInPrevMonth = new Date(year, month - 1, 0).getDate()
+    const currentMonthIndex = month - 1 // 0-based month index
+    const firstDay = new Date(year, currentMonthIndex, 1).getDay()
+    const daysInMonth = new Date(year, currentMonthIndex + 1, 0).getDate()
+    const daysInPrevMonth = new Date(year, currentMonthIndex, 0).getDate()
 
     // Map reminders by date (YYYY-MM-DD)
     const remindersByDate = new Map<string, any[]>()
@@ -274,7 +278,8 @@ export function ExpenseCalendar() {
     // Previous month days
     for (let i = firstDay - 1; i >= 0; i--) {
       const day = daysInPrevMonth - i
-      const date = `${year}-${String(month - 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      const jsDate = new Date(year, currentMonthIndex - 1, day)
+      const date = jsDate.toISOString().split('T')[0]
       const expenseTitles = (expensesByDate.get(date) || []).map((e: any) => e.title).slice(0, 2)
       calendarDays.push({
         day,
@@ -287,7 +292,8 @@ export function ExpenseCalendar() {
 
     // Current month days
     for (let day = 1; day <= daysInMonth; day++) {
-      const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      const jsDate = new Date(year, currentMonthIndex, day)
+      const date = jsDate.toISOString().split('T')[0]
       const dayData = monthData?.data?.days?.find((d: any) => d.date === date)
       const expenseTitles = (expensesByDate.get(date) || []).map((e: any) => e.title).slice(0, 2)
 
@@ -305,7 +311,8 @@ export function ExpenseCalendar() {
     // Next month days to fill the grid
     const remainingDays = 42 - calendarDays.length
     for (let day = 1; day <= remainingDays; day++) {
-      const date = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      const jsDate = new Date(year, currentMonthIndex + 1, day)
+      const date = jsDate.toISOString().split('T')[0]
       const expenseTitles = (expensesByDate.get(date) || []).map((e: any) => e.title).slice(0, 2)
       calendarDays.push({
         day,
@@ -508,16 +515,17 @@ export function ExpenseCalendar() {
                          </div>
                        ) : null}
 
-                       {firstReminder && firstReminder.title && (
-                         <div className="mt-1 text-[10px] text-amber-600 line-clamp-1">
-                           {firstReminder.title}
-                           {reminderCount > 1 && (
-                             <span className="ml-1 text-[9px] text-amber-500">
-                               (+{reminderCount - 1})
-                             </span>
-                           )}
-                         </div>
-                       )}
+                       {firstReminder && (firstReminder.title || firstReminder.description) && (
+                        <div className="mt-1 text-[10px] text-amber-600 line-clamp-1">
+                          {/* Prefer title, but fall back to description if title is empty */}
+                          {firstReminder.title || firstReminder.description}
+                          {reminderCount > 1 && (
+                            <span className="ml-1 text-[9px] text-amber-500">
+                              (+{reminderCount - 1})
+                            </span>
+                          )}
+                        </div>
+                      )}
                      </button>
                   )
                 })}
@@ -874,11 +882,44 @@ export function ExpenseCalendar() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => setIsAddReminderOpen(false)}
+              onClick={() => {
+                setIsAddReminderOpen(false)
+                setSelectedReminderId(null)
+              }}
               className="touch-friendly"
             >
               Cancel
             </Button>
+            {selectedReminderId && (
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => {
+                  reminderAPI.updateStatus(selectedReminderId, "cancelled")
+                    .then(() => {
+                      setSelectedReminderId(null)
+                      setIsAddReminderOpen(false)
+                      queryClient.invalidateQueries({ queryKey: ['calendar-reminders'] })
+                      queryClient.invalidateQueries({ queryKey: ['calendar-month'] })
+                      queryClient.invalidateQueries({ queryKey: ['calendar-events'] })
+                      toast({
+                        title: 'Reminder deleted',
+                        description: 'This reminder has been removed from your calendar.',
+                      })
+                    })
+                    .catch((err: any) => {
+                      toast({
+                        title: 'Error',
+                        description: err?.message || 'Failed to delete reminder',
+                        variant: 'destructive',
+                      })
+                    })
+                }}
+                className="touch-friendly"
+              >
+                Delete
+              </Button>
+            )}
             <Button
               type="button"
               disabled={!reminderTitle || !selectedDate}

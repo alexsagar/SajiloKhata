@@ -11,7 +11,9 @@ import type { User } from "@/types/user"
 interface AuthContextType {
   user: User | null
   login: (email: string, password: string) => Promise<void>
-  register: (userData: RegisterData) => Promise<void>
+  register: (userData: RegisterData) => Promise<{ email: string }>
+  registerVerifyOtp: (email: string, otp: string) => Promise<void>
+  registerResendOtp: (email: string) => Promise<void>
   logout: () => void
   updateUser: (userData: Partial<User>) => void
   refreshAuth: () => Promise<void>
@@ -302,11 +304,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = async (userData: RegisterData) => {
     try {
       const response = await authAPI.register(userData)
-      
 
-      router.push("/login")
+      const email = response.data?.email || userData.email
+      return { email }
     } catch (error: any) {
       const message = error.response?.data?.error || error.response?.data?.message || "Registration failed"
+      throw new Error(message)
+    }
+  }
+
+  const registerVerifyOtp = async (email: string, otp: string) => {
+    try {
+      await authAPI.registerVerifyOtp(email, otp)
+      router.push("/login?signup=success")
+    } catch (error: any) {
+      const message = error.response?.data?.error || error.response?.data?.message || "OTP verification failed"
+      throw new Error(message)
+    }
+  }
+
+  const registerResendOtp = async (email: string) => {
+    try {
+      await authAPI.registerResendOtp(email)
+    } catch (error: any) {
+      const message = error.response?.data?.error || error.response?.data?.message || "Failed to resend OTP"
       throw new Error(message)
     }
   }
@@ -353,6 +374,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user: currentUser,
         login,
         register,
+        registerVerifyOtp,
+        registerResendOtp,
         logout,
         updateUser,
         refreshAuth,

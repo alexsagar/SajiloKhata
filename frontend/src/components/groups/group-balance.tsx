@@ -4,8 +4,8 @@ import { KanbanCard, KanbanCardContent, KanbanCardDescription, KanbanCardHeader,
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { useQuery } from "@tanstack/react-query"
-import { groupAPI, expenseAPI } from "@/lib/api"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { groupAPI, expenseAPI, settlementAPI } from "@/lib/api"
 import { LoadingSpinner } from "@/components/common/loading-spinner"
 import { formatCurrency as formatCurrencyUtil, getInitials } from "@/lib/utils"
 import { formatCurrency } from "@/lib/currency"
@@ -19,10 +19,31 @@ interface GroupBalanceProps {
 export function GroupBalance({ groupId }: GroupBalanceProps) {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || "USD"
+  const queryClient = useQueryClient()
   
   const { data: balance, isLoading } = useQuery({
     queryKey: ["group-balance", groupId],
     queryFn: () => groupAPI.getBalances(groupId),
+  })
+
+  const { data: settlementsResp } = useQuery({
+    queryKey: ["group-settlements", groupId],
+    queryFn: () => groupAPI.getGroupSettlements(groupId),
+  })
+
+  const settleUpMutation = useMutation({
+    mutationFn: () => groupAPI.settleUp(groupId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["group-settlements", groupId] })
+      queryClient.invalidateQueries({ queryKey: ["group-balance", groupId] })
+    },
+  })
+
+  const confirmMutation = useMutation({
+    mutationFn: (settlementId: string) => settlementAPI.confirm(settlementId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["group-settlements", groupId] })
+    },
   })
 
   // Fetch expenses to compute balances if API doesn't provide them
@@ -84,6 +105,12 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
 
   const balanceEntries = Object.entries(balancesMap)
   const transactions = apiBalance?.minimumTransactions || []
+
+  const settlementsPayload = (settlementsResp?.data && (settlementsResp?.data as any).data) ? (settlementsResp?.data as any).data : (settlementsResp?.data as any)
+  const settlements: any[] = settlementsPayload?.settlements || []
+  const settlementTotals = settlementsPayload?.totals || { pendingCents: 0, confirmedCents: 0 }
+  const pendingTotal = (settlementTotals.pendingCents || 0) / 100
+  const confirmedTotal = (settlementTotals.confirmedCents || 0) / 100
 
   // Total expenses: prefer API, else compute from expenses
   const expensesPayload = (expensesData?.data && (expensesData?.data as any).data) ? (expensesData?.data as any).data : (expensesData?.data as any)
@@ -179,6 +206,91 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
       </KanbanCard>
 
       {/* Suggested Transactions */}
+      <KanbanCard>
+        <KanbanCardHeader>
+          <KanbanCardTitle className="flex items-center justify-between gap-2">
+            <span>Settle Up</span>
+            <Button
+              size="sm"
+              onClick={() => settleUpMutation.mutate()}
+              disabled={settleUpMutation.isPending}
+            >
+              Settle Up
+            </Button>
+          </KanbanCardTitle>
+          <KanbanCardDescription>
+            Stored settlement plan for this group (no payments—manual confirmation)
+          </KanbanCardDescription>
+        </KanbanCardHeader>
+        <KanbanCardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div className="text-center">
+              <p className="text-sm text-muted-foreground">Pending Total</p>
+              <p className="text-xl font-bold">{formatCurrency(pendingTotal, userCurrency)}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-sm text-muted-foreground">Confirmed Total</p>
+              <p className="text-xl font-bold">{formatCurrency(confirmedTotal, userCurrency)}</p>
+            </div>
+          </div>
+
+          {settlements.length === 0 ? (
+            <div className="text-center py-6 text-muted-foreground">
+              No stored settlement plan yet. Click "Settle Up" to generate one.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {settlements.map((s: any) => {
+                const fromUser = s.fromUserId
+                const toUser = s.toUserId
+                const amount = (s.amountCents || 0) / 100
+                const isPending = s.status === "PENDING"
+
+                return (
+                  <div key={s._id} className="flex items-center justify-between p-3 rounded-lg border bg-muted/50">
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-8 w-8">
+                        <AvatarImage src={fromUser?.avatar || "/placeholder.svg"} />
+                        <AvatarFallback className="text-xs">
+                          {getInitials(fromUser?.firstName || "U", fromUser?.lastName || "U")}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="font-medium">{fromUser?.firstName}</span>
+                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                      <Avatar className="h-8 w-8">
+                        <AvatarImage src={toUser?.avatar || "/placeholder.svg"} />
+                        <AvatarFallback className="text-xs">
+                          {getInitials(toUser?.firstName || "U", toUser?.lastName || "U")}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="font-medium">{toUser?.firstName}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold">{formatCurrency(amount, userCurrency)}</span>
+                      <Badge variant={isPending ? "secondary" : "default"}>
+                        {s.status}
+                      </Badge>
+                      {isPending && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => confirmMutation.mutate(s._id)}
+                          disabled={confirmMutation.isPending}
+                        >
+                          Mark as Paid
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </KanbanCardContent>
+      </KanbanCard>
+
+      {/* Suggested Transactions (computed, not stored) */}
       {transactions.length > 0 && (
         <KanbanCard>
           <KanbanCardHeader>
