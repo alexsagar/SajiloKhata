@@ -2,7 +2,7 @@
 
 A modern expense sharing application built with MERN stack and Next.js, featuring AI-powered features, real-time collaboration, and comprehensive analytics.
 
-## 🚀 Features
+##  Features
 
 ### Core Functionality
 - **Expense Management**: Create, track, and split expenses with friends, family, and groups
@@ -18,7 +18,7 @@ A modern expense sharing application built with MERN stack and Next.js, featurin
 - **Team Management**: Create teams with billing and subscription management
 - **Admin Dashboard**: Comprehensive system administration and monitoring
 
-## 💰 Centralized Currency System
+##  Centralized Currency System
 
 The application now features a **centralized currency system** that automatically applies the user's preferred currency across all pages and features:
 
@@ -43,7 +43,7 @@ The application now features a **centralized currency system** that automaticall
 - **Real-time Updates**: Currency changes in settings immediately reflect across the app
 - **Fallback Handling**: Graceful fallback to USD if no preference is set
 
-## 📱 Calendar Extension
+##  Calendar Extension
 
 ### New Features
 - **Date Click → Expense Creation**: Click any date to open expense creation modal
@@ -58,7 +58,7 @@ The application now features a **centralized currency system** that automaticall
 - **Data Flow**: Calendar data automatically flows into analytics system
 - **ACL Enforcement**: Users only see groups they belong to
 
-## 🏗️ Architecture
+##  Architecture
 
 ### Backend (Node.js + Express)
 - **MongoDB**: Document-based database with Mongoose ODM
@@ -83,7 +83,7 @@ The application now features a **centralized currency system** that automaticall
 - **Authentication**: JWT, CSRF tokens
 - **Real-time**: Socket.io for live updates
 
-## 🚀 Getting Started
+##  Getting Started
 
 ### Prerequisites
 - Node.js 18+ 
@@ -135,7 +135,7 @@ The application now features a **centralized currency system** that automaticall
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:5000/api
 
-## 📊 Analytics System
+##  Analytics System
 
 ### Available Endpoints
 - **KPIs**: `/api/analytics/kpis` - Key performance indicators
@@ -153,7 +153,7 @@ The application now features a **centralized currency system** that automaticall
 - **Interactive Charts**: Recharts-based visualizations
 - **Responsive Design**: Works on all device sizes
 
-## 🔐 Security Features
+##  Security Features
 
 - **JWT Authentication**: Secure token-based authentication
 - **CSRF Protection**: Cross-site request forgery prevention
@@ -162,7 +162,7 @@ The application now features a **centralized currency system** that automaticall
 - **Rate Limiting**: API rate limiting for abuse prevention
 - **Secure Headers**: Security headers for XSS and other attacks
 
-## 🧪 Testing
+##  Testing
 
 ### Backend Tests
 ```bash
@@ -182,7 +182,7 @@ npm test
 - Component testing with React Testing Library
 - Integration tests for critical user flows
 
-## 📈 Performance Optimizations
+##  Performance Optimizations
 
 - **Database Indexing**: Optimized MongoDB queries with proper indexes
 - **API Caching**: React Query for intelligent caching and background updates
@@ -190,7 +190,7 @@ npm test
 - **Image Optimization**: Next.js Image component with automatic optimization
 - **Bundle Analysis**: Regular bundle size monitoring and optimization
 
-## 🚀 Deployment
+##  Deployment
 
 ### Backend Deployment
 - **Environment Variables**: Configure production environment variables
@@ -204,7 +204,7 @@ npm test
 - **Environment**: Configure production API endpoints
 - **Monitoring**: Implement error tracking and performance monitoring
 
-## 🤝 Contributing
+##  Contributing
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -219,18 +219,18 @@ npm test
 - Update documentation for API changes
 - Follow the existing code structure and patterns
 
-## 📄 License
+##  License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🆘 Support
+##  Support
 
 For support and questions:
 - Create an issue in the GitHub repository
 - Check the documentation in the `/docs` folder
 - Review the API documentation for endpoint details
 
-## 🔮 Roadmap
+##  Roadmap
 
 ### Upcoming Features
 - **Mobile App**: React Native mobile application
