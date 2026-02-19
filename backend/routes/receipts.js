@@ -93,9 +93,11 @@ async function extractTextFromImage(filePath, mimetype) {
 // Upload and process receipt
 router.post("/upload", upload.single("receipt"), async (req, res) => {
   try {
-    console.log("Receipt upload - User:", req.user ? req.user._id : "No user")
-    console.log("Receipt upload - File:", req.file ? req.file.filename : "No file")
-    
+    // Production-safe logging - no sensitive data
+    if (process.env.NODE_ENV === 'development') {
+      console.log("Receipt upload - file:", req.file?.filename)
+    }
+
     if (!req.file) {
       return res.status(400).json({ message: "No file uploaded" })
     }
@@ -106,9 +108,6 @@ router.post("/upload", upload.single("receipt"), async (req, res) => {
     // Initialize OCR service
     const ocrService = new OCRService()
 
-    console.log("Starting OCR processing for file:", req.file.filename, "Type:", req.file.mimetype)
-    console.log("DEBUG: About to process OCR")
-    
     let ocrResult
     if (req.file.mimetype === "application/pdf") {
       // Handle PDF files
@@ -122,24 +121,7 @@ router.post("/upload", upload.single("receipt"), async (req, res) => {
     } else {
       // Handle image files - use OCR service
       const imageBuffer = fs.readFileSync(filePath)
-      console.log("Image buffer size:", imageBuffer.length, "bytes")
-      console.log("File exists:", fs.existsSync(filePath))
-      console.log("File stats:", fs.statSync(filePath))
       ocrResult = await ocrService.extractText(imageBuffer)
-    }
-    
-    console.log("OCR extraction completed. Text length:", ocrResult.rawText ? ocrResult.rawText.length : 0)
-    console.log("OCR Results - Merchant:", ocrResult.merchantName, "Total:", ocrResult.total, "Items:", ocrResult.items ? ocrResult.items.length : 0)
-    console.log("OCR Raw text preview:", ocrResult.rawText ? ocrResult.rawText.substring(0, 200) + "..." : "No text")
-    
-    // Test parsing with known text
-    if (ocrResult.rawText && ocrResult.rawText.includes("Total Payable")) {
-      console.log("=== MANUAL TEST ===")
-      const testLine = "Total Payable: NPR 7,011"
-      console.log("Testing line:", testLine)
-      const testAmount = ocrService.extractAmount(testLine)
-      console.log("Manual test result:", testAmount)
-      console.log("=== END TEST ===")
     }
 
     // Calculate confidence score
@@ -235,7 +217,7 @@ router.get("/", async (req, res) => {
       }
     })
   } catch (error) {
-    
+
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -254,7 +236,7 @@ router.get("/:id", async (req, res) => {
 
     res.json({ receipt })
   } catch (error) {
-    
+
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -287,7 +269,7 @@ router.put("/:id", [body("parsedData").isObject().withMessage("Parsed data must 
       receipt,
     })
   } catch (error) {
-    
+
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -336,7 +318,7 @@ router.put(
         receipt,
       })
     } catch (error) {
-      
+
       res.status(500).json({ message: "Server error" })
     }
   },
@@ -398,7 +380,7 @@ router.post("/:id/reprocess", async (req, res) => {
       throw processingError
     }
   } catch (error) {
-    
+
     res.status(500).json({ message: "Error reprocessing receipt" })
   }
 })
@@ -433,7 +415,7 @@ router.delete("/:id", async (req, res) => {
 
     res.json({ message: "Receipt deleted successfully" })
   } catch (error) {
-    
+
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -471,7 +453,7 @@ router.get("/stats/summary", async (req, res) => {
       recentReceipts,
     })
   } catch (error) {
-    
+
     res.status(500).json({ message: "Server error" })
   }
 })

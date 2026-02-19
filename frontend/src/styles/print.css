@@ -1,0 +1,503 @@
+/**
+ * Print Styles
+ * Professional print media queries for browser print functionality.
+ * Optimizes expense reports, receipts, and financial summaries for printing.
+ * 
+ * @author SajiloKhata Team
+ * @version 1.0.0
+ */
+
+/* ============================================================
+   PRINT MEDIA QUERY WRAPPER
+   ============================================================ */
+
+@media print {
+  /* ============================================================
+     RESET & HIDE NON-ESSENTIAL ELEMENTS
+     ============================================================ */
+
+  /* Hide navigation and interactive elements */
+  header,
+  footer,
+  nav,
+  aside,
+  .no-print,
+  .print-hide,
+  button:not(.print-show),
+  [role="navigation"],
+  [role="complementary"],
+  [role="banner"],
+  [data-radix-popper-content-wrapper],
+  .fixed,
+  .sticky {
+    display: none !important;
+  }
+
+  /* Hide specific UI elements that shouldn't print */
+  .sidebar,
+  .app-sidebar,
+  .mobile-nav,
+  .toast,
+  .tooltip,
+  .popover,
+  .dropdown-menu,
+  .dialog-overlay,
+  .modal-backdrop,
+  .chat-input,
+  .floating-action-button,
+  input[type="search"],
+  .search-bar {
+    display: none !important;
+  }
+
+  /* ============================================================
+     BASE TYPOGRAPHY & LAYOUT
+     ============================================================ */
+
+  *,
+  *::before,
+  *::after {
+    /* Remove shadows and transitions for cleaner print */
+    box-shadow: none !important;
+    text-shadow: none !important;
+    transition: none !important;
+    animation: none !important;
+  }
+
+  html,
+  body {
+    /* Reset to print-friendly defaults */
+    width: 100%;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    background: white !important;
+    color: black !important;
+    font-size: 11pt;
+    line-height: 1.5;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Main content container */
+  main,
+  .main-content,
+  .print-content,
+  [role="main"] {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    position: static !important;
+    overflow: visible !important;
+  }
+
+  /* ============================================================
+     TYPOGRAPHY
+     ============================================================ */
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    color: black !important;
+    page-break-after: avoid;
+    break-after: avoid-page;
+    orphans: 3;
+    widows: 3;
+  }
+
+  h1 {
+    font-size: 18pt;
+    margin-bottom: 12pt;
+  }
+
+  h2 {
+    font-size: 14pt;
+    margin-bottom: 10pt;
+    border-bottom: 1pt solid #ccc;
+    padding-bottom: 4pt;
+  }
+
+  h3 {
+    font-size: 12pt;
+    margin-bottom: 8pt;
+  }
+
+  h4 {
+    font-size: 11pt;
+    margin-bottom: 6pt;
+  }
+
+  p,
+  li,
+  td,
+  th {
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* ============================================================
+     LINKS
+     ============================================================ */
+
+  a,
+  a:visited {
+    color: #000 !important;
+    text-decoration: underline;
+  }
+
+  /* Show URL after links (except internal/JS links) */
+  a[href^="http"]:after,
+  a[href^="https"]:after {
+    content: " (" attr(href) ")";
+    font-size: 9pt;
+    color: #666;
+    word-break: break-all;
+  }
+
+  /* Don't show URL for internal links or buttons */
+  a[href^="#"]:after,
+  a[href^="javascript:"]:after,
+  a[href^="mailto:"]:after,
+  a.no-print-url:after,
+  button a:after {
+    content: "";
+  }
+
+  /* ============================================================
+     TABLES - EXPENSE SUMMARIES
+     ============================================================ */
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12pt 0;
+    font-size: 10pt;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  th,
+  td {
+    border: 0.5pt solid #999;
+    padding: 6pt 8pt;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  th {
+    background-color: #f0f0f0 !important;
+    font-weight: bold;
+    color: #000;
+  }
+
+  /* Alternate row colors for readability */
+  tbody tr:nth-child(even) {
+    background-color: #fafafa !important;
+  }
+
+  /* Amount columns - right align */
+  td.amount,
+  th.amount,
+  .text-right,
+  [data-align="right"] {
+    text-align: right;
+  }
+
+  /* Currency formatting */
+  .currency,
+  .money,
+  .amount-value {
+    font-family: "Courier New", Courier, monospace;
+    font-size: 10pt;
+  }
+
+  /* ============================================================
+     EXPENSE CARDS & ITEMS
+     ============================================================ */
+
+  .expense-card,
+  .expense-item,
+  .transaction-card,
+  .card {
+    border: 1pt solid #ccc !important;
+    border-radius: 0 !important;
+    margin-bottom: 12pt;
+    padding: 12pt !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    background: white !important;
+  }
+
+  .expense-header,
+  .card-header {
+    border-bottom: 0.5pt solid #eee;
+    padding-bottom: 8pt;
+    margin-bottom: 8pt;
+  }
+
+  .expense-description,
+  .card-title {
+    font-weight: bold;
+    font-size: 11pt;
+  }
+
+  .expense-amount,
+  .total-amount {
+    font-size: 12pt;
+    font-weight: bold;
+  }
+
+  .expense-meta,
+  .card-description {
+    font-size: 9pt;
+    color: #666 !important;
+  }
+
+  /* Split details */
+  .split-item,
+  .participant-row {
+    padding: 4pt 0;
+    border-bottom: 0.5pt dotted #ddd;
+  }
+
+  .split-item:last-child,
+  .participant-row:last-child {
+    border-bottom: none;
+  }
+
+  /* ============================================================
+     RECEIPT IMAGES
+     ============================================================ */
+
+  .receipt-image,
+  .receipt-thumbnail,
+  img.receipt {
+    max-width: 100%;
+    max-height: 400pt;
+    height: auto;
+    object-fit: contain;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    border: 0.5pt solid #ccc;
+    margin: 8pt 0;
+  }
+
+  /* OCR extracted text */
+  .receipt-text,
+  .ocr-content {
+    font-family: "Courier New", Courier, monospace;
+    font-size: 9pt;
+    background: #f9f9f9 !important;
+    padding: 8pt;
+    border: 0.5pt solid #ddd;
+    white-space: pre-wrap;
+  }
+
+  /* ============================================================
+     BALANCE SUMMARIES
+     ============================================================ */
+
+  .balance-positive {
+    color: #000 !important;
+  }
+
+  .balance-negative {
+    color: #000 !important;
+  }
+
+  .balance-positive::before {
+    content: "▲ ";
+  }
+
+  .balance-negative::before {
+    content: "▼ ";
+  }
+
+  .balance-neutral {
+    color: #666 !important;
+  }
+
+  /* Settlement summary */
+  .settlement-card,
+  .settlement-item {
+    background: #f9f9f9 !important;
+    border: 1pt solid #ccc;
+    padding: 10pt;
+    margin: 8pt 0;
+  }
+
+  /* ============================================================
+     GROUP & MEMBER INFO
+     ============================================================ */
+
+  .group-header {
+    border-bottom: 2pt solid #000;
+    padding-bottom: 8pt;
+    margin-bottom: 12pt;
+  }
+
+  .member-list {
+    columns: 2;
+    column-gap: 20pt;
+  }
+
+  .member-item {
+    break-inside: avoid;
+    padding: 4pt 0;
+  }
+
+  .avatar,
+  .member-avatar {
+    display: none !important;
+  }
+
+  /* ============================================================
+     PAGE CONTROL
+     ============================================================ */
+
+  .page-break-before,
+  .print-page-break-before {
+    page-break-before: always;
+    break-before: page;
+  }
+
+  .page-break-after,
+  .print-page-break-after {
+    page-break-after: always;
+    break-after: page;
+  }
+
+  .avoid-break,
+  .print-avoid-break {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* ============================================================
+     PRINT HEADER & FOOTER (If using custom)
+     ============================================================ */
+
+  .print-header {
+    display: block !important;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 9pt;
+    color: #666;
+    padding: 8pt;
+    border-bottom: 0.5pt solid #ccc;
+  }
+
+  .print-footer {
+    display: block !important;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 8pt;
+    color: #666;
+    padding: 8pt;
+    border-top: 0.5pt solid #ccc;
+  }
+
+  /* Page margins - adjust based on printer */
+  @page {
+    size: A4;
+    margin: 15mm 10mm;
+  }
+
+  /* First page different margins (for letterhead) */
+  @page :first {
+    margin-top: 20mm;
+  }
+
+  /* ============================================================
+     REPORT-SPECIFIC STYLES
+     ============================================================ */
+
+  /* Expense report summary box */
+  .report-summary {
+    background: #f5f5f5 !important;
+    border: 1pt solid #ccc;
+    padding: 12pt;
+    margin-bottom: 16pt;
+  }
+
+  .report-summary dt {
+    font-weight: bold;
+    display: inline-block;
+    width: 150pt;
+  }
+
+  .report-summary dd {
+    display: inline-block;
+    margin-left: 0;
+  }
+
+  /* Date range header */
+  .report-date-range {
+    font-size: 10pt;
+    color: #666 !important;
+    margin-bottom: 12pt;
+  }
+
+  /* Category breakdown */
+  .category-breakdown {
+    list-style: none;
+    padding: 0;
+  }
+
+  .category-breakdown li {
+    padding: 4pt 0;
+    border-bottom: 0.5pt dotted #ccc;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* ============================================================
+     UTILITY CLASSES FOR PRINT CONTROL
+     ============================================================ */
+
+  .print-only {
+    display: block !important;
+  }
+
+  .screen-only,
+  .print-hide {
+    display: none !important;
+  }
+
+  /* Force color printing where needed */
+  .print-color {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Grayscale fallback */
+  .print-grayscale {
+    filter: grayscale(100%);
+  }
+}
+
+/* ============================================================
+   PRINT-ONLY ELEMENTS (Hidden on screen)
+   ============================================================ */
+
+.print-only {
+  display: none;
+}

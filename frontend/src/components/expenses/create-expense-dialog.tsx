@@ -94,7 +94,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
   const createExpenseMutation = useMutation({
     mutationFn: async (data: CreateExpenseFormData) => {
       const formData = new FormData()
-      
+
       // Add basic fields
       formData.append('description', data.description)
       formData.append('amount', data.amount.toString())
@@ -104,7 +104,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
       if (data.groupId) formData.append('groupId', data.groupId)
       if (data.splitType) formData.append('splitType', data.splitType)
       if (data.currencyCode) formData.append('currencyCode', data.currencyCode)
-      
+
       // Add required createdBy field
       if (user?.id) {
         formData.append('createdBy', user.id)
@@ -137,33 +137,238 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
 
         formData.append('splits', JSON.stringify(splits))
       }
-      
+
       if (selectedFile) {
         formData.append('receipt', selectedFile)
       }
-      
+
       return expenseAPI.createExpense(formData)
     },
-    onSuccess: async (response: any) => {
-      // Invalidate all expense-related queries to ensure the list refreshes
-      queryClient.invalidateQueries({ queryKey: ["expenses"] })
-      queryClient.invalidateQueries({ queryKey: ["expenses", undefined] })
-      queryClient.invalidateQueries({ queryKey: ["expenses", null] })
-      queryClient.invalidateQueries({ queryKey: ["user-groups"] })
-      queryClient.invalidateQueries({ queryKey: ["recent-expenses"] })
-      // Invalidate all analytics queries so dashboard updates in real time
-      queryClient.invalidateQueries({
-        predicate: (q) => typeof q.queryKey?.[0] === 'string' && (q.queryKey[0] as string).startsWith('analytics-')
+
+    // ---- Optimistic update: instant UI visibility ----
+    onMutate: async (data: CreateExpenseFormData) => {
+      // 1. Cancel any outgoing refetches so they don't overwrite our optimistic update
+      //    We cancel 'expenses' (main list), 'recent-expenses' (dashboard), 'expense-summary' (balances),
+      //    and the specific group's expenses if applicable.
+      await queryClient.cancelQueries({ queryKey: ["expenses"] })
+      await queryClient.cancelQueries({ queryKey: ["recent-expenses"] })
+      await queryClient.cancelQueries({ queryKey: ["expense-summary"] })
+      if (data.groupId) {
+        await queryClient.cancelQueries({ queryKey: ["group-expenses", data.groupId] })
+      }
+
+      // 2. Snapshot all expense queries for rollback
+      const previousExpenses = queryClient.getQueryData(["expenses"])
+      const previousRecent = queryClient.getQueryData(["recent-expenses"])
+      const previousSummary = queryClient.getQueryData(["expense-summary"])
+      const previousGroupExpenses = data.groupId ? queryClient.getQueryData(["group-expenses", data.groupId]) : null
+
+      // 3. Build optimistic expense object
+      const tempId = `optimistic-${Date.now()}`
+      const amountNum = typeof data.amount === 'string' ? parseFloat(data.amount) : data.amount
+      const amountCents = Math.round(amountNum * 100)
+
+      const optimisticExpense = {
+        _id: tempId,
+        _optimistic: true,
+        description: data.description,
+        amount: amountNum,
+        amountCents,
+        currencyCode: data.currencyCode || user?.preferences?.currency || 'USD',
+        category: data.category || 'other',
+        date: data.date || new Date().toISOString(),
+        notes: data.notes || null,
+        groupId: data.groupId || null,
+        status: 'active',
+        paidBy: {
+          _id: user?.id,
+          firstName: user?.firstName || '',
+          lastName: user?.lastName || '',
+          username: user?.username || '',
+          avatar: user?.avatar || '',
+        },
+        splits: [{
+          user: {
+            _id: user?.id,
+            firstName: user?.firstName || '',
+            lastName: user?.lastName || '',
+            username: user?.username || '',
+          },
+          amountCents,
+          amount: amountNum,
+          settled: false,
+        }],
+        createdAt: new Date().toISOString(),
+      }
+
+      // 4. Inject into all matching expense query caches
+
+      // A. "expenses" (Main List)
+      queryClient.setQueryData(["expenses"], (old: any) => {
+        if (!old?.data) return old
+        const payload = old.data?.data || old.data
+        const list = payload?.expenses
+        if (Array.isArray(list)) {
+          return {
+            ...old,
+            data: {
+              ...old.data,
+              data: {
+                ...(old.data?.data || old.data),
+                expenses: [optimisticExpense, ...list],
+              },
+            },
+          }
+        }
+        return old
       })
-      // If we uploaded receipt first, link it to the created expense
+
+      // B. "recent-expenses" (Dashboard Widget - Limit 8)
+      queryClient.setQueryData(["recent-expenses"], (old: any) => {
+        if (!old?.data) return old
+        const payload = old.data?.data || old.data
+        const list = payload?.expenses || payload
+        if (Array.isArray(list)) {
+          const newList = [optimisticExpense, ...list].slice(0, 8) // Maintain limit
+          return {
+            ...old,
+            data: {
+              ...old.data,
+              data: { ...(old.data?.data || old.data), expenses: newList },
+              expenses: newList // Handle both shapes
+            }
+          }
+        }
+        return old
+      })
+
+      // C. "expense-summary" (Dashboard Balances)
+      queryClient.setQueryData(["expense-summary"], (old: any) => {
+        if (!old?.data) return old
+        const payload = old.data?.data || old.data
+        const list = payload?.expenses
+        if (Array.isArray(list)) {
+          return {
+            ...old,
+            data: {
+              ...old.data,
+              data: {
+                ...(old.data?.data || old.data),
+                expenses: [optimisticExpense, ...list],
+              },
+            },
+          }
+        }
+        return old
+      })
+
+      // D. "group-expenses" (Group Details)
+      if (data.groupId) {
+        queryClient.setQueryData(["group-expenses", data.groupId], (old: any) => {
+          if (!old?.data) return old
+          const payload = old.data?.data || old.data
+          const list = payload?.expenses
+          if (Array.isArray(list)) {
+            return {
+              ...old,
+              data: {
+                ...old.data,
+                data: {
+                  ...(old.data?.data || old.data),
+                  expenses: [optimisticExpense, ...list],
+                },
+              },
+            }
+          }
+          return old
+        })
+      }
+
+      return { previousExpenses, previousRecent, previousSummary, previousGroupExpenses, tempId, groupId: data.groupId }
+    },
+
+    // ---- Rollback on error ----
+    onError: (error: any, _variables, context) => {
+      // Restore snapshots
+      if (context?.previousExpenses) queryClient.setQueryData(["expenses"], context.previousExpenses)
+      if (context?.previousRecent) queryClient.setQueryData(["recent-expenses"], context.previousRecent)
+      if (context?.previousSummary) queryClient.setQueryData(["expense-summary"], context.previousSummary)
+      if (context?.groupId && context?.previousGroupExpenses) {
+        queryClient.setQueryData(["group-expenses", context.groupId], context.previousGroupExpenses)
+      }
+
+      const message = error?.response?.data?.message || error?.message || 'Failed to create expense'
+      toast({
+        variant: "destructive",
+        title: "Expense creation failed",
+        description: message + '. Your data has been preserved — please try again.',
+      })
+    },
+
+    // ---- Replace temp record with real server record ----
+    onSuccess: async (response: any, _variables, context) => {
+      const created = response?.data?.data || response?.data
+      const tempId = context?.tempId
+
+      // Helper to replace tempId with real ID in a list
+      const replaceInList = (list: any[]) => list.map(e => e._id === tempId ? created : e)
+
+      // 1. Update "expenses"
+      queryClient.setQueryData(["expenses"], (old: any) => {
+        if (!old?.data) return old
+        const payload = old.data?.data || old.data
+        if (Array.isArray(payload?.expenses)) {
+          const updated = replaceInList(payload.expenses)
+          return { ...old, data: { ...old.data, data: { ...payload, expenses: updated } } }
+        }
+        return old
+      })
+
+      // 2. Update "recent-expenses"
+      queryClient.setQueryData(["recent-expenses"], (old: any) => {
+        if (!old?.data) return old
+        const payload = old.data?.data || old.data
+        const list = payload?.expenses || payload
+        if (Array.isArray(list)) {
+          const updated = replaceInList(list)
+          // Handle both shapes again
+          return { ...old, data: { ...old.data, data: { ...payload, expenses: updated }, expenses: updated } }
+        }
+        return old
+      })
+
+      // 3. Update "expense-summary"
+      queryClient.setQueryData(["expense-summary"], (old: any) => {
+        if (!old?.data) return old
+        const payload = old.data?.data || old.data
+        if (Array.isArray(payload?.expenses)) {
+          const updated = replaceInList(payload.expenses)
+          return { ...old, data: { ...old.data, data: { ...payload, expenses: updated } } }
+        }
+        return old
+      })
+
+      // 4. Update "group-expenses"
+      if (context?.groupId) {
+        queryClient.setQueryData(["group-expenses", context.groupId], (old: any) => {
+          if (!old?.data) return old
+          const payload = old.data?.data || old.data
+          if (Array.isArray(payload?.expenses)) {
+            const updated = replaceInList(payload.expenses)
+            return { ...old, data: { ...old.data, data: { ...payload, expenses: updated } } }
+          }
+          return old
+        })
+      }
+
+      // Link uploaded receipt if applicable
       try {
-        const created = response?.data?.data || response?.data
         const expenseId = created?._id || created?.id
         if (uploadedReceiptId && expenseId) {
           await receiptAPI.linkToExpense(uploadedReceiptId, expenseId)
         }
-      } catch {}
-      
+      } catch { }
+
       onOpenChange?.(false)
       reset()
       setSelectedFile(null)
@@ -172,7 +377,29 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
       setSelectedMembers([])
       setShowCurrencySelection(false)
     },
-    onError: (error: any) => {
+
+    // ---- Always invalidate for consistency ----
+    onSettled: (_data, _error, variables) => {
+      // Invalidate all affected queries to ensure we eventually get the server-side truth
+      // (calculations, balances, updated sorting, etc.)
+      queryClient.invalidateQueries({ queryKey: ["expenses"] })
+      queryClient.invalidateQueries({ queryKey: ["recent-expenses"] })
+      queryClient.invalidateQueries({ queryKey: ["expense-summary"] })
+      queryClient.invalidateQueries({ queryKey: ["user-groups"] })
+
+      if (variables.groupId) {
+        queryClient.invalidateQueries({ queryKey: ["group-expenses", variables.groupId] })
+        // Also invalidate group-specific balance/settlements if they exist as separate keys
+        queryClient.invalidateQueries({ queryKey: ["group-balance", variables.groupId] })
+      }
+
+      // Invalidate analytics
+      queryClient.invalidateQueries({
+        predicate: (q) => {
+          const key = q.queryKey?.[0]
+          return typeof key === 'string' && (key.startsWith('analytics-') || key === 'analytics-kpis')
+        }
+      })
     },
   })
 
@@ -190,7 +417,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
 
       createExpenseMutation.mutate(data)
     } catch (error) {
-      
+
     }
   }
 
@@ -205,13 +432,13 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
   const handleCurrencySelect = (currency: string) => {
     try {
       if (!currency) {
-        
+
         return
       }
       setValue("currencyCode", currency)
       setShowCurrencySelection(false)
     } catch (error) {
-      
+
       toast({
         title: "Error",
         description: "Failed to set currency. Please try again.",
@@ -232,7 +459,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
           <DialogTitle className="text-lg font-semibold">Create New Expense</DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground">Add a new expense to split with your group.</DialogDescription>
         </DialogHeader>
-        
+
         {/* Receipt Upload */}
         {selectedFile && (
           <div className="flex items-center gap-2 p-2 bg-muted rounded-md">
@@ -250,9 +477,8 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
 
         <div
           {...getRootProps()}
-          className={`border-2 border-dashed rounded-lg p-2 text-center cursor-pointer transition-colors ${
-            isDragActive ? "border-primary bg-primary/10" : "border-muted-foreground/25"
-          }`}
+          className={`border-2 border-dashed rounded-lg p-2 text-center cursor-pointer transition-colors ${isDragActive ? "border-primary bg-primary/10" : "border-muted-foreground/25"
+            }`}
         >
           <input {...getInputProps()} />
           <Upload className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
@@ -396,11 +622,10 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
                 {selectedGroup.members?.map((member: any) => (
                   <div
                     key={member.user._id}
-                    className={`flex items-center gap-2 p-2 rounded-md border cursor-pointer transition-colors ${
-                      selectedMembers.includes(member.user._id)
-                        ? "border-primary bg-primary/10"
-                        : "border-muted-foreground/25 hover:border-muted-foreground/50"
-                    }`}
+                    className={`flex items-center gap-2 p-2 rounded-md border cursor-pointer transition-colors ${selectedMembers.includes(member.user._id)
+                      ? "border-primary bg-primary/10"
+                      : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                      }`}
                     onClick={() => toggleMember(member.user._id)}
                   >
                     <Avatar className="h-6 w-6">

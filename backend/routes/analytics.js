@@ -4,10 +4,10 @@ const Expense = require("../models/Expense")
 const Group = require("../models/Group")
 const User = require("../models/User")
 const { ok, fail } = require("../utils/http")
-const { 
-  toBaseCurrency, 
-  calculateMemberBalance, 
-  calculateBalanceMatrix, 
+const {
+  toBaseCurrency,
+  calculateMemberBalance,
+  calculateBalanceMatrix,
   calculateSettlementSuggestions,
   calculateAgingBuckets,
   calculateSettlementVelocity,
@@ -15,12 +15,101 @@ const {
   calculateParticipationMetrics
 } = require("../utils/analytics-calcs")
 
+// --- Validation constants ---
+const VALID_MODES = ['personal', 'group', 'all']
+const VALID_RANGES = ['ALL_TIME', 'THIS_MONTH', 'LAST_3M', 'YTD', 'CUSTOM']
+const VALID_STATUSES = ['active', 'settled', 'disputed', 'deleted']
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * Normalise a query-string value that may arrive as a string or array.
+ * Returns [] when the raw value is empty/missing.
+ */
+function toStringArray(raw) {
+  if (!raw) return []
+  if (Array.isArray(raw)) return raw.map(String)
+  return String(raw).split(',').map(s => s.trim()).filter(Boolean)
+}
+
+/**
+ * Middleware: validate + sanitise analytics query-string filters.
+ * Rejects with 400 on invalid values; populates req.analyticsFilters.
+ */
+function validateAnalyticsFilters(req, res, next) {
+  const q = req.query
+  const errors = []
+
+  // mode
+  const mode = q.mode || 'all'
+  if (!VALID_MODES.includes(mode)) {
+    errors.push(`Invalid mode "${mode}". Must be one of: ${VALID_MODES.join(', ')}`)
+  }
+
+  // time
+  let time = {}
+  const range = q['time.range'] || q['time[range]'] || (typeof q.time === 'object' ? q.time?.range : undefined)
+  if (range) {
+    if (!VALID_RANGES.includes(range)) {
+      errors.push(`Invalid time.range "${range}". Must be one of: ${VALID_RANGES.join(', ')}`)
+    }
+    time.range = range
+    if (range === 'CUSTOM') {
+      const from = q['time.from'] || q['time[from]'] || (typeof q.time === 'object' ? q.time?.from : undefined)
+      const to = q['time.to'] || q['time[to]'] || (typeof q.time === 'object' ? q.time?.to : undefined)
+      if (!from || !to) {
+        errors.push('CUSTOM range requires both time.from and time.to')
+      } else {
+        if (!ISO_DATE_RE.test(from)) errors.push(`Invalid time.from "${from}". Use YYYY-MM-DD`)
+        if (!ISO_DATE_RE.test(to)) errors.push(`Invalid time.to "${to}". Use YYYY-MM-DD`)
+        if (from > to) errors.push('time.from must be before time.to')
+        time.from = from
+        time.to = to
+      }
+    }
+  }
+
+  // array filters
+  const categories = toStringArray(q.categories)
+  const paymentMethods = toStringArray(q.paymentMethods)
+  const currencies = toStringArray(q.currencies)
+  const createdBy = toStringArray(q.createdBy)
+  const paidBy = toStringArray(q.paidBy)
+  const groupIds = toStringArray(q.groupIds)
+
+  // status
+  let status = toStringArray(q.status)
+  if (status.length === 0) status = ['active', 'settled']
+  const badStatuses = status.filter(s => !VALID_STATUSES.includes(s))
+  if (badStatuses.length) {
+    errors.push(`Invalid status values: ${badStatuses.join(', ')}`)
+  }
+
+  if (errors.length) {
+    return fail(res, errors.join('; '), 400)
+  }
+
+  // Attach sanitised filters to request
+  req.analyticsFilters = {
+    mode,
+    time: Object.keys(time).length ? time : undefined,
+    categories,
+    paymentMethods,
+    currencies,
+    createdBy,
+    paidBy,
+    groupIds,
+    status,
+    baseCurrency: q.baseCurrency || undefined,
+  }
+  next()
+}
+
 /**
  * Build date range filter based on time parameters
  */
 function buildDateFilter(timeConfig) {
   const now = new Date()
-  
+
   switch (timeConfig.range) {
     case 'ALL_TIME':
       return {}
@@ -61,7 +150,7 @@ function buildDateFilter(timeConfig) {
 async function buildBaseQuery(req, filters) {
   const userId = req.user._id || req.user.id
   const baseCurrency = req.user.preferences?.baseCurrency || 'USD'
-  
+
   let matchQuery = {
     status: { $in: filters.status || ['active', 'settled'] },
   }
@@ -72,7 +161,7 @@ async function buildBaseQuery(req, filters) {
       matchQuery.date = dateFilter
     }
   }
-  
+
   // Handle mode filtering
   if (filters.mode === 'personal') {
     matchQuery.groupId = null
@@ -82,23 +171,23 @@ async function buildBaseQuery(req, filters) {
     ]
   } else if (filters.mode === 'group') {
     matchQuery.groupId = { $exists: true, $ne: null }
-    
+
     // Get user's groups for ACL
     const userGroups = await Group.find({
       "members.user": userId,
       isActive: true
     }).select('_id')
-    
+
     if (filters.groupIds && filters.groupIds.length > 0) {
       // Filter by specific groups and verify membership
-      const allowedGroupIds = filters.groupIds.filter(groupId => 
+      const allowedGroupIds = filters.groupIds.filter(groupId =>
         userGroups.some(g => g._id.toString() === groupId)
       )
       matchQuery.groupId = { $in: allowedGroupIds }
     } else {
       matchQuery.groupId = { $in: userGroups.map(g => g._id) }
     }
-    
+
     matchQuery.$or = [
       { paidBy: userId },
       { "splits.user": userId }
@@ -110,55 +199,55 @@ async function buildBaseQuery(req, filters) {
       { "splits.user": userId }
     ]
   }
-  
+
   // Apply additional filters
   if (filters.categories && filters.categories.length > 0) {
     matchQuery.category = { $in: filters.categories }
   }
-  
+
   if (filters.paymentMethods && filters.paymentMethods.length > 0) {
     matchQuery.paymentMethod = { $in: filters.paymentMethods }
   }
-  
+
   if (filters.currencies && filters.currencies.length > 0) {
     matchQuery.currencyCode = { $in: filters.currencies }
   }
-  
+
   if (filters.createdBy && filters.createdBy.length > 0) {
     matchQuery.createdBy = { $in: filters.createdBy }
   }
-  
+
   if (filters.paidBy && filters.paidBy.length > 0) {
     matchQuery.paidBy = { $in: filters.paidBy }
   }
-  
+
   return { matchQuery, baseCurrency }
 }
 
 /**
  * 1. KPIs endpoint
  */
-router.get("/kpis", async (req, res) => {
+router.get("/kpis", validateAnalyticsFilters, async (req, res) => {
   try {
-    const filters = req.query
+    const filters = req.analyticsFilters
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
     const userId = (req.user._id || req.user.id).toString()
-    
+
     // Get expenses for calculations
     const expenses = await Expense.find(matchQuery)
       .select('amountCents currencyCode fxRate category status date groupId paidBy splits')
       .lean()
-    
+
     // Calculate KPIs
     let totalSpendBaseCents = 0
     let expensesCount = { personal: 0, group: 0 }
     let activeGroups = new Set()
     let activeMembers = new Set()
-    
+
     expenses.forEach(expense => {
       const baseAmount = toBaseCurrency(expense.amountCents, expense.fxRate || 1.0)
       totalSpendBaseCents += baseAmount
-      
+
       if (expense.groupId) {
         expensesCount.group++
         activeGroups.add(expense.groupId.toString())
@@ -169,22 +258,22 @@ router.get("/kpis", async (req, res) => {
         activeMembers.add(expense.paidBy.toString())
       }
     })
-    
+
     // Calculate net balance for current user
-    const userExpenses = expenses.filter(e => 
-      e.paidBy.toString() === userId || 
+    const userExpenses = expenses.filter(e =>
+      e.paidBy.toString() === userId ||
       e.splits.some(s => s.user.toString() === userId)
     )
-    
+
     let netBalanceBaseCents = 0
     userExpenses.forEach(expense => {
       const isPayer = expense.paidBy.toString() === userId
       const userSplit = expense.splits.find(s => s.user.toString() === userId)
-      
+
       if (userSplit) {
         const baseAmount = toBaseCurrency(expense.amountCents, expense.fxRate || 1.0)
         const splitBaseAmount = toBaseCurrency(userSplit.amountCents, expense.fxRate || 1.0)
-        
+
         if (isPayer) {
           netBalanceBaseCents += baseAmount - splitBaseAmount
         } else {
@@ -192,15 +281,15 @@ router.get("/kpis", async (req, res) => {
         }
       }
     })
-    
+
     // Calculate average expense size
-    const avgExpenseSizeBaseCents = expenses.length > 0 ? 
+    const avgExpenseSizeBaseCents = expenses.length > 0 ?
       Math.round(totalSpendBaseCents / expenses.length) : 0
-    
+
     // Calculate average settlement days
     const settledExpenses = expenses.filter(e => e.status === 'settled' && e.settledAt)
     let avgSettlementDays = 0
-    
+
     if (settledExpenses.length > 0) {
       const totalDays = settledExpenses.reduce((sum, expense) => {
         const days = Math.floor((new Date(expense.settledAt) - new Date(expense.date)) / (1000 * 60 * 60 * 24))
@@ -208,7 +297,7 @@ router.get("/kpis", async (req, res) => {
       }, 0)
       avgSettlementDays = Math.round(totalDays / settledExpenses.length)
     }
-    
+
     return ok(res, {
       totalSpendBaseCents,
       netBalanceBaseCents,
@@ -220,7 +309,7 @@ router.get("/kpis", async (req, res) => {
       baseCurrency
     })
   } catch (error) {
-    
+    console.error('[Analytics] KPIs error:', error.message)
     return fail(res, 'Failed to calculate KPIs', 500)
   }
 })
@@ -228,11 +317,11 @@ router.get("/kpis", async (req, res) => {
 /**
  * 2. Spend over time chart
  */
-router.get("/spend-over-time", async (req, res) => {
+router.get("/spend-over-time", validateAnalyticsFilters, async (req, res) => {
   try {
-    const filters = req.query
+    const filters = req.analyticsFilters
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
-    
+
     const aggregation = [
       { $match: matchQuery },
       {
@@ -248,15 +337,15 @@ router.get("/spend-over-time", async (req, res) => {
       },
       { $sort: { "_id.date": 1 } }
     ]
-    
+
     const results = await Expense.aggregate(aggregation)
-    
+
     // Group by date and separate personal vs group
     const spendOverTime = {}
     results.forEach(result => {
       const date = result._id.date
       const isGroup = result._id.isGroup
-      
+
       if (!spendOverTime[date]) {
         spendOverTime[date] = {
           date,
@@ -264,7 +353,7 @@ router.get("/spend-over-time", async (req, res) => {
           group: { amountCents: 0, baseCents: 0, count: 0 }
         }
       }
-      
+
       if (isGroup) {
         spendOverTime[date].group.amountCents += result.totalCents
         spendOverTime[date].group.baseCents += result.totalBaseCents
@@ -275,13 +364,13 @@ router.get("/spend-over-time", async (req, res) => {
         spendOverTime[date].personal.count += result.count
       }
     })
-    
+
     return ok(res, {
       data: Object.values(spendOverTime),
       baseCurrency
     })
   } catch (error) {
-    
+    console.error('[Analytics] spend-over-time error:', error.message)
     return fail(res, 'Failed to get spend over time data', 500)
   }
 })
@@ -289,11 +378,11 @@ router.get("/spend-over-time", async (req, res) => {
 /**
  * 3. Category breakdown
  */
-router.get("/category-breakdown", async (req, res) => {
+router.get("/category-breakdown", validateAnalyticsFilters, async (req, res) => {
   try {
-    const filters = req.query
+    const filters = req.analyticsFilters
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
-    
+
     const aggregation = [
       { $match: matchQuery },
       {
@@ -312,15 +401,15 @@ router.get("/category-breakdown", async (req, res) => {
       },
       { $sort: { totalBaseCents: -1 } }
     ]
-    
+
     const results = await Expense.aggregate(aggregation)
-    
+
     return ok(res, {
       data: results,
       baseCurrency
     })
   } catch (error) {
-    
+    console.error('[Analytics] category-breakdown error:', error.message)
     return fail(res, 'Failed to get category breakdown', 500)
   }
 })
@@ -328,11 +417,11 @@ router.get("/category-breakdown", async (req, res) => {
 /**
  * 4. Top partners (users/groups)
  */
-router.get("/top-partners", async (req, res) => {
+router.get("/top-partners", validateAnalyticsFilters, async (req, res) => {
   try {
-    const filters = req.query
+    const filters = req.analyticsFilters
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
-    
+
     // Top users
     const topUsers = await Expense.aggregate([
       { $match: { ...matchQuery, groupId: { $exists: true, $ne: null } } },
@@ -366,7 +455,7 @@ router.get("/top-partners", async (req, res) => {
         }
       }
     ])
-    
+
     // Top groups
     const topGroups = await Expense.aggregate([
       { $match: { ...matchQuery, groupId: { $exists: true, $ne: null } } },
@@ -400,14 +489,14 @@ router.get("/top-partners", async (req, res) => {
         }
       }
     ])
-    
+
     return ok(res, {
       topUsers,
       topGroups,
       baseCurrency
     })
   } catch (error) {
-    
+    console.error('[Analytics] top-partners error:', error.message)
     return fail(res, 'Failed to get top partners data', 500)
   }
 })
@@ -422,28 +511,28 @@ router.get("/balance-matrix", async (req, res) => {
     if (!groupId) {
       return fail(res, 'Group ID is required', 400)
     }
-    
+
     // Verify user is member of group
     const group = await Group.findById(groupId)
     if (!group || !group.members.some(m => m.user.toString() === userId)) {
       return fail(res, 'Access denied', 403)
     }
-    
+
     const expenses = await Expense.find({
       groupId,
       status: { $in: ['active', 'settled'] }
     }).select('amountCents fxRate paidBy splits').lean()
-    
+
     const memberIds = group.members.map(m => m.user.toString())
     const balanceMatrix = calculateBalanceMatrix(expenses, memberIds)
-    
+
     return ok(res, {
       balanceMatrix,
       memberIds,
       groupName: group.name
     })
   } catch (error) {
-    
+    console.error('[Analytics] balance-matrix error:', error.message)
     return fail(res, 'Failed to get balance matrix', 500)
   }
 })
@@ -458,28 +547,28 @@ router.get("/simplify", async (req, res) => {
     if (!groupId) {
       return fail(res, 'Group ID is required', 400)
     }
-    
+
     // Verify user is member of group
     const group = await Group.findById(groupId)
     if (!group || !group.members.some(m => m.user.toString() === userId)) {
       return fail(res, 'Access denied', 403)
     }
-    
+
     const expenses = await Expense.find({
       groupId,
       status: { $in: ['active', 'settled'] }
     }).select('amountCents fxRate paidBy splits').lean()
-    
+
     const memberIds = group.members.map(m => m.user.toString())
     const balanceMatrix = calculateBalanceMatrix(expenses, memberIds)
     const suggestions = calculateSettlementSuggestions(balanceMatrix)
-    
+
     return ok(res, {
       suggestions,
       groupName: group.name
     })
   } catch (error) {
-    
+    console.error('[Analytics] simplify error:', error.message)
     return fail(res, 'Failed to get settlement suggestions', 500)
   }
 })
@@ -487,26 +576,26 @@ router.get("/simplify", async (req, res) => {
 /**
  * 7. Aging buckets for unsettled balances
  */
-router.get("/aging", async (req, res) => {
+router.get("/aging", validateAnalyticsFilters, async (req, res) => {
   try {
-    const filters = req.query
+    const filters = req.analyticsFilters
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
-    
+
     // Only get unsettled expenses
     matchQuery.status = { $in: ['active'] }
-    
+
     const expenses = await Expense.find(matchQuery)
       .select('amountCents fxRate date status')
       .lean()
-    
+
     const agingBuckets = calculateAgingBuckets(expenses)
-    
+
     return ok(res, {
       data: agingBuckets,
       baseCurrency
     })
   } catch (error) {
-    
+    console.error('[Analytics] aging error:', error.message)
     return fail(res, 'Failed to get aging data', 500)
   }
 })
@@ -514,13 +603,13 @@ router.get("/aging", async (req, res) => {
 /**
  * 8. Ledger export
  */
-router.get("/ledger", async (req, res) => {
+router.get("/ledger", validateAnalyticsFilters, async (req, res) => {
   try {
-    const filters = req.query
+    const filters = req.analyticsFilters
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
-    
+
     const { page = 1, limit = 50 } = req.query
-    
+
     const expenses = await Expense.find(matchQuery)
       .populate('paidBy', 'firstName lastName')
       .populate('groupId', 'name')
@@ -529,9 +618,9 @@ router.get("/ledger", async (req, res) => {
       .limit(Number(limit))
       .skip((Number(page) - 1) * Number(limit))
       .lean()
-    
+
     const total = await Expense.countDocuments(matchQuery)
-    
+
     const ledger = expenses.map(expense => ({
       id: expense._id,
       description: expense.description,
@@ -547,7 +636,7 @@ router.get("/ledger", async (req, res) => {
       participantCount: expense.splits.length,
       isSettled: expense.status === 'settled'
     }))
-    
+
     return ok(res, {
       data: ledger,
       pagination: {
@@ -559,7 +648,7 @@ router.get("/ledger", async (req, res) => {
       baseCurrency
     })
   } catch (error) {
-    
+    console.error('[Analytics] ledger error:', error.message)
     return fail(res, 'Failed to get ledger data', 500)
   }
 })
@@ -567,18 +656,18 @@ router.get("/ledger", async (req, res) => {
 /**
  * 9. CSV export
  */
-router.get("/export/csv", async (req, res) => {
+router.get("/export/csv", validateAnalyticsFilters, async (req, res) => {
   try {
-    const filters = req.query
+    const filters = req.analyticsFilters
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
-    
+
     const expenses = await Expense.find(matchQuery)
       .populate('paidBy', 'firstName lastName')
       .populate('groupId', 'name')
       .select('description amountCents currencyCode fxRate category date status groupId paidBy splits')
       .sort({ date: -1 })
       .lean()
-    
+
     // Generate CSV
     const csvHeader = 'Date,Description,Amount,Currency,Base Amount,Category,Type,Group,Paid By,Status,Participants\n'
     const csvRows = expenses.map(expense => {
@@ -597,14 +686,14 @@ router.get("/export/csv", async (req, res) => {
         expense.splits.length
       ].join(',')
     }).join('\n')
-    
+
     const csv = csvHeader + csvRows
-    
+
     res.setHeader('Content-Type', 'text/csv')
     res.setHeader('Content-Disposition', `attachment; filename="expenses-${new Date().toISOString().split('T')[0]}.csv"`)
     res.send(csv)
   } catch (error) {
-    
+    console.error('[Analytics] CSV export error:', error.message)
     return fail(res, 'Failed to export CSV', 500)
   }
 })
@@ -619,51 +708,51 @@ router.get("/group-health", async (req, res) => {
     if (!groupId) {
       return fail(res, 'Group ID is required', 400)
     }
-    
+
     // Verify user is member of group
     const group = await Group.findById(groupId)
     if (!group || !group.members.some(m => m.user.toString() === userId)) {
       return fail(res, 'Access denied', 403)
     }
-    
+
     const now = new Date()
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
     const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
-    
+
     // Active members in last 30/90 days
     const active30d = await Expense.distinct('paidBy', {
       groupId,
       date: { $gte: thirtyDaysAgo },
       status: { $in: ['active', 'settled'] }
     })
-    
+
     const active90d = await Expense.distinct('paidBy', {
       groupId,
       date: { $gte: ninetyDaysAgo },
       status: { $in: ['active', 'settled'] }
     })
-    
+
     // Expenses per week
     const weeklyExpenses = await Expense.countDocuments({
       groupId,
       date: { $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) },
       status: { $in: ['active', 'settled'] }
     })
-    
+
     // Settlement rate
     const totalExpenses = await Expense.countDocuments({
       groupId,
       status: { $in: ['active', 'settled'] }
     })
-    
+
     const settledExpenses = await Expense.countDocuments({
       groupId,
       status: 'settled'
     })
-    
-    const settlementRate = totalExpenses > 0 ? 
+
+    const settlementRate = totalExpenses > 0 ?
       Math.round((settledExpenses / totalExpenses) * 100) : 0
-    
+
     // Fast settlements (< 14 days)
     const fastSettlements = await Expense.countDocuments({
       groupId,
@@ -675,10 +764,10 @@ router.get("/group-health", async (req, res) => {
         ]
       }
     })
-    
-    const fastSettlementRate = settledExpenses > 0 ? 
+
+    const fastSettlementRate = settledExpenses > 0 ?
       Math.round((fastSettlements / settledExpenses) * 100) : 0
-    
+
     return ok(res, {
       activeMembers30d: active30d.length,
       activeMembers90d: active90d.length,
@@ -689,9 +778,10 @@ router.get("/group-health", async (req, res) => {
       groupName: group.name
     })
   } catch (error) {
-    
+    console.error('[Analytics] group-health error:', error.message)
     return fail(res, 'Failed to get group health metrics', 500)
   }
 })
 
 module.exports = router
+module.exports.validateAnalyticsFilters = validateAnalyticsFilters

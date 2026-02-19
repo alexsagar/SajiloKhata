@@ -77,6 +77,21 @@ app.use(
 // app.use("/api/auth", authLimiter)
 
 // Body parsing middleware
+// Request timing middleware
+app.use((req, res, next) => {
+  const start = Date.now()
+  res.on('finish', () => {
+    const duration = Date.now() - start
+    // Log slow requests as warnings, others as info (if logger existed, using console for now)
+    if (duration > 500) {
+      console.warn(`[HTTP] ${req.method} ${req.url} ${res.statusCode} ${duration}ms (SLOW)`)
+    } else {
+      console.log(`[HTTP] ${req.method} ${req.url} ${res.statusCode} ${duration}ms`)
+    }
+  })
+  next()
+})
+
 app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true, limit: "10mb" }))
 app.use(compression())
@@ -129,8 +144,8 @@ app.get("/api/health", (req, res) => {
 io.use((socket, next) => {
   try {
     const cookieHeader = socket.handshake.headers.cookie || ''
-    
-    
+
+
 
     const cookies = Object.fromEntries(cookieHeader.split(';').filter(Boolean).map(c => {
       const [k, ...rest] = c.trim().split('=')
@@ -141,9 +156,9 @@ io.use((socket, next) => {
     const authToken = socket.handshake.auth && socket.handshake.auth.token
     const token = cookies['accessToken'] || authToken
 
-    
+
     if (!token) {
-      
+
       return next(new Error('Authentication error'))
     }
 
@@ -162,7 +177,7 @@ io.use((socket, next) => {
 })
 
 io.on("connection", (socket) => {
-  
+
 
   // Join user to their personal room
   socket.join(`user_${socket.userId}`)
@@ -171,7 +186,7 @@ io.on("connection", (socket) => {
   try {
     onlineUsers.add(String(socket.userId))
     socket.emit("presence:state", { onlineUserIds: Array.from(onlineUsers) })
-  } catch (_) { }
+  } catch (err) { console.error("[Socket] presence:state emit error:", err.message) }
 
   // Join user to their group rooms
   socket.on("join_groups", (groupIds) => {
@@ -184,22 +199,47 @@ io.on("connection", (socket) => {
   socket.on("join_conversations", (conversationIds = []) => {
     try {
       conversationIds.forEach((id) => socket.join(`conv_${id}`))
-    } catch (_) { }
+    } catch (err) { console.error("[Socket] join_conversations error:", err.message) }
   })
 
   // Explicitly request presence state
   socket.on("presence:request", () => {
     try {
       socket.emit("presence:state", { onlineUserIds: Array.from(onlineUsers) })
-    } catch (_) { }
+    } catch (err) { console.error("[Socket] presence:request error:", err.message) }
   })
 
   // Simple presence broadcast
   socket.broadcast.emit("presence:online", { userId: String(socket.userId) })
 
+  // Typing indicators — broadcast to conversation room (exclude sender)
+  socket.on("typing:start", (payload) => {
+    try {
+      const convId = payload?.conversationId
+      if (convId) {
+        socket.to(`conv_${convId}`).emit("typing:start", {
+          conversationId: convId,
+          userId: String(socket.userId),
+        })
+      }
+    } catch (err) { console.error("[Socket] typing:start error:", err.message) }
+  })
+
+  socket.on("typing:stop", (payload) => {
+    try {
+      const convId = payload?.conversationId
+      if (convId) {
+        socket.to(`conv_${convId}`).emit("typing:stop", {
+          conversationId: convId,
+          userId: String(socket.userId),
+        })
+      }
+    } catch (err) { console.error("[Socket] typing:stop error:", err.message) }
+  })
+
   socket.on("disconnect", () => {
-    
-    try { onlineUsers.delete(String(socket.userId)) } catch (_) { }
+
+    try { onlineUsers.delete(String(socket.userId)) } catch (err) { console.error("[Socket] disconnect cleanup error:", err.message) }
     socket.broadcast.emit("presence:offline", { userId: String(socket.userId) })
   })
 })

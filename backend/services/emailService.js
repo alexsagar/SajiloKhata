@@ -1,11 +1,13 @@
 const nodemailer = require("nodemailer")
 
+const IS_PRODUCTION = process.env.NODE_ENV === "production"
+
 class EmailService {
   constructor() {
     // Only create transporter if SMTP credentials are provided
-    if (process.env.SMTP_USER && process.env.SMTP_PASS && 
-        !process.env.SMTP_USER.includes('your-email') && 
-        !process.env.SMTP_PASS.includes('your-app-password')) {
+    if (process.env.SMTP_USER && process.env.SMTP_PASS &&
+      !process.env.SMTP_USER.includes('your-email') &&
+      !process.env.SMTP_PASS.includes('your-app-password')) {
       const port = Number(process.env.SMTP_PORT) || 587
       const secure = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || port === 465
 
@@ -25,28 +27,41 @@ class EmailService {
       // Verify connection configuration
       this.transporter.verify((error, success) => {
         if (error) {
-          
+          console.error("[EmailService] SMTP connection verification failed:", error.message)
         } else {
-          
+          console.log("[EmailService] SMTP connection verified successfully")
         }
       })
     } else {
-      
+      if (IS_PRODUCTION) {
+        console.warn(
+          "[EmailService] WARNING: No SMTP credentials configured in production. " +
+          "Emails will NOT be sent. Set SMTP_USER and SMTP_PASS environment variables."
+        )
+      } else {
+        console.log("[EmailService] No SMTP credentials configured. Emails will be logged to console in development.")
+      }
       this.transporter = null
     }
   }
 
   async sendEmail({ to, subject, template, data, html, text }) {
     try {
-      // If no transporter (no SMTP configuration), log and return
+      // If no transporter (no SMTP configuration), handle gracefully
       if (!this.transporter) {
-        ("📧 Email would be sent:", { 
-          to, 
-          subject, 
-          template: template || 'custom',
-          preview: data ? `${data.firstName || 'User'}: ${data.message || subject}` : subject
+        if (IS_PRODUCTION) {
+          console.error(
+            `[EmailService] FAILED: Cannot send email to ${to} (subject: "${subject}") — SMTP not configured.`
+          )
+          throw new Error("Email delivery unavailable: SMTP not configured in production environment")
+        }
+        // Development: log the email that would have been sent
+        console.log("[EmailService] Dev mode — email not sent:", {
+          to,
+          subject,
+          template: template || "custom",
         })
-        return { success: true, messageId: "mock-id" }
+        return { success: true, messageId: `dev-no-smtp-${Date.now()}`, accepted: [to], rejected: [] }
       }
 
       let emailHtml = html
@@ -84,14 +99,10 @@ class EmailService {
       }
 
       const result = await this.transporter.sendMail(mailOptions)
-      console.log("Email sent successfully:", result.messageId, {
-        accepted: result.accepted,
-        rejected: result.rejected,
-        response: result.response,
-      })
+      console.log(`[EmailService] Email sent to ${to} (messageId: ${result.messageId})`)
       return result
     } catch (error) {
-      
+      console.error(`[EmailService] Failed to send email to ${to}:`, error.message)
       throw error
     }
   }

@@ -25,10 +25,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated } = useAuth()
 
   useEffect(() => {
-    
+
 
     if (isAuthenticated && user && typeof window !== 'undefined') {
-      
+
 
       const newSocket = io(process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5000", {
         transports: ["websocket", "polling"],
@@ -37,7 +37,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       })
 
       newSocket.on("connect", () => {
-        
+
         setIsConnected(true)
         // Emit presence when connected
         newSocket.emit('presence:online')
@@ -46,13 +46,13 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       })
 
       newSocket.on("disconnect", () => {
-        
+
         setIsConnected(false)
         setOnlineUsers([])
       })
 
       newSocket.on("connect_error", (error) => {
-        
+
         setIsConnected(false)
         setOnlineUsers([])
       })
@@ -78,10 +78,23 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         window.dispatchEvent(new CustomEvent("socket:message:new", { detail: payload }))
       })
 
+      // Read receipt relay
+      newSocket.on("conversation:read", (payload) => {
+        window.dispatchEvent(new CustomEvent("socket:conversation:read", { detail: payload }))
+      })
+
+      // Typing indicator relay
+      newSocket.on("typing:start", (payload) => {
+        window.dispatchEvent(new CustomEvent("socket:typing:start", { detail: payload }))
+      })
+      newSocket.on("typing:stop", (payload) => {
+        window.dispatchEvent(new CustomEvent("socket:typing:stop", { detail: payload }))
+      })
+
       // Presence handling - Update local state AND dispatch events
       newSocket.on("presence:online", (payload) => {
         const userId = String(payload.userId)
-        
+
         setOnlineUsers(prev => {
           if (prev.includes(userId)) return prev
           return [...prev, userId]
@@ -91,13 +104,13 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
       newSocket.on("presence:offline", (payload) => {
         const userId = String(payload.userId)
-        
+
         setOnlineUsers(prev => prev.filter(id => id !== userId))
         window.dispatchEvent(new CustomEvent("socket:presence:offline", { detail: payload }))
       })
 
       newSocket.on("presence:state", (payload) => {
-        
+
         const ids = (payload.onlineUserIds || []).map((id: any) => String(id))
         setOnlineUsers(ids)
         window.dispatchEvent(new CustomEvent("socket:presence:state", { detail: payload }))
@@ -166,11 +179,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
   const joinConversations = useCallback((conversationIds: string[]) => {
     if (!socket || !isConnected) {
-      
       return
     }
-    
-    conversationIds.forEach(id => socket.emit("conversation:join", { conversationId: id }))
+    // Backend expects 'join_conversations' event with array of IDs
+    socket.emit("join_conversations", conversationIds)
   }, [socket, isConnected])
 
   return (

@@ -1,11 +1,15 @@
 const Tesseract = require("tesseract.js")
 
+// Environment-gated debug logging
+const DEBUG = process.env.NODE_ENV === 'development'
+const debugLog = (...args) => { if (DEBUG) console.log(...args) }
+
 class OCRService {
   constructor() {
     this.tesseractOptions = {
       logger: (m) => {
-        if (m.status === "recognizing text" && typeof m.progress === "number") {
-          console.log(`OCR progress: ${Math.round(m.progress * 100)}%`)
+        if (DEBUG && m.status === "recognizing text" && typeof m.progress === "number") {
+          debugLog(`OCR progress: ${Math.round(m.progress * 100)}%`)
         }
       },
     }
@@ -13,13 +17,9 @@ class OCRService {
 
   async extractText(imageBuffer) {
     try {
-      console.log("Starting Tesseract recognition...")
       const {
         data: { text },
       } = await Tesseract.recognize(imageBuffer, "eng", this.tesseractOptions)
-      
-      console.log("Tesseract recognition completed")
-      console.log("Raw OCR text:", text)
 
       // Parse the extracted text to find relevant information
       const parsedData = this.parseReceiptText(text)
@@ -29,17 +29,13 @@ class OCRService {
         ...parsedData,
       }
     } catch (error) {
-      console.error("OCR extraction error:", error)
+      console.error("OCR extraction error:", error.message)
       throw new Error("Failed to extract text from image: " + error.message)
     }
   }
 
   parseReceiptText(text) {
-    console.log("OCR Raw text extracted:", text)
-    console.log("OCR Raw text length:", text ? text.length : 0)
-    
     if (!text || text.trim().length === 0) {
-      console.log("OCR No text extracted - returning empty result")
       return {
         merchantName: null,
         total: null,
@@ -49,10 +45,8 @@ class OCRService {
         items: [],
       }
     }
-    
+
     const lines = text.split("\n").map((line) => line.trim()).filter(Boolean)
-    console.log("OCR Parsed lines:", lines)
-    console.log("OCR Number of lines:", lines.length)
 
     const result = {
       merchantName: null,
@@ -66,10 +60,8 @@ class OCRService {
     // Try to find merchant name (usually first few lines)
     for (let i = 0; i < Math.min(5, lines.length); i++) {
       const line = lines[i]
-      console.log(`OCR Line ${i}: "${line}" (length: ${line.length}, isNumeric: ${this.isNumericLine(line)}, isDate: ${this.isDateLine(line)})`)
       if (line.length > 1 && !this.isNumericLine(line) && !this.isDateLine(line)) {
         result.merchantName = line
-        console.log(`OCR Merchant found: "${line}"`)
         break
       }
     }
@@ -79,35 +71,24 @@ class OCRService {
       const lowerLine = line.toLowerCase()
 
       // Total patterns - more comprehensive
-      if ((lowerLine.includes("total") && !lowerLine.includes("subtotal")) || 
-          lowerLine.includes("amount due") || 
-          lowerLine.includes("balance") ||
-          lowerLine.includes("total payable") ||
-          lowerLine.includes("payable") ||
-          lowerLine.match(/\btotal\s*amount\b/) ||
-          lowerLine.match(/\bgrand\s*total\b/)) {
-        console.log(`OCR Found total line: "${line}"`)
-        
-        // Test specific patterns for this line
-        console.log(`OCR Testing NPR pattern on: "${line}"`)
-        const nprMatch = line.match(/NPR\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/gi)
-        if (nprMatch) {
-          console.log(`OCR NPR match found:`, nprMatch)
-        }
-        
+      if ((lowerLine.includes("total") && !lowerLine.includes("subtotal")) ||
+        lowerLine.includes("amount due") ||
+        lowerLine.includes("balance") ||
+        lowerLine.includes("total payable") ||
+        lowerLine.includes("payable") ||
+        lowerLine.match(/\btotal\s*amount\b/) ||
+        lowerLine.match(/\bgrand\s*total\b/)) {
         const amount = this.extractAmount(line)
-        console.log(`OCR Extracted amount: ${amount}`)
         if (amount && (!result.total || amount > result.total)) {
           result.total = amount
-          console.log(`OCR Total set to: ${amount}`)
         }
       }
 
       // Subtotal patterns
-      if (lowerLine.includes("subtotal") || 
-          lowerLine.includes("sub total") ||
-          lowerLine.includes("sub-total") ||
-          lowerLine.match(/\bsubtotal\b/)) {
+      if (lowerLine.includes("subtotal") ||
+        lowerLine.includes("sub total") ||
+        lowerLine.includes("sub-total") ||
+        lowerLine.match(/\bsubtotal\b/)) {
         const amount = this.extractAmount(line)
         if (amount) {
           result.subtotal = amount
@@ -116,11 +97,11 @@ class OCRService {
 
       // Tax patterns - more comprehensive
       if ((lowerLine.includes("tax") && !lowerLine.includes("total")) ||
-          lowerLine.includes("vat") ||
-          lowerLine.includes("gst") ||
-          lowerLine.includes("hst") ||
-          lowerLine.match(/\btax\s*amount\b/) ||
-          lowerLine.match(/\bsales\s*tax\b/)) {
+        lowerLine.includes("vat") ||
+        lowerLine.includes("gst") ||
+        lowerLine.includes("hst") ||
+        lowerLine.match(/\btax\s*amount\b/) ||
+        lowerLine.match(/\bsales\s*tax\b/)) {
         const amount = this.extractAmount(line)
         if (amount) {
           result.tax = amount
@@ -139,24 +120,17 @@ class OCRService {
 
     // Fallback: if no total found, try to find the largest amount in the receipt
     if (!result.total) {
-      console.log("OCR No total found, looking for largest amount as fallback")
       let largestAmount = 0
-      let largestAmountLine = ""
       for (const line of lines) {
         const amount = this.extractAmount(line)
         if (amount && amount > largestAmount) {
           largestAmount = amount
-          largestAmountLine = line
-          console.log(`OCR Found potential total: ${amount} from line: "${line}"`)
         }
       }
       if (largestAmount > 0) {
         result.total = largestAmount
-        console.log(`OCR Using largest amount as total: ${largestAmount} from line: "${largestAmountLine}"`)
       }
     }
-
-    console.log("OCR Final result:", JSON.stringify(result, null, 2))
 
     return result
   }
@@ -166,12 +140,12 @@ class OCRService {
     if (!text || typeof text !== 'string') {
       return null
     }
-    
+
     // Test the specific case first
     if (text.includes("Total Payable: NPR 7,011")) {
       return 7011
     }
-    
+
     // Enhanced currency patterns to handle more formats
     const patterns = [
       // NPR currency format: NPR 7,011 (more specific)
@@ -227,12 +201,10 @@ class OCRService {
           // Remove thousand separators (commas)
           amountStr = amountStr.replace(/,/g, '')
         }
-        
+
         if (amountStr) {
           const amount = Number.parseFloat(amountStr)
-          console.log(`OCR Parsed amount: "${amountStr}" -> ${amount}`)
           if (!Number.isNaN(amount) && amount > 0) {
-            console.log(`OCR Valid amount found: ${amount}`)
             return amount
           }
         }
@@ -266,7 +238,7 @@ class OCRService {
 
   extractLineItems(lines) {
     const items = []
-    
+
     // Direct handling for known receipt format (with OCR error tolerance)
     for (const line of lines) {
       if (line.includes("T=Shilnk 1 800") || line.includes("T-Shirt 1 800")) {
@@ -282,7 +254,7 @@ class OCRService {
         continue
       }
     }
-    
+
     // If we found items with direct matching, return them
     if (items.length > 0) {
       return items
@@ -307,22 +279,20 @@ class OCRService {
         lowerLine.includes("vat") ||
         lowerLine.includes("qty") ||
         lowerLine.includes("rate") ||
-        lowerLine.includes("item qty rate") || // More specific filter
+        lowerLine.includes("item qty rate") ||
         lowerLine.includes("cashier") ||
         lowerLine.includes("staff") ||
         line.length < 3
       ) {
-        console.log(`OCR Skipping line: "${line}" (reason: filtered out)`)
         continue
       }
 
       // Look for lines with both text and amount (format: "T-Shirt 1 800" or "Jeans 1 2,200")
       const amount = this.extractAmount(line)
-      console.log(`OCR Line item check: "${line}" -> amount: ${amount}`)
       if (amount && amount > 0) {
         // More robust description extraction for receipt format
         let description = line
-        
+
         // Remove NPR currency references
         description = description.replace(/NPR/gi, "")
         // Remove various amount patterns including comma-separated numbers
@@ -369,7 +339,7 @@ class OCRService {
         confidence: this.calculateConfidence(ocrResult),
       }
     } catch (error) {
-      console.error("OCR processing failed:", error)
+      console.error("OCR processing failed:", error.message)
       return {
         success: false,
         error: error.message,
@@ -381,32 +351,32 @@ class OCRService {
   // Calculate confidence score based on extracted data
   calculateConfidence(ocrResult) {
     let score = 0
-    
+
     // Merchant name found
     if (ocrResult.merchantName && ocrResult.merchantName !== "Unknown Merchant") {
       score += 30
     }
-    
+
     // Total amount found
     if (ocrResult.total && ocrResult.total > 0) {
       score += 40
     }
-    
+
     // Date found
     if (ocrResult.date) {
       score += 15
     }
-    
+
     // Items found
     if (ocrResult.items && ocrResult.items.length > 0) {
       score += 10
     }
-    
+
     // Tax or subtotal found
     if (ocrResult.tax > 0 || ocrResult.subtotal > 0) {
       score += 5
     }
-    
+
     return Math.min(score, 100)
   }
 

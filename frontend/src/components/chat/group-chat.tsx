@@ -69,10 +69,8 @@ export function GroupChat() {
           let lastMsg: GroupMessage | undefined
           let convId: string | undefined
 
-          try {
-            // We might need a better way to batch this or get it from the group list API
-            // For now, we'll initialize with empty messages and load on select
-          } catch (e) { }
+          // TODO: batch conversation loading or get from the group list API
+          //       For now, initialized with empty messages and loaded on select
 
           return {
             id: g._id,
@@ -95,7 +93,7 @@ export function GroupChat() {
           joinGroups(groupIds)
         }
       } catch (e) {
-        
+
         toast({ title: "Error", description: "Failed to load groups", variant: "destructive" })
       }
     }
@@ -153,7 +151,7 @@ export function GroupChat() {
           setSelectedGroup(prev => prev ? { ...prev, messages: formattedMsgs, conversationId: convId } : null)
         }
       } catch (e) {
-        
+
       }
     }
 
@@ -182,11 +180,6 @@ export function GroupChat() {
       // This is tricky if we don't have the mapping. 
       // Ideally the socket event should include groupId or we map conversationId to groupId.
       // For now, we'll check if the current selected group matches the conversationId
-
-      // Add to processed IDs immediately to prevent echo duplication
-      if (msgData._id) {
-        processedMessageIds.current.add(String(msgData._id))
-      }
 
       setGroups(prev => prev.map(g => {
         if (g.conversationId === conversationId) {

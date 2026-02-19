@@ -29,7 +29,7 @@ const authRoutes = ["/login", "/register"]
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
-  
+
   // Skip middleware for API routes and static files
   if (
     pathname.startsWith("/api") ||
@@ -38,41 +38,41 @@ export async function middleware(request: NextRequest) {
   ) {
     return NextResponse.next()
   }
-  
+
   // Check for NextAuth session cookie
   const nextAuthSession = request.cookies.get("authjs.session-token")?.value ||
-                          request.cookies.get("__Secure-authjs.session-token")?.value
-  
+    request.cookies.get("__Secure-authjs.session-token")?.value
+
   // Check for custom auth token (your existing auth system)
-  const authToken = request.cookies.get("token")?.value
-  
+  const authToken = request.cookies.get("accessToken")?.value
+
   const isAuthenticated = !!nextAuthSession || !!authToken
-  
+
   // Check if the current path is a protected route
-  const isProtectedRoute = protectedRoutes.some(route => 
+  const isProtectedRoute = protectedRoutes.some(route =>
     pathname === route || pathname.startsWith(`${route}/`)
   )
-  
+
   // Check if the current path is an auth route
   const isAuthRoute = authRoutes.some(route => pathname === route)
-  
+
   // For the home page, allow access but the page itself will handle auth
   if (pathname === "/") {
     return NextResponse.next()
   }
-  
+
   // Redirect unauthenticated users from protected routes to login
   if (isProtectedRoute && !isAuthenticated) {
     const loginUrl = new URL("/login", request.url)
     loginUrl.searchParams.set("callbackUrl", pathname)
     return NextResponse.redirect(loginUrl)
   }
-  
+
   // Redirect authenticated users from auth routes to home
   if (isAuthRoute && isAuthenticated) {
     return NextResponse.redirect(new URL("/", request.url))
   }
-  
+
   return NextResponse.next()
 }
 

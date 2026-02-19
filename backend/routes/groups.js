@@ -170,7 +170,7 @@ router.put(
         return res.status(403).json({ message: "Only group admins can update group details" })
       }
 
-            const { name, description, category, settings } = req.body
+      const { name, description, category, settings } = req.body
 
       if (name) group.name = name
       if (description !== undefined) group.description = description
@@ -262,7 +262,7 @@ router.get("/:id/balances", async (req, res) => {
       groupId: group._id,
       status: "active",
     }).populate("paidBy", "firstName lastName username avatar")
-    .populate("splits.user", "firstName lastName username avatar")
+      .populate("splits.user", "firstName lastName username avatar")
 
     // Calculate balances
     const calculator = new ExpenseCalculator()
@@ -296,7 +296,7 @@ router.get("/:id/balances", async (req, res) => {
     const transactionsWithUsers = summary.minimumTransactions.map(transaction => {
       const fromMember = group.members.find(m => m.user._id.toString() === transaction.from)
       const toMember = group.members.find(m => m.user._id.toString() === transaction.to)
-      
+
       return {
         ...transaction,
         from: fromMember ? fromMember.user : null,
@@ -532,6 +532,53 @@ router.delete("/:id/members/:userId", async (req, res) => {
     })
 
     res.json({ message: "Member removed successfully" })
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message })
+  }
+})
+
+// Update member role (admin only)
+router.put("/:id/members/:userId", async (req, res) => {
+  try {
+    const { role } = req.body
+
+    if (!role || !["admin", "member"].includes(role)) {
+      return res.status(400).json({ message: "Invalid role. Must be 'admin' or 'member'" })
+    }
+
+    const group = await Group.findOne({
+      _id: req.params.id,
+      "members.user": req.user._id,
+      isActive: true,
+    })
+
+    if (!group) {
+      return res.status(404).json({ message: "Group not found" })
+    }
+
+    // Check if requester is admin
+    const requesterMember = group.members.find((m) => m.user.toString() === req.user._id.toString())
+    if (!requesterMember || requesterMember.role !== "admin") {
+      return res.status(403).json({ message: "Only admins can update member roles" })
+    }
+
+    // Find and update the target member's role
+    const targetMember = group.members.find((m) => m.user.toString() === req.params.userId)
+    if (!targetMember) {
+      return res.status(404).json({ message: "Member not found in group" })
+    }
+
+    targetMember.role = role
+    await group.save()
+
+    // Emit update to group members
+    req.io.to(`group_${group._id}`).emit("member_role_updated", {
+      groupId: group._id,
+      userId: req.params.userId,
+      role,
+    })
+
+    res.json({ message: "Member role updated successfully", role })
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message })
   }

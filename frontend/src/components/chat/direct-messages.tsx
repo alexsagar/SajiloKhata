@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { useSearchParams } from "next/navigation"
 import { KanbanCard, KanbanCardContent, KanbanCardHeader, KanbanCardTitle } from "@/components/ui/kanban-card"
 import { Button } from "@/components/ui/button"
@@ -18,7 +18,9 @@ import {
   Video,
   MessageSquare,
   UserPlus,
-  Plus
+  Plus,
+  RefreshCw,
+  Loader2
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
@@ -43,6 +45,8 @@ interface DirectMessage {
   content: string
   timestamp: string
   isCurrentUser: boolean
+  _status?: 'sending' | 'sent' | 'error'  // optimistic send status
+  _tempId?: string                          // for reconciliation
 }
 
 interface Conversation {
@@ -70,7 +74,13 @@ export function DirectMessages() {
   const [message, setMessage] = useState("")
   const [searchTerm, setSearchTerm] = useState("")
   const [isNewChatOpen, setIsNewChatOpen] = useState(false)
+  const [typingUsers, setTypingUsers] = useState<Record<string, string[]>>({})
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState<Record<string, boolean>>({})
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollAreaRef = useRef<HTMLDivElement>(null)
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const lastTypingEmitRef = useRef<number>(0)
 
   useEffect(() => {
     // Component mount effect
@@ -139,7 +149,7 @@ export function DirectMessages() {
             const conv: Conversation = {
               id: String(c._id),
               friend: friendFallback,
-              unreadCount: 0,
+              unreadCount: c.unreadCount || 0,  // from server
               messages: [],
             }
             return conv
@@ -183,12 +193,14 @@ export function DirectMessages() {
             // join this conversation's room
             if (convId) joinConversations([convId])
             setSelectedConversation(ensured)
-          } catch {
-            // ignore
+          } catch (e: any) {
+            console.error('[Chat] DM upsert error:', e?.message)
+            toast({ title: 'Could not open conversation', variant: 'destructive' })
           }
         }
       } catch (e: any) {
-        // ignore for now; UI will show empty state
+        console.error('[Chat] Failed to load conversations:', e?.message)
+        toast({ title: 'Failed to load chats', description: 'Please refresh the page.', variant: 'destructive' })
       }
     }
     load()
@@ -201,7 +213,7 @@ export function DirectMessages() {
   useEffect(() => {
     if (isConnected && conversations.length > 0) {
       const idsToJoin = conversations.map((c) => c.id).filter((id) => !String(id).startsWith("local-"))
-      
+
       if (idsToJoin.length > 0) {
         joinConversations(idsToJoin)
       }
@@ -217,7 +229,7 @@ export function DirectMessages() {
   // Update the handler refs when dependencies change
   useEffect(() => {
     handleNewMessageRef.current = (e: any) => {
-      
+
       const detail = e.detail || {}
       const convId = String(detail.conversationId || '')
       const msg = detail.message || {}
@@ -225,12 +237,12 @@ export function DirectMessages() {
       if (!convId || !msgId) return
 
       if (processedMessageIds.has(msgId)) {
-        
+
         return
       }
       processedMessageIds.add(msgId)
 
-      
+
 
       // Determine if this message is from the current user
       const currentUserId = String((user as any)?._id || (user as any)?.id || '')
@@ -338,10 +350,45 @@ export function DirectMessages() {
   useEffect(() => {
     const handleNewMessage = (e: any) => handleNewMessageRef.current?.(e)
 
+    // Listen for read receipts
+    const handleReadReceipt = (e: any) => {
+      const detail = e.detail || {}
+      const convId = String(detail.conversationId || '')
+      if (!convId) return
+      setConversations(prev => prev.map(c =>
+        c.id === convId ? { ...c, unreadCount: 0 } : c
+      ))
+    }
+
+    // Listen for typing indicators
+    const handleTypingStart = (e: any) => {
+      const { conversationId, userId } = e.detail || {}
+      if (!conversationId || !userId) return
+      setTypingUsers(prev => {
+        const current = prev[conversationId] || []
+        if (current.includes(userId)) return prev
+        return { ...prev, [conversationId]: [...current, userId] }
+      })
+    }
+    const handleTypingStop = (e: any) => {
+      const { conversationId, userId } = e.detail || {}
+      if (!conversationId || !userId) return
+      setTypingUsers(prev => {
+        const current = prev[conversationId] || []
+        return { ...prev, [conversationId]: current.filter(id => id !== userId) }
+      })
+    }
+
     window.addEventListener("socket:message:new", handleNewMessage)
+    window.addEventListener("socket:conversation:read", handleReadReceipt)
+    window.addEventListener("socket:typing:start", handleTypingStart)
+    window.addEventListener("socket:typing:stop", handleTypingStop)
 
     return () => {
       window.removeEventListener("socket:message:new", handleNewMessage)
+      window.removeEventListener("socket:conversation:read", handleReadReceipt)
+      window.removeEventListener("socket:typing:start", handleTypingStart)
+      window.removeEventListener("socket:typing:stop", handleTypingStop)
     }
   }, []) // Only run once!
 
@@ -356,53 +403,137 @@ export function DirectMessages() {
 
   const handleSendMessage = async () => {
     if (!message.trim() || !selectedConversation) return
-    try {
-      const res = await conversationAPI.sendMessage({ conversationId: selectedConversation.id, text: message.trim() })
-      const msgData = res.data?.data || {}
-      const msgId = String(msgData._id || Date.now())
 
-      const newMessage: DirectMessage = {
-        id: msgId,
-        senderId: String(msgData.sender || 'current'),
+    const convId = selectedConversation.id
+    const text = message.trim()
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+    // Optimistic: show message immediately
+    const optimisticMsg: DirectMessage = {
+      id: tempId,
+      senderId: String((user as any)?._id || (user as any)?.id || 'current'),
+      senderName: 'You',
+      senderAvatar: (user as any)?.avatar || '',
+      content: text,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isCurrentUser: true,
+      _status: 'sending',
+      _tempId: tempId,
+    }
+
+    setConversations(prev => prev.map(conv =>
+      conv.id === convId
+        ? { ...conv, messages: [...conv.messages, optimisticMsg], lastMessage: optimisticMsg }
+        : conv
+    ))
+    setSelectedConversation(prev =>
+      prev && prev.id === convId
+        ? { ...prev, messages: [...prev.messages, optimisticMsg], lastMessage: optimisticMsg }
+        : prev
+    )
+    setMessage("")
+
+    const startTime = Date.now()
+
+    try {
+      const res = await conversationAPI.sendMessage({ conversationId: convId, text })
+      const duration = Date.now() - startTime
+      console.log(`[Metrics] Message send latency: ${duration}ms`)
+
+      const msgData = res.data?.data || {}
+      const serverId = String(msgData._id || Date.now())
+
+      // Pre-register to prevent echo duplication
+      if (msgData._id) processedMessageIds.add(String(msgData._id))
+
+      // Reconcile: replace temp message with server message
+      const reconciledMsg: DirectMessage = {
+        id: serverId,
+        senderId: String(msgData.sender || optimisticMsg.senderId),
         senderName: 'You',
         senderAvatar: (user as any)?.avatar || '',
-        content: msgData.text || message.trim(),
+        content: msgData.text || text,
         timestamp: new Date(msgData.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         isCurrentUser: true,
+        _status: 'sent',
       }
 
-      // Add to processed IDs immediately to prevent echo duplication
-      if (msgData._id) {
-        processedMessageIds.add(String(msgData._id))
-      }
-
-      setConversations(prev => prev.map(conv => {
-        if (conv.id === selectedConversation.id) {
-          // Check if message already exists
-          if (conv.messages.some(m => String(m.id) === msgId)) {
-            return conv
-          }
-          return {
-            ...conv,
-            messages: [...conv.messages, newMessage],
-            lastMessage: newMessage,
-          }
-        }
-        return conv
-      }))
-
-      setSelectedConversation(prev => {
-        if (!prev) return null
-        // Check if message already exists
-        if (prev.messages.some(m => String(m.id) === msgId)) {
-          return prev
-        }
-        return { ...prev, messages: [...prev.messages, newMessage], lastMessage: newMessage }
-      })
-
-      setMessage("")
+      setConversations(prev => prev.map(conv =>
+        conv.id === convId
+          ? { ...conv, messages: conv.messages.map(m => m.id === tempId ? reconciledMsg : m), lastMessage: reconciledMsg }
+          : conv
+      ))
+      setSelectedConversation(prev =>
+        prev && prev.id === convId
+          ? { ...prev, messages: prev.messages.map(m => m.id === tempId ? reconciledMsg : m), lastMessage: reconciledMsg }
+          : prev
+      )
     } catch (e: any) {
+      // Mark as failed — user can retry
+      setConversations(prev => prev.map(conv =>
+        conv.id === convId
+          ? { ...conv, messages: conv.messages.map(m => m.id === tempId ? { ...m, _status: 'error' as const } : m) }
+          : conv
+      ))
+      setSelectedConversation(prev =>
+        prev && prev.id === convId
+          ? { ...prev, messages: prev.messages.map(m => m.id === tempId ? { ...m, _status: 'error' as const } : m) }
+          : prev
+      )
       toast({ title: "Failed to send", description: e?.response?.data?.message || "", variant: "destructive" })
+    }
+  }
+
+  // Retry a failed message
+  const handleRetryMessage = async (failedMsg: DirectMessage) => {
+    if (!selectedConversation) return
+    const convId = selectedConversation.id
+    const tempId = failedMsg.id
+
+    // Mark as sending again
+    const updateStatus = (status: 'sending' | 'sent' | 'error') => {
+      setConversations(prev => prev.map(conv =>
+        conv.id === convId
+          ? { ...conv, messages: conv.messages.map(m => m.id === tempId ? { ...m, _status: status } : m) }
+          : conv
+      ))
+      setSelectedConversation(prev =>
+        prev && prev.id === convId
+          ? { ...prev, messages: prev.messages.map(m => m.id === tempId ? { ...m, _status: status } : m) }
+          : prev
+      )
+    }
+
+    updateStatus('sending')
+    try {
+      const res = await conversationAPI.sendMessage({ conversationId: convId, text: failedMsg.content })
+      const msgData = res.data?.data || {}
+      if (msgData._id) processedMessageIds.add(String(msgData._id))
+
+      const reconciledMsg: DirectMessage = {
+        id: String(msgData._id || Date.now()),
+        senderId: String(msgData.sender || failedMsg.senderId),
+        senderName: 'You',
+        senderAvatar: failedMsg.senderAvatar,
+        content: msgData.text || failedMsg.content,
+        timestamp: new Date(msgData.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isCurrentUser: true,
+        _status: 'sent',
+      }
+
+      setConversations(prev => prev.map(conv =>
+        conv.id === convId
+          ? { ...conv, messages: conv.messages.map(m => m.id === tempId ? reconciledMsg : m) }
+          : conv
+      ))
+      setSelectedConversation(prev =>
+        prev && prev.id === convId
+          ? { ...prev, messages: prev.messages.map(m => m.id === tempId ? reconciledMsg : m) }
+          : prev
+      )
+    } catch (e: any) {
+      updateStatus('error')
+      toast({ title: 'Retry failed', description: e?.response?.data?.message || '', variant: 'destructive' })
     }
   }
 
@@ -410,6 +541,90 @@ export function DirectMessages() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSendMessage()
+    }
+  }
+
+  // Throttled typing emit
+  const emitTyping = useCallback(() => {
+    if (!socket || !isConnected || !selectedConversation) return
+    const now = Date.now()
+    if (now - lastTypingEmitRef.current < 2000) return  // throttle 2s
+    lastTypingEmitRef.current = now
+    socket.emit('typing:start', { conversationId: selectedConversation.id })
+
+    // Auto-stop after 3s of inactivity
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current)
+    typingTimeoutRef.current = setTimeout(() => {
+      socket.emit('typing:stop', { conversationId: selectedConversation.id })
+    }, 3000)
+  }, [socket, isConnected, selectedConversation])
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setMessage(e.target.value)
+    emitTyping()
+  }
+
+  // Infinite scroll: load older messages
+  const loadOlderMessages = async () => {
+    if (!selectedConversation || loadingMore) return
+    const convId = selectedConversation.id
+    if (convId.startsWith('local-') || hasMore[convId] === false) return
+    const msgs = selectedConversation.messages
+    if (msgs.length === 0) return
+
+    const oldestCreatedAt = msgs[0]?.timestamp  // we need the raw createdAt
+    // Use the oldest message ID to find cursor — we stored ISO string in load
+    // Better: use the raw createdAt from the original data
+    // For now, use the API cursor param
+    const oldestMsg = msgs.find(m => !m.id.startsWith('temp-'))
+    if (!oldestMsg) return
+
+    setLoadingMore(true)
+    try {
+      const scrollEl = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null
+      const prevScrollHeight = scrollEl?.scrollHeight || 0
+
+      const res = await conversationAPI.getMessages(convId, { limit: 30 })
+      const allData = res.data?.data || []
+      const nextCursor = res.data?.nextCursor
+
+      if (!nextCursor) setHasMore(prev => ({ ...prev, [convId]: false }))
+
+      const myId = String((user as any)?._id || (user as any)?.id)
+      const olderMsgs: DirectMessage[] = allData.map((msg: any) => ({
+        id: String(msg._id),
+        senderId: String(msg.sender),
+        senderName: String(msg.sender) === myId ? 'You' : selectedConversation.friend.name,
+        senderAvatar: selectedConversation.friend.avatar,
+        content: msg.text || '',
+        timestamp: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isCurrentUser: String(msg.sender) === myId,
+        _status: 'sent' as const,
+      }))
+
+      // Merge: deduplicate by ID, replace entire message list
+      const existingIds = new Set(msgs.map(m => m.id))
+      const uniqueOlder = olderMsgs.filter(m => !existingIds.has(m.id))
+      const merged = [...uniqueOlder, ...msgs]
+
+      setSelectedConversation(prev =>
+        prev && prev.id === convId ? { ...prev, messages: merged } : prev
+      )
+      setConversations(prev => prev.map(c =>
+        c.id === convId ? { ...c, messages: merged } : c
+      ))
+
+      // Restore scroll position
+      requestAnimationFrame(() => {
+        if (scrollEl) {
+          const newScrollHeight = scrollEl.scrollHeight
+          scrollEl.scrollTop = newScrollHeight - prevScrollHeight
+        }
+      })
+    } catch (e: any) {
+      console.error('[Chat] Load older messages error:', e?.message)
+    } finally {
+      setLoadingMore(false)
     }
   }
 
@@ -431,10 +646,16 @@ export function DirectMessages() {
     })
   }
 
-  const markConversationAsRead = (conversationId: string) => {
+  const markConversationAsRead = async (conversationId: string) => {
     setConversations(prev => prev.map(conv =>
       conv.id === conversationId ? { ...conv, unreadCount: 0 } : conv
     ))
+    // Fire API call (non-blocking)
+    if (!conversationId.startsWith('local-')) {
+      conversationAPI.markAsRead(conversationId).catch(err => {
+        console.error('[Chat] markAsRead error:', err?.message)
+      })
+    }
   }
 
   // Load messages when a conversation is selected
@@ -443,7 +664,7 @@ export function DirectMessages() {
 
     const loadMessages = async () => {
       try {
-        
+
         const res = await conversationAPI.getMessages(selectedConversation.id)
         const messagesData = res.data?.data || []
 
@@ -457,7 +678,7 @@ export function DirectMessages() {
           isCurrentUser: String(msg.sender) === String((user as any)?._id || (user as any)?.id),
         }))
 
-        
+
 
         setSelectedConversation(prev => prev ? {
           ...prev,
@@ -469,8 +690,9 @@ export function DirectMessages() {
             ? { ...conv, messages: loadedMessages }
             : conv
         ))
-      } catch (error) {
-        
+      } catch (error: any) {
+        console.error('[Chat] Load messages error:', error?.message)
+        toast({ title: 'Failed to load messages', description: 'Tap to retry.', variant: 'destructive' })
       }
     }
 
@@ -516,7 +738,10 @@ export function DirectMessages() {
                         "flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all hover:bg-muted/80 group",
                         selectedConversation?.id === conversation.id && "bg-primary/10 ring-2 ring-primary/20"
                       )}
-                      onClick={() => setSelectedConversation(conversation)}
+                      onClick={() => {
+                        setSelectedConversation(conversation)
+                        markConversationAsRead(conversation.id)
+                      }}
                     >
                       <div className="relative">
                         <Avatar className="h-11 w-11">
@@ -635,7 +860,19 @@ export function DirectMessages() {
 
               {/* Messages Area */}
               <KanbanCardContent className="flex-1 p-0">
-                <ScrollArea className="h-[calc(100vh-26rem)] p-3 bg-gradient-to-b from-transparent via-muted/10 to-transparent">
+                <ScrollArea ref={scrollAreaRef} className="h-[calc(100vh-26rem)] p-3 bg-gradient-to-b from-transparent via-muted/10 to-transparent"
+                  onScrollCapture={(e: any) => {
+                    const el = e.target as HTMLElement
+                    if (el.scrollTop < 60 && !loadingMore) {
+                      loadOlderMessages()
+                    }
+                  }}
+                >
+                  {loadingMore && (
+                    <div className="flex justify-center py-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    </div>
+                  )}
                   {selectedConversation.messages.length > 0 ? (
                     <div className="space-y-3">
                       {selectedConversation.messages.map((msg, index) => {
@@ -680,12 +917,32 @@ export function DirectMessages() {
                                 className={cn(
                                   "px-4 py-2.5 rounded-2xl text-sm max-w-md",
                                   msg.isCurrentUser
-                                    ? "bg-primary text-primary-foreground rounded-br-md"
+                                    ? msg._status === 'error'
+                                      ? "bg-destructive/80 text-destructive-foreground rounded-br-md"
+                                      : msg._status === 'sending'
+                                        ? "bg-primary/60 text-primary-foreground rounded-br-md"
+                                        : "bg-primary text-primary-foreground rounded-br-md"
                                     : "bg-muted rounded-bl-md"
                                 )}
                               >
                                 {msg.content}
                               </div>
+                              {/* Status indicator */}
+                              {msg.isCurrentUser && msg._status === 'sending' && (
+                                <div className="flex items-center gap-1 mt-0.5">
+                                  <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                                  <span className="text-[10px] text-muted-foreground">Sending...</span>
+                                </div>
+                              )}
+                              {msg.isCurrentUser && msg._status === 'error' && (
+                                <button
+                                  className="flex items-center gap-1 mt-0.5 text-destructive hover:underline cursor-pointer"
+                                  onClick={() => handleRetryMessage(msg)}
+                                >
+                                  <RefreshCw className="h-3 w-3" />
+                                  <span className="text-[10px]">Failed — tap to retry</span>
+                                </button>
+                              )}
                             </div>
                           </div>
                         )
@@ -708,14 +965,31 @@ export function DirectMessages() {
 
               <Separator />
 
+              {/* Typing Indicator */}
+              {selectedConversation && (typingUsers[selectedConversation.id] || []).length > 0 && (
+                <div className="px-4 py-1 text-xs text-muted-foreground flex items-center gap-1.5">
+                  <span className="flex gap-0.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:0ms]" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:150ms]" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:300ms]" />
+                  </span>
+                  <span>{selectedConversation.friend.name} is typing...</span>
+                </div>
+              )}
+
               {/* Message Input */}
               <div className="p-3 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t">
                 <div className="flex gap-2">
                   <Input
                     placeholder="Type a message..."
                     value={message}
-                    onChange={(e) => setMessage(e.target.value)}
+                    onChange={handleInputChange}
                     onKeyPress={handleKeyPress}
+                    onBlur={() => {
+                      if (socket && isConnected && selectedConversation) {
+                        socket.emit('typing:stop', { conversationId: selectedConversation.id })
+                      }
+                    }}
                     className="flex-1 rounded-full bg-muted/40 border-0 focus-visible:ring-2 focus-visible:ring-primary h-8 text-sm"
                   />
                   <Button onClick={handleSendMessage} disabled={!message.trim()} size="sm" className="h-8 px-3">

@@ -5,7 +5,7 @@ const friendInviteSchema = new mongoose.Schema(
     code: { type: String, unique: true, index: true, required: true },
     inviter: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true, required: true },
     inviteeEmail: { type: String },
-    status: { type: String, enum: ["pending", "accepted", "expired", "revoked"], default: "pending", index: true },
+    status: { type: String, enum: ["pending", "accepted", "expired", "revoked", "declined"], default: "pending", index: true },
     expiresAt: { type: Date, index: true, required: true },
     metadata: {
       message: { type: String },

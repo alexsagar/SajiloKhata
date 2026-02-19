@@ -104,8 +104,27 @@ export const userAPI = {
     return api.get(`/users/search?q=${q}${lim}`)
   },
   getBalance: () => api.get("/users/balance"),
+
+  // Account deletion
+  deleteAccount: (data: { password?: string; confirmation: string }) =>
+    api.delete("/users/account", { data }),
+  requestAccountDeletion: () => api.post("/users/account/deletion-request"),
+  cancelAccountDeletion: () => api.delete("/users/account/deletion-request"),
+
+  // Two-factor authentication
+  get2FAStatus: () => api.get("/users/2fa/status"),
+  generate2FASecret: () => api.post("/users/2fa/generate"),
+  enable2FA: (data: { code: string; secret: string }) => api.post("/users/2fa/enable", data),
+  disable2FA: (data: { code: string; password: string }) => api.post("/users/2fa/disable", data),
+  verify2FA: (code: string) => api.post("/users/2fa/verify", { code }),
+  getBackupCodes: () => api.get("/users/2fa/backup-codes"),
+  regenerateBackupCodes: (data: { code: string }) => api.post("/users/2fa/backup-codes/regenerate", data),
+
+  // Session management
   getSessions: () => api.get("/users/sessions"),
   revokeSession: (sessionId: string) => api.delete(`/users/sessions/${sessionId}`),
+  revokeAllSessions: () => api.delete("/users/sessions"),
+  getCurrentSession: () => api.get("/users/sessions/current"),
 }
 
 export const friendsAPI = {
@@ -128,6 +147,7 @@ export const conversationAPI = {
   getMessages: (id: string, params?: { cursor?: string; limit?: number }) =>
     api.get(`/conversations/${id}/messages`, { params }),
   sendMessage: (data: { conversationId: string; text: string; attachments?: any[] }) => api.post("/conversations/messages", data),
+  markAsRead: (id: string) => api.post(`/conversations/${id}/read`),
 }
 
 export const groupAPI = {
@@ -183,6 +203,10 @@ export const expenseAPI = {
   createRecurringExpense: (data: any) => api.post("/expenses/recurring", data),
   updateRecurringExpense: (id: string, data: any) => api.put(`/expenses/recurring/${id}`, data),
   deleteRecurringExpense: (id: string) => api.delete(`/expenses/recurring/${id}`),
+
+  // Data export
+  exportData: (options: { format?: 'json' | 'csv'; includeReceipts?: boolean }) =>
+    api.post("/expenses/export", options),
 }
 
 export const notificationAPI = {
@@ -206,27 +230,54 @@ export const receiptAPI = {
   reprocessReceipt: (id: string) => api.post(`/receipts/${id}/reprocess`),
 }
 
+/**
+ * Flatten analytics filter objects into a query-string-safe Record.
+ * This is the single source of truth for filter serialization — used by
+ * both React Query params and CSV export URL generation.
+ */
+export function serializeAnalyticsFilters(filters: Record<string, any>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(filters)) {
+    if (value == null || value === '') continue
+    if (key === 'time' && typeof value === 'object') {
+      if (value.range) out['time.range'] = value.range
+      if (value.from) out['time.from'] = value.from
+      if (value.to) out['time.to'] = value.to
+    } else if (Array.isArray(value)) {
+      if (value.length > 0) out[key] = value.join(',')
+    } else {
+      out[key] = String(value)
+    }
+  }
+  return out
+}
+
 export const analyticsAPI = {
   // KPIs and overview
-  getKPIs: (filters = {}) => api.get('/analytics/kpis', { params: filters }),
-  getSpendOverTime: (filters = {}) => api.get('/analytics/spend-over-time', { params: filters }),
-  getCategoryBreakdown: (filters = {}) => api.get('/analytics/category-breakdown', { params: filters }),
-  getSpendingOverview: (filters = {}) => api.get('/analytics/spending-overview', { params: filters }),
-  getExpenseTrends: (filters = {}) => api.get('/analytics/expense-trends', { params: filters }),
+  getKPIs: (filters = {}) => api.get('/analytics/kpis', { params: serializeAnalyticsFilters(filters) }),
+  getSpendOverTime: (filters = {}) => api.get('/analytics/spend-over-time', { params: serializeAnalyticsFilters(filters) }),
+  getCategoryBreakdown: (filters = {}) => api.get('/analytics/category-breakdown', { params: serializeAnalyticsFilters(filters) }),
+  getSpendingOverview: (filters = {}) => api.get('/analytics/spending-overview', { params: serializeAnalyticsFilters(filters) }),
+  getExpenseTrends: (filters = {}) => api.get('/analytics/expense-trends', { params: serializeAnalyticsFilters(filters) }),
 
   // Partners and relationships
-  getTopPartners: (filters = {}) => api.get('/analytics/top-partners', { params: filters }),
+  getTopPartners: (filters = {}) => api.get('/analytics/top-partners', { params: serializeAnalyticsFilters(filters) }),
 
   // Group-specific analytics
   getBalanceMatrix: (groupId: string) => api.get(`/analytics/balance-matrix?groupId=${groupId}`),
   getSettlementSuggestions: (groupId: string) => api.get(`/analytics/simplify?groupId=${groupId}`),
 
   // Aging and settlements
-  getAgingBuckets: (filters = {}) => api.get('/analytics/aging', { params: filters }),
+  getAgingBuckets: (filters = {}) => api.get('/analytics/aging', { params: serializeAnalyticsFilters(filters) }),
 
   // Data export
-  getLedger: (filters = {}) => api.get('/analytics/ledger', { params: filters }),
-  exportCSV: (filters = {}) => api.get('/analytics/export/csv', { params: filters }),
+  getLedger: (filters = {}) => api.get('/analytics/ledger', { params: serializeAnalyticsFilters(filters) }),
+  exportCSV: (filters = {}) => api.get('/analytics/export/csv', { params: serializeAnalyticsFilters(filters) }),
+  /** Build a URL suitable for window.open() that uses the same serializer */
+  buildCSVExportURL: (filters = {}) => {
+    const params = new URLSearchParams(serializeAnalyticsFilters(filters))
+    return `${API_BASE_URL}/analytics/export/csv?${params.toString()}`
+  },
 
   // Group health
   getGroupHealth: (groupId: string) => api.get(`/analytics/group-health?groupId=${groupId}`),

@@ -5,10 +5,10 @@ const Expense = require("../models/Expense")
 const Group = require("../models/Group")
 const User = require("../models/User")
 const { body, validationResult } = require("express-validator")
-const OCRService = require("../services/ocrService")
 const { createNotification } = require("../services/notificationService")
 const { toCents, fromCents } = require("../utils/money")
 const { ok, fail } = require("../utils/http")
+const { enqueueExpenseProcessing } = require("../queues/expenseQueue")
 
 const router = express.Router()
 
@@ -96,7 +96,7 @@ router.get("/", async (req, res) => {
       }
     })
   } catch (error) {
-    
+
     return fail(res, "Server error", 500)
   }
 })
@@ -141,7 +141,7 @@ router.get("/group/:groupId", async (req, res) => {
       }
     })
   } catch (error) {
-    
+
     return fail(res, "Server error", 500)
   }
 })
@@ -173,90 +173,26 @@ router.get("/:id", async (req, res) => {
   }
 })
 
-// Test route to debug FormData parsing
-router.post("/test", upload.single("receipt"), async (req, res) => {
-  
-  
-  
-  
-  res.json({ 
-    message: 'Test successful',
-    body: req.body,
-    file: req.file ? { name: req.file.originalname, size: req.file.size } : null
-  })
-})
-
-// Test route without file upload
-router.post("/test-no-file", async (req, res) => {
-  
-  
-  
-  res.json({ 
-    message: 'Test successful (no file)',
-    body: req.body
-  })
-})
-
-// Test route to check expense storage and retrieval
-router.get("/test-storage", async (req, res) => {
-  try {
-    
-    
-    
-    // Check if any expenses exist for this user
-    const userExpenses = await Expense.find({
-      $or: [
-        { paidBy: req.user._id },
-        { createdBy: req.user._id },
-        { "splits.user": req.user._id }
-      ]
-    }).select('_id description amountCents paidBy createdBy groupId status')
-    
-    
-    
-    
-    // Check personal expenses specifically
-    const personalExpenses = await Expense.find({
-      groupId: null,
-      paidBy: req.user._id,
-      status: "active"
-    }).select('_id description amountCents paidBy createdBy status')
-    
-    
-    
-    
-    res.json({
-      message: 'Storage test complete',
-      totalExpenses: userExpenses.length,
-      personalExpenses: personalExpenses.length,
-      expenses: userExpenses
-    })
-  } catch (error) {
-    
-    res.status(500).json({ message: 'Storage test failed', error: error.message })
-  }
-})
-
 // Create expense (personal or group)
 router.post("/", upload.single("receipt"), async (req, res) => {
   try {
-    
+
     const { groupId, description, amount, category, splits, date, notes, splitType, currencyCode, createdBy } = req.body
 
     // Basic validation
     if (!description || !description.trim()) {
       return fail(res, "Description is required")
     }
-    
+
     if (!amount || parseFloat(amount) <= 0) {
       return fail(res, "Amount must be greater than 0")
     }
 
     // Ensure createdBy is available
     const expenseCreator = createdBy || req.user._id
-    
-    
-    
+
+
+
 
     const isGroup = !!(groupId && String(groupId).trim())
     let group = null
@@ -267,7 +203,7 @@ router.post("/", upload.single("receipt"), async (req, res) => {
       if (!group) {
         return fail(res, "Group not found", 404)
       }
-      
+
       const isMember = group.members?.some(m => m.user?.toString?.() === req.user._id.toString())
       if (!isMember) {
         return fail(res, "Not a member of this group", 403)
@@ -275,8 +211,8 @@ router.post("/", upload.single("receipt"), async (req, res) => {
     }
 
     // Determine currency
-    const currency = 
-      (currencyCode && ['USD','EUR','NPR','INR','GBP','AUD','CAD','JPY','CNY','CHF'].includes(currencyCode.toUpperCase()) && currencyCode.toUpperCase()) ||
+    const currency =
+      (currencyCode && ['USD', 'EUR', 'NPR', 'INR', 'GBP', 'AUD', 'CAD', 'JPY', 'CNY', 'CHF'].includes(currencyCode.toUpperCase()) && currencyCode.toUpperCase()) ||
       (isGroup ? group?.currencyCode : req.user.profile?.currencyCode) || 'USD'
 
     // Convert amount to cents
@@ -287,11 +223,11 @@ router.post("/", upload.single("receipt"), async (req, res) => {
 
     // Build splits
     let expenseSplits = []
-    
+
     if (isGroup && splits && splits.length > 0) {
       // Parse splits if it's a string (from form data)
       const parsedSplits = typeof splits === "string" ? JSON.parse(splits) : splits
-      
+
       expenseSplits = parsedSplits.map(s => ({
         user: s.user,
         amountCents: toCents(s.amount || 0),
@@ -327,28 +263,18 @@ router.post("/", upload.single("receipt"), async (req, res) => {
       }]
     }
 
-    // Handle receipt upload
+    // ---- Receipt metadata (save immediately, defer OCR) ----
     let receiptData = null
+    let receiptBufferArray = null
     if (req.file) {
-      try {
-        const ocrResult = await OCRService.processReceipt(req.file.buffer)
-        receiptData = {
-          filename: req.file.originalname,
-          originalName: req.file.originalname,
-          mimetype: req.file.mimetype,
-          size: req.file.size,
-          url: ocrResult.url || null,
-        }
-      } catch (ocrError) {
-        
-        // Continue without OCR data
-        receiptData = {
-          filename: req.file.originalname,
-          originalName: req.file.originalname,
-          mimetype: req.file.mimetype,
-          size: req.file.size,
-        }
+      receiptData = {
+        filename: req.file.originalname,
+        originalName: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
       }
+      // Store buffer as array for queue serialization
+      receiptBufferArray = Array.from(req.file.buffer)
     }
 
     // Create expense
@@ -375,50 +301,61 @@ router.post("/", upload.single("receipt"), async (req, res) => {
       status: "active"
     })
 
+    const startSave = Date.now()
     await expense.save()
     await expense.populate("paidBy", "firstName lastName username avatar")
     await expense.populate("splits.user", "firstName lastName username")
+    const saveMs = Date.now() - startSave
+    console.log(`[Expenses] POST saved in ${saveMs}ms (id: ${expense._id})`)
 
-    
-    
-    
-    
-    
-    
-    
-    
+    // ---- Defer heavy work to queue (non-blocking) ----
+    const jobData = {
+      expenseId: expense._id.toString(),
+    }
 
-    // Create notifications for group expenses
+    // OCR
+    if (receiptBufferArray) {
+      jobData.receiptBuffer = receiptBufferArray
+      jobData.receiptMeta = receiptData
+    }
+
+    // Notifications (group expenses only)
     if (isGroup) {
       const affectedUsers = expenseSplits
         .filter((split) => split.user !== req.user._id.toString())
         .map((split) => split.user)
 
-      for (const userId of affectedUsers) {
-        await createNotification({
-          userId,
-          type: "expense_added",
-          title: "New expense added",
-          message: `${req.user.firstName} added "${description}" for ${fromCents(amountCents)}`,
-          data: {
-            expenseId: expense._id,
-            groupId,
-            fromUserId: req.user._id,
-            amount: fromCents(amountCents),
-          },
-        })
-      }
+      jobData.notifications = affectedUsers.map(userId => ({
+        userId,
+        type: "expense_added",
+        title: "New expense added",
+        message: `${req.user.firstName} added "${description}" for ${fromCents(amountCents)}`,
+        data: {
+          expenseId: expense._id,
+          groupId,
+          fromUserId: req.user._id,
+          amount: fromCents(amountCents),
+        },
+      }))
 
-      // Emit to group members
+      // Socket emit — fire-and-forget, not queued
       if (req.io) {
-        req.io.to(`group_${groupId}`).emit("expense_added", expense)
+        try {
+          req.io.to(`group_${groupId}`).emit("expense_added", expense)
+        } catch (err) {
+          console.error('[Expenses] Socket emit error:', err.message)
+        }
       }
     }
 
-    
+    // Enqueue (non-blocking, errors are logged internally)
+    enqueueExpenseProcessing(jobData).catch(err => {
+      console.error('[Expenses] Failed to enqueue job:', err.message)
+    })
+
     return ok(res, expense, 201)
   } catch (error) {
-    
+    console.error('[Expenses] POST error:', error.message)
     return fail(res, error.message || "Create expense failed", 400)
   }
 })
@@ -479,7 +416,7 @@ router.put("/:id", async (req, res) => {
         percentage: split.percentage || null,
         settled: split.settled || false,
       }))
-      
+
       const sumSplitCents = splitCents.reduce((sum, s) => sum + s.amountCents, 0)
       const diff = targetAmountCents - sumSplitCents
       if (diff !== 0) {
@@ -509,7 +446,7 @@ router.put("/:id", async (req, res) => {
 
     return ok(res, expense)
   } catch (error) {
-    
+
     return fail(res, error.message || "Update expense failed", 500)
   }
 })
@@ -559,7 +496,7 @@ router.delete("/:id", async (req, res) => {
 
     return ok(res, { message: "Expense deleted successfully" })
   } catch (error) {
-    
+
     return fail(res, error.message || "Delete expense failed", 500)
   }
 })
@@ -617,7 +554,7 @@ router.patch("/:id/settle", async (req, res) => {
 
     return ok(res, { message: "Split settled successfully" })
   } catch (error) {
-    
+
     return fail(res, error.message || "Settle split failed", 500)
   }
 })

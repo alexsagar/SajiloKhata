@@ -40,7 +40,7 @@ export const CURRENCIES: Currency[] = [
   { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', decimals: 2, flag: '🇦🇺', popular: true, region: 'Oceania' },
   { code: 'CHF', name: 'Swiss Franc', symbol: 'CHF', decimals: 2, flag: '🇨🇭', popular: true, region: 'Europe' },
   { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', decimals: 2, flag: '🇨🇳', popular: true, region: 'Asia' },
-  
+
   // Other major currencies
   { code: 'INR', name: 'Indian Rupee', symbol: '₹', decimals: 2, flag: '🇮🇳', region: 'Asia' },
   { code: 'NPR', name: 'Nepali Rupee', symbol: 'रू', decimals: 2, flag: '🇳🇵', region: 'Asia' },
@@ -98,7 +98,7 @@ export function formatCurrency(amount: number, currencyCode = 'USD', locale = 'e
       maximumFractionDigits: currency.decimals,
     }).format(amount)
   } catch (error) {
-    
+
     // Fallback to basic formatting if Intl.NumberFormat fails
     return `${getCurrencySymbol(currencyCode)}${amount.toFixed(currency.decimals)}`
   }
@@ -146,7 +146,7 @@ export function convertCurrency(
 
   const fromRate = exchangeRates[fromCurrency] || 1
   const toRate = exchangeRates[toCurrency] || 1
-  
+
   // Convert to base currency (USD) then to target currency
   const baseAmount = amount / fromRate
   return baseAmount * toRate
@@ -191,8 +191,9 @@ export function validateCurrencyAmount(value: string): boolean {
   return !isNaN(amount) && amount >= 0
 }
 
-// Mock exchange rates - in a real app, these would come from an API
-export const MOCK_EXCHANGE_RATES: Record<string, number> = {
+// Fallback exchange rates — used ONLY when the live API is unreachable.
+// These are approximate and should never be treated as accurate for financial calculations.
+const FALLBACK_RATES: Record<string, number> = {
   USD: 1.0,
   EUR: 0.85,
   GBP: 0.73,
@@ -231,14 +232,53 @@ export const MOCK_EXCHANGE_RATES: Record<string, number> = {
   TWD: 28.0,
 }
 
-export async function fetchExchangeRates(): Promise<Record<string, number>> {
-  // In a real app, this would fetch from a currency API like:
-  // - https://exchangeratesapi.io/
-  // - https://fixer.io/
-  // - https://currencylayer.com/
-  
-  // For now, return mock data
-  return Promise.resolve(MOCK_EXCHANGE_RATES)
+// Re-export for backward compatibility (consumers should prefer fetchExchangeRates)
+export const MOCK_EXCHANGE_RATES = FALLBACK_RATES
+
+// --- In-memory cache ---
+let cachedRates: Record<string, number> | null = null
+let cacheTimestamp = 0
+const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour
+
+/**
+ * Fetch live exchange rates from the Frankfurter API (ECB data, free, no key).
+ * Falls back to FALLBACK_RATES on network/parsing errors.
+ * Results are cached in-memory for 1 hour to avoid rate limits.
+ */
+export async function fetchExchangeRates(baseCurrency = "USD"): Promise<Record<string, number>> {
+  const now = Date.now()
+
+  // Return cached rates if still fresh
+  if (cachedRates && now - cacheTimestamp < CACHE_TTL_MS) {
+    return cachedRates
+  }
+
+  try {
+    const url = `https://api.frankfurter.app/latest?from=${encodeURIComponent(baseCurrency)}`
+    const response = await fetch(url, { signal: AbortSignal.timeout(5000) })
+
+    if (!response.ok) {
+      throw new Error(`Exchange rate API returned ${response.status}`)
+    }
+
+    const json = await response.json()
+    const rates: Record<string, number> = { [baseCurrency]: 1.0, ...json.rates }
+
+    // Merge fallback currencies that the API may not cover (e.g., NPR, VND)
+    for (const [code, fallbackRate] of Object.entries(FALLBACK_RATES)) {
+      if (!(code in rates)) {
+        rates[code] = fallbackRate
+      }
+    }
+
+    cachedRates = rates
+    cacheTimestamp = now
+    return rates
+  } catch {
+    console.warn("[Currency] Failed to fetch live exchange rates, using fallback values")
+    // Return fallback rates so the app continues to function
+    return FALLBACK_RATES
+  }
 }
 
 export function formatAmountWithCurrency(amount: number, currencyCode: string, options?: {
@@ -259,7 +299,7 @@ export function formatAmountWithCurrency(amount: number, currencyCode: string, o
     return `${amount.toFixed(2)} ${currencyCode}`
   }
 
-  const formattedAmount = compact 
+  const formattedAmount = compact
     ? formatCurrencyCompact(amount, currencyCode, locale)
     : formatCurrency(amount, currencyCode, locale)
 
