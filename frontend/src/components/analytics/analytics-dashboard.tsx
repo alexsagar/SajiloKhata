@@ -36,19 +36,11 @@ import { useCurrency } from "@/contexts/currency-context"
 import { formatCurrency } from "@/lib/utils"
 import { ComponentLoading } from "@/components/ui/loading"
 
-// Dynamically import Recharts to reduce bundle size
-const ResponsiveContainer: any = dynamic(() => import('recharts').then(m => m.ResponsiveContainer), { ssr: false })
-const LineChart: any = dynamic(() => import('recharts').then(m => m.LineChart), { ssr: false })
-const Line: any = dynamic(() => import('recharts').then(m => m.Line), { ssr: false })
-const XAxis: any = dynamic(() => import('recharts').then(m => m.XAxis), { ssr: false })
-const YAxis: any = dynamic(() => import('recharts').then(m => m.YAxis), { ssr: false })
-const CartesianGrid: any = dynamic(() => import('recharts').then(m => m.CartesianGrid), { ssr: false })
-const Tooltip: any = dynamic(() => import('recharts').then(m => m.Tooltip), { ssr: false })
-const BarChart: any = dynamic(() => import('recharts').then(m => m.BarChart), { ssr: false })
-const Bar: any = dynamic(() => import('recharts').then(m => m.Bar), { ssr: false })
-const PieChart: any = dynamic(() => import('recharts').then(m => m.PieChart), { ssr: false })
-const Pie: any = dynamic(() => import('recharts').then(m => m.Pie), { ssr: false })
-const Cell: any = dynamic(() => import('recharts').then(m => m.Cell), { ssr: false })
+// Dynamically import Charts to reduce bundle size and avoid SSR issues with Recharts
+const SpendingOverTimeChart = dynamic(() => import('./charts').then(m => m.SpendingOverTimeChart), { ssr: false })
+const MonthlyTrendsChart = dynamic(() => import('./charts').then(m => m.MonthlyTrendsChart), { ssr: false })
+const CategoryTrendsChart = dynamic(() => import('./charts').then(m => m.CategoryTrendsChart), { ssr: false })
+const CategoryBreakdownChart = dynamic(() => import('./charts').then(m => m.CategoryBreakdownChart), { ssr: false })
 
 // Filter types
 interface AnalyticsFilters {
@@ -996,14 +988,7 @@ interface ChartDataItem {
   group: { amountCents: number; baseCents: number; count: number }
 }
 
-interface CategoryDataItem {
-  _id: string
-  totalCents: number
-  totalBaseCents: number
-  count: number
-  personal: number
-  group: number
-}
+
 
 interface PartnerDataItem {
   _id: string
@@ -1023,229 +1008,11 @@ interface GroupDataItem {
   memberCount: number
 }
 
-interface ChartTooltipProps {
-  active?: boolean
-  payload?: any[]
-  label?: string
-}
 
-interface ChartComponentProps {
-  data: any[] | undefined | null
-  baseCurrency: string
-  detailed?: boolean
-}
 
-function SpendingOverTimeChart({ data, baseCurrency, detailed = false }: {
-  data: ChartDataItem[] | undefined | null
-  baseCurrency: string
-  detailed?: boolean
-}) {
-  const safeData = Array.isArray(data) ? data : []
 
-  if (safeData.length === 0) {
-    return (
-      <div className="min-h-[240px] flex items-center justify-center text-sm text-muted-foreground bg-gray-50/5 rounded-md border border-gray-100/10">
-        <div className="text-center p-4">
-          <p>No spending data available for the selected filters</p>
-          <p className="text-xs mt-1">Try adjusting your filters or time range</p>
-        </div>
-      </div>
-    )
-  }
+// (Interfaces and Components moved to ./charts.tsx)
 
-  const personalTotal = safeData.reduce((sum, item) => sum + (item?.personal?.baseCents || 0), 0)
-  const groupTotal = safeData.reduce((sum, item) => sum + (item?.group?.baseCents || 0), 0)
-
-  const chartData = safeData.map(item => ({
-    date: item.date,
-    personal: (item.personal?.baseCents || 0) / 100,
-    group: (item.group?.baseCents || 0) / 100,
-    total: ((item.personal?.baseCents || 0) + (item.group?.baseCents || 0)) / 100
-  }))
-
-  const CustomTooltip = ({ active, payload, label }: ChartTooltipProps) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-[var(--card)] p-3 border border-gray-100/10 rounded-lg shadow-lg text-sm">
-          <p className="font-medium">{label}</p>
-          {payload.map((entry: any, index: number) => (
-            <p key={index} style={{ color: entry.color }}>
-              {entry.name}: {formatCurrency(entry.value, baseCurrency)}
-            </p>
-          ))}
-        </div>
-      )
-    }
-    return null
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4 text-center">
-        <div className="p-3 bg-[var(--card)] border border-gray-100/10 rounded-lg">
-          <div className="text-lg md:text-xl font-bold text-green-600">
-            {formatCurrency(personalTotal / 100, baseCurrency)}
-          </div>
-          <div className="text-xs md:text-sm text-muted-foreground mt-1">Personal</div>
-        </div>
-        <div className="p-3 bg-[var(--card)] border border-gray-100/10 rounded-lg">
-          <div className="text-lg md:text-xl font-bold text-blue-600">
-            {formatCurrency(groupTotal / 100, baseCurrency)}
-          </div>
-          <div className="text-xs md:text-sm text-muted-foreground mt-1">Group</div>
-        </div>
-      </div>
-
-      <div className="h-[280px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} barGap={4} barCategoryGap={12}>
-            <CartesianGrid {...({ strokeDasharray: "3 3" } as any)} />
-            <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-            <YAxis tick={{ fontSize: 12 }} tickFormatter={(value: any) => formatCurrency(value, baseCurrency)} />
-            <Tooltip content={<CustomTooltip />} />
-            {/* Stacked bars for personal vs group */}
-            <Bar dataKey="personal" stackId="a" fill="#10b981" name="Personal" radius={[3, 3, 0, 0]} />
-            <Bar dataKey="group" stackId="a" fill="#3b82f6" name="Group" radius={[3, 3, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
-  )
-}
-
-interface MonthlyItem { date: string; personal?: { baseCents?: number }; group?: { baseCents?: number } }
-interface MonthlyAgg { month: string; personal: number; group: number; total: number }
-
-function MonthlyTrendsChart({ data, baseCurrency }: { data: MonthlyItem[]; baseCurrency: string }) {
-  const safeData = Array.isArray(data) ? data : []
-
-  if (safeData.length === 0) {
-    return (
-      <div className="min-h-[300px] flex items-center justify-center text-sm text-muted-foreground">
-        No trend data available
-      </div>
-    )
-  }
-
-  // Group data by month
-  const monthlyData: Record<string, MonthlyAgg> = safeData.reduce((acc: Record<string, MonthlyAgg>, item) => {
-    const date = new Date(item.date)
-    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-
-    if (!acc[monthKey]) {
-      acc[monthKey] = {
-        month: monthKey,
-        personal: 0,
-        group: 0,
-        total: 0
-      }
-    }
-
-    acc[monthKey].personal += (item.personal?.baseCents || 0) / 100
-    acc[monthKey].group += (item.group?.baseCents || 0) / 100
-    acc[monthKey].total += ((item.personal?.baseCents || 0) + (item.group?.baseCents || 0)) / 100
-
-    return acc
-  }, {})
-
-  const chartData: MonthlyAgg[] = Object.values(monthlyData).sort((a: MonthlyAgg, b: MonthlyAgg) => a.month.localeCompare(b.month))
-
-  const CustomTooltip = ({ active, payload, label }: ChartTooltipProps) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-white dark:bg-gray-800 p-3 border rounded-lg shadow-lg">
-          <p className="font-medium">{label}</p>
-          {payload.map((entry: any, index: number) => (
-            <p key={index} style={{ color: entry.color }}>
-              {entry.name}: {formatCurrency(entry.value, baseCurrency)}
-            </p>
-          ))}
-        </div>
-      )
-    }
-    return null
-  }
-
-  return (
-    <div className="h-[300px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData}>
-          <CartesianGrid {...({ strokeDasharray: "3 3" } as any)} />
-          <XAxis
-            dataKey="month"
-            tick={{ fontSize: 12 }}
-          />
-          <YAxis
-            tick={{ fontSize: 12 }}
-            tickFormatter={(value: any) => formatCurrency(value, baseCurrency)}
-          />
-          <Tooltip content={<CustomTooltip />} />
-          <Bar dataKey="personal" fill="#10b981" name="Personal" />
-          <Bar dataKey="group" fill="#3b82f6" name="Group" />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  )
-}
-
-// Category Trends Chart (basic)
-function CategoryTrendsChart({ data, baseCurrency }: { data: Array<{ _id: string; totalBaseCents?: number; count?: number }>; baseCurrency: string }) {
-  const safeData = Array.isArray(data) ? data : []
-  if (safeData.length === 0) {
-    return (
-      <div className="min-h-[300px] flex items-center justify-center text-sm text-muted-foreground">
-        No category trend data available
-      </div>
-    )
-  }
-  const chartData = safeData
-    .sort((a, b) => (b.totalBaseCents || 0) - (a.totalBaseCents || 0))
-    .slice(0, 5)
-    .map(cat => ({ name: cat._id, amount: (cat.totalBaseCents || 0) / 100 }))
-
-  const CustomTooltip = ({ active, payload, label }: ChartTooltipProps) => {
-    if (active && payload && payload.length) {
-      const row = payload[0].payload
-      return (
-        <div className="bg-white dark:bg-gray-800 p-3 border rounded-lg shadow-lg">
-          <p className="font-medium">{label}</p>
-          <p className="text-sm">{formatCurrency(row.amount, baseCurrency)}</p>
-        </div>
-      )
-    }
-    return null
-  }
-
-  return (
-    <div className="h-[300px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData}>
-          <CartesianGrid {...({ strokeDasharray: "3 3" } as any)} />
-          <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-          <YAxis tick={{ fontSize: 12 }} tickFormatter={(value: any) => formatCurrency(value, baseCurrency)} />
-          <Tooltip content={<CustomTooltip />} />
-          <Bar dataKey="amount" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  )
-}
-
-// Minimal helper components to satisfy references in the dashboard while keeping type safety
-function CategoryBreakdownChart({ data, baseCurrency, detailed }: { data: Array<{ _id: string; totalBaseCents?: number; count?: number }>; baseCurrency: string; detailed?: boolean }) {
-  const safe = Array.isArray(data) ? data : []
-  if (safe.length === 0) return <div className="text-sm text-muted-foreground">No category data</div>
-  return (
-    <div className="space-y-2">
-      {safe.slice(0, 10).map((c) => (
-        <div key={c._id} className="flex items-center justify-between text-sm">
-          <span className="capitalize">{c._id}</span>
-          <span>{formatCurrency((c.totalBaseCents || 0) / 100, baseCurrency)}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
 
 function SpendingComparisonChart({ personalData, categoryData, baseCurrency }: { personalData: any[]; categoryData: any[]; baseCurrency: string }) {
   const personal = Array.isArray(personalData) ? personalData.reduce((s, i) => s + ((i?.personal?.baseCents || 0) / 100), 0) : 0
