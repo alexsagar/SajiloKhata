@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { KanbanCard, KanbanCardContent, KanbanCardDescription, KanbanCardHeader, KanbanCardTitle } from "@/components/ui/kanban-card"
 import { Button } from "@/components/ui/button"
@@ -12,13 +12,13 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
-import { 
-  UserPlus, 
-  Mail, 
-  Send, 
-  Copy, 
-  Check, 
-  Clock, 
+import {
+  UserPlus,
+  Mail,
+  Send,
+  Copy,
+  Check,
+  Clock,
   X,
   Users,
   MessageSquare,
@@ -31,6 +31,7 @@ import { useToast } from "@/hooks/use-toast"
 import { friendsAPI, conversationAPI } from "@/lib/api"
 import { formatCurrencyWithSymbol } from "@/lib/currency"
 import { useAuth } from "@/contexts/auth-context"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 interface Friend {
   id: string
@@ -57,15 +58,63 @@ interface PendingInvitation {
   }
 }
 
-// Empty initial data - will be populated from API
-const mockFriends: Friend[] = []
-const mockPendingInvitations: PendingInvitation[] = []
+/** Map raw API response to Friend[] */
+function mapFriends(res: any): Friend[] {
+  const items = Array.isArray(res.data?.data) ? res.data.data : []
+  return items.map((u: any) => ({
+    id: u._id,
+    name: [u.firstName, u.lastName].filter(Boolean).join(" "),
+    email: u.email,
+    avatar: u.avatar || undefined,
+    status: 'active' as const,
+    joinedDate: u.joinedAt || new Date().toISOString(),
+    totalExpenses: 0,
+    balance: 0,
+  }))
+}
 
 export function FriendInvitationWithDelete() {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || "USD"
-  const [friends, setFriends] = useState<Friend[]>(mockFriends)
-  const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>(mockPendingInvitations)
+  const queryClient = useQueryClient()
+
+  // ─── React Query: friends list (cached, instant back-nav) ─────────
+  const { data: friends = [], isLoading: friendsLoading } = useQuery({
+    queryKey: ['friends-list'],
+    queryFn: () => friendsAPI.list(),
+    staleTime: 5 * 60 * 1000,
+    select: mapFriends,
+  })
+
+  // ─── React Query: pending invitations (cached) ────────────────────
+  const { data: pendingInvitations = [], isLoading: invitesLoading } = useQuery({
+    queryKey: ['friend-invites'],
+    queryFn: () => friendsAPI.myInvites(),
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+    select: (res) => {
+      const items = Array.isArray(res.data?.data) ? res.data.data : []
+      return items as PendingInvitation[]
+    },
+  })
+
+  // Real-time socket event → invalidate React Query caches
+  useEffect(() => {
+    const onInvited = () => {
+      queryClient.invalidateQueries({ queryKey: ['friend-invites'] })
+    }
+    const onAccepted = () => {
+      queryClient.invalidateQueries({ queryKey: ['friends-list'] })
+      queryClient.invalidateQueries({ queryKey: ['friend-invites'] })
+    }
+    window.addEventListener("socket:friend:invited", onInvited)
+    window.addEventListener("socket:friend:accepted", onAccepted)
+    return () => {
+      window.removeEventListener("socket:friend:invited", onInvited)
+      window.removeEventListener("socket:friend:accepted", onAccepted)
+    }
+  }, [queryClient])
+
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [friendToDelete, setFriendToDelete] = useState<Friend | null>(null)
@@ -78,39 +127,13 @@ export function FriendInvitationWithDelete() {
 
   const inviteLink = "https://SajiloKhata.app/invite/abc123"
 
-  useEffect(() => {
-    friendsAPI
-      .list()
-      .then((res) => {
-        const items = Array.isArray(res.data?.data) ? res.data.data : []
-        const mapped: Friend[] = items.map((u: any) => ({
-          id: u._id,
-          name: [u.firstName, u.lastName].filter(Boolean).join(" "),
-          email: u.email,
-          avatar: u.avatar || undefined,
-          status: 'active',
-          joinedDate: u.joinedAt || new Date().toISOString(),
-          totalExpenses: 0,
-          balance: 0,
-        }))
-        setFriends(mapped)
-      })
-      .catch(() => {})
-
-    friendsAPI
-      .myInvites()
-      .then((res) => {
-        const items = Array.isArray(res.data?.data) ? res.data.data : []
-        setPendingInvitations(items)
-      })
-      .catch(() => {})
-  }, [])
+  const isLoading = friendsLoading || invitesLoading
 
   const handleSendInvitations = async () => {
     if (sending) return
     setSending(true)
     const emails = inviteEmails
-      .split(/[\,\n]/)
+      .split(/[\\,\\n]/)
       .map(email => email.trim())
       .filter(email => email && email.includes('@'))
 
@@ -128,7 +151,7 @@ export function FriendInvitationWithDelete() {
     const existingEmails = [
       ...friends.map(f => f.email),
     ]
-    
+
     const newEmails = emails.filter(email => !existingEmails.includes(email))
     const duplicateEmails = emails.filter(email => existingEmails.includes(email))
 
@@ -141,11 +164,11 @@ export function FriendInvitationWithDelete() {
     }
 
     if (newEmails.length === 0) {
+      setSending(false)
       return
     }
 
     try {
-      
       const results = await Promise.allSettled(
         newEmails.map(email => friendsAPI.createInvite({ inviteeEmail: email, message: inviteMessage }))
       )
@@ -157,8 +180,6 @@ export function FriendInvitationWithDelete() {
         else failed.push(newEmails[i])
       })
 
-      // Sent invites are tracked via backend; no need to add to received-pending list
-
       setInviteEmails('')
       setIsInviteDialogOpen(false)
 
@@ -168,9 +189,8 @@ export function FriendInvitationWithDelete() {
       if (failed.length) {
         toast({ title: "Some invites failed", description: failed.join(', '), variant: 'destructive' })
       }
-      
+
     } catch (e: any) {
-      
       toast({ title: "Failed to send invites", description: e?.message || '', variant: 'destructive' })
     }
     setSending(false)
@@ -197,23 +217,10 @@ export function FriendInvitationWithDelete() {
   const handleAcceptInvite = async (code: string) => {
     try {
       await friendsAPI.acceptInvite(code)
-      setPendingInvitations(prev => prev.filter(inv => inv.code !== code))
       toast({ title: "You're now friends!" })
-      // Optionally refresh friends list
-      friendsAPI.list().then((res) => {
-        const items = Array.isArray(res.data?.data) ? res.data.data : []
-        const mapped: Friend[] = items.map((u: any) => ({
-          id: u._id,
-          name: [u.firstName, u.lastName].filter(Boolean).join(" "),
-          email: u.email,
-          avatar: u.avatar || undefined,
-          status: 'active',
-          joinedDate: u.joinedAt || new Date().toISOString(),
-          totalExpenses: 0,
-          balance: 0,
-        }))
-        setFriends(mapped)
-      }).catch(() => {})
+      // Invalidate both queries to refresh from server
+      queryClient.invalidateQueries({ queryKey: ['friends-list'] })
+      queryClient.invalidateQueries({ queryKey: ['friend-invites'] })
     } catch (e: any) {
       toast({
         title: "Failed to accept invite",
@@ -226,8 +233,8 @@ export function FriendInvitationWithDelete() {
   const handleDeclineInvite = async (code: string) => {
     try {
       await friendsAPI.declineInvite(code)
-      setPendingInvitations(prev => prev.filter(inv => inv.code !== code))
       toast({ title: "Invite declined" })
+      queryClient.invalidateQueries({ queryKey: ['friend-invites'] })
     } catch (e: any) {
       toast({
         title: "Failed to decline invite",
@@ -247,11 +254,11 @@ export function FriendInvitationWithDelete() {
 
     try {
       await friendsAPI.remove(friendToDelete.id)
-      setFriends(prev => prev.filter(f => f.id !== friendToDelete.id))
       toast({
         title: "Friend removed",
         description: `${friendToDelete.name} has been removed from your friends list.`,
       })
+      queryClient.invalidateQueries({ queryKey: ['friends-list'] })
     } catch (e: any) {
       toast({
         title: "Failed to remove friend",
@@ -296,6 +303,33 @@ export function FriendInvitationWithDelete() {
 
   const addToGroup = (friendId: string) => {
     router.push(`/groups?addMember=${friendId}`)
+  }
+
+  // Loading skeleton
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="h-7 w-48 bg-slate-700 rounded animate-pulse" />
+            <div className="h-4 w-72 bg-slate-700 rounded animate-pulse mt-2" />
+          </div>
+          <div className="h-10 w-32 bg-slate-700 rounded animate-pulse" />
+        </div>
+        <div className="grid gap-4 md:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <KanbanCard key={i}>
+              <KanbanCardHeader className="pb-2">
+                <div className="h-4 w-20 bg-slate-700 rounded animate-pulse" />
+              </KanbanCardHeader>
+              <KanbanCardContent>
+                <div className="h-8 w-12 bg-slate-700 rounded animate-pulse" />
+              </KanbanCardContent>
+            </KanbanCard>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -384,7 +418,7 @@ export function FriendInvitationWithDelete() {
                           </div>
                         </div>
                       </div>
-                      
+
                       <div className="flex items-center gap-4">
                         <div className="text-right">
                           <div className="text-sm text-muted-foreground">Balance</div>
@@ -395,12 +429,12 @@ export function FriendInvitationWithDelete() {
                             </span>
                           </div>
                         </div>
-                        
+
                         <div className="text-right">
                           <div className="text-sm text-muted-foreground">Expenses</div>
                           <div className="font-semibold">{friend.totalExpenses}</div>
                         </div>
-                        
+
                         <div className="flex gap-2">
                           <Button
                             variant="outline"
@@ -436,7 +470,7 @@ export function FriendInvitationWithDelete() {
                                 Add to Group
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem 
+                              <DropdownMenuItem
                                 onClick={() => handleDeleteFriend(friend)}
                                 className="text-red-600 focus:text-red-600"
                               >
@@ -496,7 +530,7 @@ export function FriendInvitationWithDelete() {
                           </p>
                         </div>
                       </div>
-                      
+
                       <div className="flex gap-2">
                         <Button
                           variant="default"
@@ -515,7 +549,7 @@ export function FriendInvitationWithDelete() {
                         </Button>
                       </div>
                     </div>
-                    
+
                     {invitation.message && (
                       <div className="mt-3 p-3 bg-muted rounded-lg">
                         <p className="text-sm">{invitation.message}</p>
@@ -548,19 +582,19 @@ export function FriendInvitationWithDelete() {
               Send invitations via email or share your personal invite link
             </DialogDescription>
           </DialogHeader>
-          
+
           <Tabs defaultValue="email" className="space-y-2">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="email">Email Invites</TabsTrigger>
               <TabsTrigger value="link">Share Link</TabsTrigger>
             </TabsList>
-            
+
             <TabsContent value="email" className="space-y-2">
               <div>
                 <Label htmlFor="emails" className="text-xs">Email Addresses</Label>
                 <Textarea
                   id="emails"
-                  placeholder="Enter email addresses (one per line or comma-separated)&#10;alice@example.com&#10;bob@example.com"
+                  placeholder={"Enter email addresses (one per line or comma-separated)\nalice@example.com\nbob@example.com"}
                   value={inviteEmails}
                   onChange={(e) => setInviteEmails(e.target.value)}
                   className="min-h-[60px] text-sm"
@@ -569,7 +603,7 @@ export function FriendInvitationWithDelete() {
                   Separate multiple emails with commas or new lines
                 </p>
               </div>
-              
+
               <div>
                 <Label htmlFor="message" className="text-xs">Personal Message (Optional)</Label>
                 <Textarea
@@ -581,7 +615,7 @@ export function FriendInvitationWithDelete() {
                 />
               </div>
             </TabsContent>
-            
+
             <TabsContent value="link" className="space-y-2">
               <div>
                 <Label className="text-xs">Your Personal Invite Link</Label>
@@ -601,7 +635,7 @@ export function FriendInvitationWithDelete() {
               </div>
             </TabsContent>
           </Tabs>
-          
+
           <DialogFooter className="flex justify-end gap-2 pt-1">
             <Button variant="outline" onClick={() => setIsInviteDialogOpen(false)} size="sm" className="h-8 px-3">
               Cancel
@@ -623,7 +657,7 @@ export function FriendInvitationWithDelete() {
               Are you sure you want to remove {friendToDelete?.name} from your friends list?
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-2">
             <div className="p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
               <div className="flex items-start gap-2">
@@ -642,7 +676,7 @@ export function FriendInvitationWithDelete() {
                 </div>
               </div>
             </div>
-            
+
             {friendToDelete && friendToDelete.balance !== 0 && (
               <div className="p-2 bg-red-50 border border-red-200 rounded-lg">
                 <div className="flex items-center gap-2 text-red-800">
@@ -650,7 +684,7 @@ export function FriendInvitationWithDelete() {
                   <span className="font-medium">Outstanding Balance</span>
                 </div>
                 <p className="text-xs text-red-700 mt-1">
-                  {friendToDelete.balance > 0 
+                  {friendToDelete.balance > 0
                     ? `${friendToDelete.name} owes you ${formatCurrencyWithSymbol(Math.abs(friendToDelete.balance), userCurrency)}`
                     : `You owe ${friendToDelete.name} ${formatCurrencyWithSymbol(Math.abs(friendToDelete.balance), userCurrency)}`
                   }
@@ -661,7 +695,7 @@ export function FriendInvitationWithDelete() {
               </div>
             )}
           </div>
-          
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
               Cancel

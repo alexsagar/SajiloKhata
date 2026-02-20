@@ -20,13 +20,13 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Loader2, X, Scan } from "lucide-react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { expenseAPI } from "@/lib/api"
+import { useCreateExpenseMutation } from "@/hooks/use-create-expense-mutation"
 import { toast } from "@/hooks/use-toast"
 import { CurrencySelector } from "@/components/currency/currency-selector"
 import { useAuth } from "@/contexts/auth-context"
 import { CreateExpenseSchema } from "@/lib/validation"
 import { SmartReceiptScanner } from "@/components/ocr/smart-receipt-scanner"
+
 
 type CreatePersonalExpenseFormData = z.infer<typeof CreateExpenseSchema>
 
@@ -40,7 +40,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
   const [showCurrencySelection, setShowCurrencySelection] = useState(false)
   const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'offline'>('checking')
   const [showReceiptScanner, setShowReceiptScanner] = useState(false)
-  const queryClient = useQueryClient()
+
   const { user, loading: authLoading, refreshAuth } = useAuth()
 
   // Check backend status
@@ -48,17 +48,17 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
     const checkBackend = async () => {
       try {
         setBackendStatus('checking')
-        
+
         // Try to access the auth endpoint directly
-        const authResponse = await fetch('http://localhost:5000/api/auth/me', { 
+        const authResponse = await fetch('http://localhost:5000/api/auth/me', {
           method: 'GET',
           credentials: 'include'
         })
-        
+
         if (authResponse.ok) {
           setBackendStatus('online')
           console.log('Auth endpoint accessible, status:', authResponse.status)
-          
+
           // Get the actual response data to see the structure
           try {
             const responseData = await authResponse.json()
@@ -67,7 +67,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
           } catch (parseError) {
             console.log('CreatePersonalExpenseDialog - Could not parse response as JSON:', parseError)
           }
-          
+
           // If backend is online but we don't have user, try to refresh auth
           if (!user && !authLoading) {
             console.log('Backend online but no user, refreshing auth...')
@@ -96,13 +96,13 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
       console.log('CreatePersonalExpenseDialog - User ID:', user.id)
       console.log('CreatePersonalExpenseDialog - User object keys:', Object.keys(user))
       console.log('CreatePersonalExpenseDialog - User preferences:', user.preferences)
-      
+
       // Validate user object structure
       if (!user.id) {
         console.error('CreatePersonalExpenseDialog - User object missing ID!')
         console.error('CreatePersonalExpenseDialog - Full user object:', user)
       }
-      
+
       if (!user.preferences) {
         console.error('CreatePersonalExpenseDialog - User object missing preferences!')
       }
@@ -143,19 +143,18 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
           </DialogHeader>
           <div className="space-y-4 py-4">
             {/* Backend Status */}
-            <div className={`p-3 border rounded-lg ${
-              backendStatus === 'online' 
-                ? 'bg-green-50 border-green-200' 
-                : backendStatus === 'offline' 
+            <div className={`p-3 border rounded-lg ${backendStatus === 'online'
+              ? 'bg-green-50 border-green-200'
+              : backendStatus === 'offline'
                 ? 'bg-red-50 border-red-200'
                 : 'bg-yellow-50 border-yellow-200'
-            }`}>
+              }`}>
               <div className="text-sm">
                 <p className="font-medium mb-1">
                   Backend Status: {
                     backendStatus === 'online' ? '🟢 Online' :
-                    backendStatus === 'offline' ? '🔴 Offline' :
-                    '🟡 Checking...'
+                      backendStatus === 'offline' ? '🔴 Offline' :
+                        '🟡 Checking...'
                   }
                 </p>
                 {backendStatus === 'offline' && (
@@ -177,7 +176,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
                 </ul>
               </div>
             </div>
-            
+
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 Close
@@ -217,130 +216,10 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
   const selectedCurrency = watch("currencyCode")
 
 
-  const createPersonalExpenseMutation = useMutation({
-    mutationFn: async (data: CreatePersonalExpenseFormData) => {
-      // Double-check user authentication
-      if (!user?.id) {
-        throw new Error('User not authenticated. Please log in again.')
-      }
-
-      console.log('CreatePersonalExpenseDialog - Creating expense with user:', user)
-      console.log('CreatePersonalExpenseDialog - User ID:', user.id)
-      console.log('CreatePersonalExpenseDialog - User object keys:', Object.keys(user))
-
-      const formData = new FormData()
-      
-      // Add basic fields
-      formData.append('description', data.description)
-      formData.append('amount', data.amount.toString())
-      formData.append('category', data.category || 'other')
-      formData.append('date', data.date || new Date().toISOString())
-      if (data.notes) formData.append('notes', data.notes)
-      if (data.currencyCode) formData.append('currencyCode', data.currencyCode)
-      
-      // Add required createdBy field
-      formData.append('createdBy', user.id)
-      
-      // Debug: Log all FormData entries
-      console.log('CreatePersonalExpenseDialog - FormData contents:')
-      for (let [key, value] of formData.entries()) {
-        console.log(`  ${key}: ${value}`)
-      }
-      
-      // Personal expense - no groupId, no splits (server will auto-split)
-      
-      if (selectedFile) {
-        formData.append('receipt', selectedFile)
-      }
-      
-      return expenseAPI.createExpense(formData)
-    },
-    onMutate: async (newExpenseData) => {
-      console.log("🚀 Starting optimistic update for expense:", newExpenseData.description)
-      
-      // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
-      await queryClient.cancelQueries({ queryKey: ["expenses"] })
-      await queryClient.cancelQueries({ queryKey: ["recent-expenses"] })
-
-      // Snapshot the previous values for all queries
-      const previousData = {
-        expenses: queryClient.getQueryData(["expenses"]),
-        recentExpenses: queryClient.getQueryData(["recent-expenses"]),
-        expensesUndefined: queryClient.getQueryData(["expenses", undefined]),
-        expensesNull: queryClient.getQueryData(["expenses", null])
-      }
-
-      console.log("📊 Current query data:", previousData)
-
-      // Create the optimistic expense object
-      const tempId = `temp-${Date.now()}`
-      const optimisticExpense = {
-        _id: tempId,
-        id: tempId,
-        description: newExpenseData.description,
-        amount: newExpenseData.amount,
-        category: newExpenseData.category || 'other',
-        date: newExpenseData.date || new Date().toISOString(),
-        notes: newExpenseData.notes || '',
-        currencyCode: newExpenseData.currencyCode || user?.preferences?.currency || 'NPR',
-        createdBy: user?.id,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        isPersonal: true,
-        splits: [{
-          userId: user?.id,
-          amount: newExpenseData.amount,
-          percentage: 100
-        }]
-      }
-
-      console.log("✨ Created optimistic expense:", optimisticExpense)
-
-      // Optimistically update all expense queries with better logic
-      const updateQueryData = (queryKey: any[], debugName: string) => {
-        queryClient.setQueryData(queryKey, (old: any) => {
-          console.log(`📝 Updating ${debugName} query:`, old)
-          
-          // Handle different data structures
-          if (!old) {
-            console.log(`➕ ${debugName}: Creating new data structure`)
-            return [optimisticExpense]
-          }
-          
-          if (Array.isArray(old)) {
-            console.log(`📋 ${debugName}: Direct array, adding to front`)
-            return [optimisticExpense, ...old]
-          }
-          
-          if (old.data && Array.isArray(old.data)) {
-            console.log(`📦 ${debugName}: Wrapped array, adding to front`)
-            return { ...old, data: [optimisticExpense, ...old.data] }
-          }
-          
-          if (old.expenses && Array.isArray(old.expenses)) {
-            console.log(`💼 ${debugName}: Expenses property, adding to front`)
-            return { ...old, expenses: [optimisticExpense, ...old.expenses] }
-          }
-          
-          console.log(`❓ ${debugName}: Unknown structure, returning as-is`)
-          return old
-        })
-      }
-
-      // Update all possible expense query variations
-      updateQueryData(["expenses"], "expenses")
-      updateQueryData(["expenses", undefined], "expenses-undefined")  
-      updateQueryData(["expenses", null], "expenses-null")
-      updateQueryData(["recent-expenses"], "recent-expenses")
-      
-      console.log("✅ Optimistic updates completed")
-
-      // Return a context object with the snapshotted value
-      return { previousData, optimisticExpense }
-    },
-    onSuccess: (data, variables, context) => {
+  const { mutate: createExpense, isPending } = useCreateExpenseMutation({
+    onSuccess: (data) => {
       console.log("✅ Expense created successfully, server response:", data)
-      
+
       // Close dialog and reset form immediately
       onOpenChange(false)
       setTimeout(() => {
@@ -349,30 +228,10 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
         setShowCurrencySelection(false)
         setShowReceiptScanner(false)
       }, 100)
-
-      // Force immediate refetch of all expense queries to get latest data
-      console.log("🔄 Force refetching all expense queries")
-      queryClient.refetchQueries({ queryKey: ["expenses"] })
-      queryClient.refetchQueries({ queryKey: ["recent-expenses"] })
-      
-      // Also invalidate analytics/dashboard queries
-      queryClient.invalidateQueries({ queryKey: ["analytics"] })
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] })
     },
-    onError: (error: any, variables, context) => {
-      console.log("❌ Expense creation failed, reverting optimistic updates")
-      
-      // If the mutation fails, use the context returned from onMutate to roll back
-      if (context?.previousData) {
-        // Revert all expense queries to their previous state
-        queryClient.setQueryData(["expenses"], context.previousData.expenses)
-        queryClient.setQueryData(["expenses", undefined], context.previousData.expensesUndefined)
-        queryClient.setQueryData(["expenses", null], context.previousData.expensesNull)
-        queryClient.setQueryData(["recent-expenses"], context.previousData.recentExpenses)
-        
-        console.log("🔄 Reverted all queries to previous state")
-      }
-    },
+    onError: (error) => {
+      console.error("❌ Expense creation failed:", error)
+    }
   })
 
   const onSubmit = (data: CreatePersonalExpenseFormData) => {
@@ -383,8 +242,9 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
       }
 
       // Show immediate feedback that expense is being created
-      console.log("Creating personal expense with optimistic update...")
-      createPersonalExpenseMutation.mutate(data)
+      console.log("Creating personal expense with optimistic update using shared hook...")
+      // Pass the receipt file to the mutation
+      createExpense({ ...data, receiptFile: selectedFile })
     } catch (error) {
       console.error("Form submission error:", error)
     }
@@ -408,7 +268,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
     console.log("Personal Expense Dialog - Received receipt data:", receiptData)
     console.log("Dialog open state:", open)
     console.log("User currency:", user?.preferences?.currency)
-    
+
     try {
       // Prepare the new form values
       const newFormValues = {
@@ -418,24 +278,24 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
         description: receiptData.description || "",
         amount: receiptData.amount || 0,
       }
-      
+
       console.log("Form values to set:", newFormValues)
-      
+
       // Reset form with new values to ensure UI updates
       reset(newFormValues)
       console.log("Form reset completed")
-      
+
       // Set the file separately
       if (receiptData.receipt) {
         console.log("Setting file:", receiptData.receipt.name)
         setSelectedFile(receiptData.receipt)
       }
-      
+
       // Force a re-render and ensure dialog stays open
       setTimeout(() => {
         console.log("Triggering form validation")
         trigger()
-        
+
         // Ensure dialog stays open
         if (!open) {
           console.log("Dialog was closed, forcing it to stay open")
@@ -443,7 +303,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
         }
       }, 100)
 
-      
+
       console.log("=== RECEIPT PROCESSING END ===")
     } catch (error) {
       console.error("Error processing receipt data:", error)
@@ -460,7 +320,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
             Add a new personal expense to track your spending.
           </DialogDescription>
         </DialogHeader>
-        
+
         {/* Receipt Upload */}
         {selectedFile && (
           <div className="flex items-center gap-2 p-2 bg-muted rounded-md">
@@ -497,7 +357,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
               id="description"
               placeholder="What did you spend money on?"
               {...register("description")}
-              disabled={createPersonalExpenseMutation.isPending}
+              disabled={isPending}
               className="h-8 text-sm"
             />
             {errors.description && <p className="text-xs text-destructive">{errors.description.message}</p>}
@@ -513,7 +373,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
                 min="0.01"
                 placeholder="0.00"
                 {...register("amount", { valueAsNumber: true })}
-                disabled={createPersonalExpenseMutation.isPending}
+                disabled={isPending}
                 className="h-8 text-sm"
               />
               {errors.amount && <p className="text-xs text-destructive">{errors.amount.message}</p>}
@@ -525,7 +385,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
                 value={selectedCurrency}
                 onValueChange={(value) => setValue("currencyCode", value)}
                 variant="compact"
-                disabled={createPersonalExpenseMutation.isPending}
+                disabled={isPending}
               />
               {errors.currencyCode && <p className="text-xs text-destructive">{errors.currencyCode.message}</p>}
             </div>
@@ -537,7 +397,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
               <Select
                 value={watch("category")}
                 onValueChange={(value) => setValue("category", value as any)}
-                disabled={createPersonalExpenseMutation.isPending}
+                disabled={isPending}
               >
                 <SelectTrigger className="h-8 text-sm">
                   <SelectValue placeholder="Select category" />
@@ -562,7 +422,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
                 id="date"
                 type="date"
                 {...register("date")}
-                disabled={createPersonalExpenseMutation.isPending}
+                disabled={isPending}
                 className="h-8 text-sm"
               />
               {errors.date && <p className="text-xs text-destructive">{errors.date.message}</p>}
@@ -575,7 +435,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
               id="notes"
               placeholder="Add any additional notes..."
               {...register("notes")}
-              disabled={createPersonalExpenseMutation.isPending}
+              disabled={isPending}
               className="min-h-[50px] text-sm"
             />
             {errors.notes && <p className="text-xs text-destructive">{errors.notes.message}</p>}
@@ -586,7 +446,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
-              disabled={createPersonalExpenseMutation.isPending}
+              disabled={isPending}
               size="sm"
               className="h-8 px-3"
             >
@@ -594,11 +454,11 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
             </Button>
             <Button
               type="submit"
-              disabled={createPersonalExpenseMutation.isPending}
+              disabled={isPending}
               size="sm"
               className="h-8 px-3"
             >
-              {createPersonalExpenseMutation.isPending && (
+              {isPending && (
                 <Loader2 className="mr-2 h-3 w-3 animate-spin" />
               )}
               Create Expense

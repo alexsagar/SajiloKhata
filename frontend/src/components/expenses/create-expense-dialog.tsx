@@ -29,6 +29,7 @@ import { useDropzone } from "react-dropzone"
 import { CurrencySelector } from "@/components/currency/currency-selector"
 import { useAuth } from "@/contexts/auth-context"
 import { CreateExpenseSchema } from "@/lib/validation"
+import { useCreateExpenseMutation } from "@/hooks/use-create-expense-mutation"
 
 type CreateExpenseFormData = z.infer<typeof CreateExpenseSchema>
 
@@ -91,281 +92,16 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
     }
   })
 
-  const createExpenseMutation = useMutation({
-    mutationFn: async (data: CreateExpenseFormData) => {
-      const formData = new FormData()
-
-      // Add basic fields
-      formData.append('description', data.description)
-      formData.append('amount', data.amount.toString())
-      formData.append('category', data.category || 'other')
-      formData.append('date', data.date || new Date().toISOString())
-      if (data.notes) formData.append('notes', data.notes)
-      if (data.groupId) formData.append('groupId', data.groupId)
-      if (data.splitType) formData.append('splitType', data.splitType)
-      if (data.currencyCode) formData.append('currencyCode', data.currencyCode)
-
-      // Add required createdBy field
-      if (user?.id) {
-        formData.append('createdBy', user.id)
-      } else {
-        throw new Error('User not authenticated')
-      }
-
-      // Build splits including payer (current user) + selected members
-      if (data.groupId) {
-        const amountNumber = typeof data.amount === 'string' ? parseFloat(data.amount) : data.amount
-        const participants = Array.from(new Set([user.id, ...selectedMembers]))
-
-        if (participants.length === 0) {
-          throw new Error('No participants selected for group split')
-        }
-
-        let splits: Array<{ user: string; amount?: number; percentage?: number }> = []
-        const splitType = data.splitType || 'equal'
-
-        if (splitType === 'equal') {
-          const share = amountNumber / participants.length
-          splits = participants.map((pid) => ({ user: pid, amount: Number(share.toFixed(2)) }))
-        } else if (splitType === 'percentage') {
-          const pct = Math.round((100 / participants.length) * 100) / 100 // equal fallback
-          splits = participants.map((pid) => ({ user: pid, percentage: pct }))
-        } else if (splitType === 'exact') {
-          const share = amountNumber / participants.length // default exact equally
-          splits = participants.map((pid) => ({ user: pid, amount: Number(share.toFixed(2)) }))
-        }
-
-        formData.append('splits', JSON.stringify(splits))
-      }
-
-      if (selectedFile) {
-        formData.append('receipt', selectedFile)
-      }
-
-      return expenseAPI.createExpense(formData)
-    },
-
-    // ---- Optimistic update: instant UI visibility ----
-    onMutate: async (data: CreateExpenseFormData) => {
-      // 1. Cancel any outgoing refetches so they don't overwrite our optimistic update
-      //    We cancel 'expenses' (main list), 'recent-expenses' (dashboard), 'expense-summary' (balances),
-      //    and the specific group's expenses if applicable.
-      await queryClient.cancelQueries({ queryKey: ["expenses"] })
-      await queryClient.cancelQueries({ queryKey: ["recent-expenses"] })
-      await queryClient.cancelQueries({ queryKey: ["expense-summary"] })
-      if (data.groupId) {
-        await queryClient.cancelQueries({ queryKey: ["group-expenses", data.groupId] })
-      }
-
-      // 2. Snapshot all expense queries for rollback
-      const previousExpenses = queryClient.getQueryData(["expenses"])
-      const previousRecent = queryClient.getQueryData(["recent-expenses"])
-      const previousSummary = queryClient.getQueryData(["expense-summary"])
-      const previousGroupExpenses = data.groupId ? queryClient.getQueryData(["group-expenses", data.groupId]) : null
-
-      // 3. Build optimistic expense object
-      const tempId = `optimistic-${Date.now()}`
-      const amountNum = typeof data.amount === 'string' ? parseFloat(data.amount) : data.amount
-      const amountCents = Math.round(amountNum * 100)
-
-      const optimisticExpense = {
-        _id: tempId,
-        _optimistic: true,
-        description: data.description,
-        amount: amountNum,
-        amountCents,
-        currencyCode: data.currencyCode || user?.preferences?.currency || 'USD',
-        category: data.category || 'other',
-        date: data.date || new Date().toISOString(),
-        notes: data.notes || null,
-        groupId: data.groupId || null,
-        status: 'active',
-        paidBy: {
-          _id: user?.id,
-          firstName: user?.firstName || '',
-          lastName: user?.lastName || '',
-          username: user?.username || '',
-          avatar: user?.avatar || '',
-        },
-        splits: [{
-          user: {
-            _id: user?.id,
-            firstName: user?.firstName || '',
-            lastName: user?.lastName || '',
-            username: user?.username || '',
-          },
-          amountCents,
-          amount: amountNum,
-          settled: false,
-        }],
-        createdAt: new Date().toISOString(),
-      }
-
-      // 4. Inject into all matching expense query caches
-
-      // A. "expenses" (Main List)
-      queryClient.setQueryData(["expenses"], (old: any) => {
-        if (!old?.data) return old
-        const payload = old.data?.data || old.data
-        const list = payload?.expenses
-        if (Array.isArray(list)) {
-          return {
-            ...old,
-            data: {
-              ...old.data,
-              data: {
-                ...(old.data?.data || old.data),
-                expenses: [optimisticExpense, ...list],
-              },
-            },
-          }
-        }
-        return old
-      })
-
-      // B. "recent-expenses" (Dashboard Widget - Limit 8)
-      queryClient.setQueryData(["recent-expenses"], (old: any) => {
-        if (!old?.data) return old
-        const payload = old.data?.data || old.data
-        const list = payload?.expenses || payload
-        if (Array.isArray(list)) {
-          const newList = [optimisticExpense, ...list].slice(0, 8) // Maintain limit
-          return {
-            ...old,
-            data: {
-              ...old.data,
-              data: { ...(old.data?.data || old.data), expenses: newList },
-              expenses: newList // Handle both shapes
-            }
-          }
-        }
-        return old
-      })
-
-      // C. "expense-summary" (Dashboard Balances)
-      queryClient.setQueryData(["expense-summary"], (old: any) => {
-        if (!old?.data) return old
-        const payload = old.data?.data || old.data
-        const list = payload?.expenses
-        if (Array.isArray(list)) {
-          return {
-            ...old,
-            data: {
-              ...old.data,
-              data: {
-                ...(old.data?.data || old.data),
-                expenses: [optimisticExpense, ...list],
-              },
-            },
-          }
-        }
-        return old
-      })
-
-      // D. "group-expenses" (Group Details)
-      if (data.groupId) {
-        queryClient.setQueryData(["group-expenses", data.groupId], (old: any) => {
-          if (!old?.data) return old
-          const payload = old.data?.data || old.data
-          const list = payload?.expenses
-          if (Array.isArray(list)) {
-            return {
-              ...old,
-              data: {
-                ...old.data,
-                data: {
-                  ...(old.data?.data || old.data),
-                  expenses: [optimisticExpense, ...list],
-                },
-              },
-            }
-          }
-          return old
-        })
-      }
-
-      return { previousExpenses, previousRecent, previousSummary, previousGroupExpenses, tempId, groupId: data.groupId }
-    },
-
-    // ---- Rollback on error ----
-    onError: (error: any, _variables, context) => {
-      // Restore snapshots
-      if (context?.previousExpenses) queryClient.setQueryData(["expenses"], context.previousExpenses)
-      if (context?.previousRecent) queryClient.setQueryData(["recent-expenses"], context.previousRecent)
-      if (context?.previousSummary) queryClient.setQueryData(["expense-summary"], context.previousSummary)
-      if (context?.groupId && context?.previousGroupExpenses) {
-        queryClient.setQueryData(["group-expenses", context.groupId], context.previousGroupExpenses)
-      }
-
-      const message = error?.response?.data?.message || error?.message || 'Failed to create expense'
-      toast({
-        variant: "destructive",
-        title: "Expense creation failed",
-        description: message + '. Your data has been preserved — please try again.',
-      })
-    },
-
-    // ---- Replace temp record with real server record ----
-    onSuccess: async (response: any, _variables, context) => {
-      const created = response?.data?.data || response?.data
-      const tempId = context?.tempId
-
-      // Helper to replace tempId with real ID in a list
-      const replaceInList = (list: any[]) => list.map(e => e._id === tempId ? created : e)
-
-      // 1. Update "expenses"
-      queryClient.setQueryData(["expenses"], (old: any) => {
-        if (!old?.data) return old
-        const payload = old.data?.data || old.data
-        if (Array.isArray(payload?.expenses)) {
-          const updated = replaceInList(payload.expenses)
-          return { ...old, data: { ...old.data, data: { ...payload, expenses: updated } } }
-        }
-        return old
-      })
-
-      // 2. Update "recent-expenses"
-      queryClient.setQueryData(["recent-expenses"], (old: any) => {
-        if (!old?.data) return old
-        const payload = old.data?.data || old.data
-        const list = payload?.expenses || payload
-        if (Array.isArray(list)) {
-          const updated = replaceInList(list)
-          // Handle both shapes again
-          return { ...old, data: { ...old.data, data: { ...payload, expenses: updated }, expenses: updated } }
-        }
-        return old
-      })
-
-      // 3. Update "expense-summary"
-      queryClient.setQueryData(["expense-summary"], (old: any) => {
-        if (!old?.data) return old
-        const payload = old.data?.data || old.data
-        if (Array.isArray(payload?.expenses)) {
-          const updated = replaceInList(payload.expenses)
-          return { ...old, data: { ...old.data, data: { ...payload, expenses: updated } } }
-        }
-        return old
-      })
-
-      // 4. Update "group-expenses"
-      if (context?.groupId) {
-        queryClient.setQueryData(["group-expenses", context.groupId], (old: any) => {
-          if (!old?.data) return old
-          const payload = old.data?.data || old.data
-          if (Array.isArray(payload?.expenses)) {
-            const updated = replaceInList(payload.expenses)
-            return { ...old, data: { ...old.data, data: { ...payload, expenses: updated } } }
-          }
-          return old
-        })
-      }
-
+  const { mutate: createExpense, isPending } = useCreateExpenseMutation({
+    selectedMembers,
+    selectedGroup,
+    onSuccess: (data) => {
       // Link uploaded receipt if applicable
       try {
+        const created = data?.data?.data || data?.data
         const expenseId = created?._id || created?.id
         if (uploadedReceiptId && expenseId) {
-          await receiptAPI.linkToExpense(uploadedReceiptId, expenseId)
+          receiptAPI.linkToExpense(uploadedReceiptId, expenseId)
         }
       } catch { }
 
@@ -377,30 +113,9 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
       setSelectedMembers([])
       setShowCurrencySelection(false)
     },
-
-    // ---- Always invalidate for consistency ----
-    onSettled: (_data, _error, variables) => {
-      // Invalidate all affected queries to ensure we eventually get the server-side truth
-      // (calculations, balances, updated sorting, etc.)
-      queryClient.invalidateQueries({ queryKey: ["expenses"] })
-      queryClient.invalidateQueries({ queryKey: ["recent-expenses"] })
-      queryClient.invalidateQueries({ queryKey: ["expense-summary"] })
-      queryClient.invalidateQueries({ queryKey: ["user-groups"] })
-
-      if (variables.groupId) {
-        queryClient.invalidateQueries({ queryKey: ["group-expenses", variables.groupId] })
-        // Also invalidate group-specific balance/settlements if they exist as separate keys
-        queryClient.invalidateQueries({ queryKey: ["group-balance", variables.groupId] })
-      }
-
-      // Invalidate analytics
-      queryClient.invalidateQueries({
-        predicate: (q) => {
-          const key = q.queryKey?.[0]
-          return typeof key === 'string' && (key.startsWith('analytics-') || key === 'analytics-kpis')
-        }
-      })
-    },
+    onError: (error) => {
+      console.error("Create expense failed", error)
+    }
   })
 
   const onSubmit = (data: CreateExpenseFormData) => {
@@ -415,7 +130,8 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
         return
       }
 
-      createExpenseMutation.mutate(data)
+      // Pass receipt file if selected (though receipt scanning is mainly for personal, manual upload might exist)
+      createExpense({ ...data, receiptFile: selectedFile })
     } catch (error) {
 
     }
@@ -496,7 +212,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
               id="description"
               placeholder="What did you spend money on?"
               {...register("description")}
-              disabled={createExpenseMutation.isPending}
+              disabled={isPending}
             />
             {errors.description && <p className="text-sm text-destructive">{errors.description.message}</p>}
           </div>
@@ -511,7 +227,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
                 min="0.01"
                 placeholder="0.00"
                 {...register("amount", { valueAsNumber: true })}
-                disabled={createExpenseMutation.isPending}
+                disabled={isPending}
               />
               {errors.amount && <p className="text-sm text-destructive">{errors.amount.message}</p>}
             </div>
@@ -523,7 +239,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
                   value={selectedCurrency}
                   onValueChange={(value) => setValue("currencyCode", value)}
                   variant="compact"
-                  disabled={createExpenseMutation.isPending}
+                  disabled={isPending}
                 />
                 {selectedGroup && selectedGroup.currencyCode && selectedGroup.currencyCode !== selectedCurrency && (
                   <p className="text-xs text-muted-foreground">
@@ -541,7 +257,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
               <Select
                 value={watch("groupId")}
                 onValueChange={(value) => setValue("groupId", value)}
-                disabled={createExpenseMutation.isPending}
+                disabled={isPending}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select group" />
@@ -562,7 +278,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
               <Select
                 value={watch("splitType")}
                 onValueChange={(value: "equal" | "percentage" | "exact") => setValue("splitType", value)}
-                disabled={createExpenseMutation.isPending}
+                disabled={isPending}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select split type" />
@@ -583,7 +299,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
               <Select
                 value={watch("category")}
                 onValueChange={(value: "food" | "transportation" | "accommodation" | "entertainment" | "utilities" | "shopping" | "healthcare" | "other") => setValue("category", value)}
-                disabled={createExpenseMutation.isPending}
+                disabled={isPending}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select category" />
@@ -608,7 +324,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
                 id="date"
                 type="date"
                 {...register("date")}
-                disabled={createExpenseMutation.isPending}
+                disabled={isPending}
               />
               {errors.date && <p className="text-sm text-destructive">{errors.date.message}</p>}
             </div>
@@ -654,7 +370,7 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
               id="notes"
               placeholder="Add any additional notes..."
               {...register("notes")}
-              disabled={createExpenseMutation.isPending}
+              disabled={isPending}
             />
             {errors.notes && <p className="text-sm text-destructive">{errors.notes.message}</p>}
           </div>
@@ -664,15 +380,15 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
               type="button"
               variant="outline"
               onClick={() => onOpenChange?.(false)}
-              disabled={createExpenseMutation.isPending}
+              disabled={isPending}
             >
               Cancel
             </Button>
             <Button
               type="submit"
-              disabled={createExpenseMutation.isPending}
+              disabled={isPending}
             >
-              {createExpenseMutation.isPending && (
+              {isPending && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               Create Expense

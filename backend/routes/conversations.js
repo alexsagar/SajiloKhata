@@ -55,7 +55,10 @@ router.post("/group", [body("groupId").isMongoId()], async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const userId = req.user._id
-    const convs = await Conversation.find({ participants: userId }).sort({ lastMessageAt: -1 }).lean()
+    const convs = await Conversation.find({ participants: userId })
+      .populate('participants', 'firstName lastName username email avatar')
+      .sort({ lastMessageAt: -1 })
+      .lean()
 
     // Batch-fetch unread counts
     const convIds = convs.map(c => c._id)
@@ -136,16 +139,8 @@ router.post(
       conv.lastMessageAt = msg.createdAt
       await conv.save()
 
-      // emit to conversation room
+      // emit to conversation room (all participants join this room on load)
       req.io.to(`conv_${conv._id}`).emit("message:new", { conversationId: String(conv._id), message: msg })
-      // also emit to each participant's personal room to guarantee delivery
-      try {
-        ; (conv.participants || []).forEach((p) => {
-          req.io.to(`user_${String(p)}`).emit("message:new", { conversationId: String(conv._id), message: msg })
-        })
-      } catch (broadcastErr) {
-        console.error("[Conversations] Broadcast error:", broadcastErr.message)
-      }
 
       res.status(201).json({ data: msg })
     } catch (e) {

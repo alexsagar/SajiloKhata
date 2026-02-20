@@ -1,52 +1,49 @@
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
-import { expenseAPI } from "@/lib/api"
+import { useMemo } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import { formatCurrencyWithSymbol } from "@/lib/currency"
 import { Users, CreditCard, TrendingUp, Building2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { useExpensesQuery } from "@/hooks/use-expenses-query"
 
 export function GroupSummary() {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || 'USD'
 
-  const { data: expenseData, isLoading } = useQuery({
-    queryKey: ["group-summary"],
-    queryFn: async () => {
-      const response = await expenseAPI.getExpenses()
-      return response.data
-    },
-    enabled: !!user,
-    refetchInterval: 30000, // Refresh every 30 seconds
-  })
+  const { data: expenseData, isLoading } = useExpensesQuery()
 
-  const payload = (expenseData?.data?.data) ? expenseData.data.data : expenseData?.data || expenseData
-  const expenses = payload?.expenses || []
+  // Memoize expensive group breakdown computation
+  const { expenses, personalExpenses, groupExpenses, groups } = useMemo(() => {
+    const payload = (expenseData?.data?.data) ? expenseData.data.data : expenseData?.data || expenseData
+    const allExpenses = payload?.expenses || []
+    const personal = allExpenses.filter((exp: any) => !exp.groupId)
+    const group = allExpenses.filter((exp: any) => exp.groupId)
 
-  // Calculate group breakdown
-  const groupExpenses = expenses.filter((exp: any) => exp.groupId)
-  const personalExpenses = expenses.filter((exp: any) => !exp.groupId)
-
-  // Group expenses by group
-  const groupBreakdown = groupExpenses.reduce((acc: any, exp: any) => {
-    const groupId = exp.groupId || exp.group?._id
-    if (!acc[groupId]) {
-      acc[groupId] = {
-        id: groupId,
-        name: (exp.group && exp.group.name) || (exp.groupId?.name) || 'Unknown Group',
-        total: 0,
-        count: 0,
-        expenses: []
+    const groupBreakdown = group.reduce((acc: any, exp: any) => {
+      const groupId = exp.groupId || exp.group?._id
+      if (!acc[groupId]) {
+        acc[groupId] = {
+          id: groupId,
+          name: (exp.group && exp.group.name) || (exp.groupId?.name) || 'Unknown Group',
+          total: 0,
+          count: 0,
+          expenses: []
+        }
       }
-    }
-    acc[groupId].total += exp.amountCents || 0
-    acc[groupId].count += 1
-    acc[groupId].expenses.push(exp)
-    return acc
-  }, {})
+      acc[groupId].total += exp.amountCents || 0
+      acc[groupId].count += 1
+      acc[groupId].expenses.push(exp)
+      return acc
+    }, {})
 
-  const groups = Object.values(groupBreakdown)
+    return {
+      expenses: allExpenses,
+      personalExpenses: personal,
+      groupExpenses: group,
+      groups: Object.values(groupBreakdown),
+    }
+  }, [expenseData])
 
   if (isLoading) {
     return (
@@ -62,7 +59,7 @@ export function GroupSummary() {
   return (
     <div className="bg-[var(--card)] rounded-xl p-6 border border-white/5">
       <h3 className="text-lg font-semibold text-white mb-4">Expense Summary</h3>
-      
+
       {/* Overall Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">

@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { AppLayout } from "@/components/common/app-layout"
 import { Header } from "@/components/common/header"
 import { GroupBalance } from "@/components/groups/group-balance"
 import { ExpensesList } from "@/components/expenses/expenses-list"
@@ -18,7 +17,7 @@ export function GroupPageClient({ groupId }: GroupPageClientProps) {
   const [showCreateExpense, setShowCreateExpense] = useState(false)
 
   return (
-    <AppLayout>
+    <>
       <Header
         title="Group Details"
         actions={
@@ -47,11 +46,11 @@ export function GroupPageClient({ groupId }: GroupPageClientProps) {
         <ExpensesList groupId={groupId} />
       </div>
 
-      <CreateExpenseDialog 
-        open={showCreateExpense} 
+      <CreateExpenseDialog
+        open={showCreateExpense}
         onOpenChange={setShowCreateExpense}
         defaultGroupId={groupId}
       />
-    </AppLayout>
+    </>
   )
 }

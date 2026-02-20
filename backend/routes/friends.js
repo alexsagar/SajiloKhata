@@ -36,8 +36,9 @@ router.get("/my-invites", async (req, res) => {
       return res.json({ data: [] })
     }
 
+    const normalizedEmail = me.email.trim().toLowerCase()
     const invites = await FriendInvite.find({
-      inviteeEmail: me.email,
+      inviteeEmail: { $regex: new RegExp(`^${normalizedEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
       status: "pending",
       expiresAt: { $gt: new Date() },
     })
@@ -102,17 +103,20 @@ router.post(
 
       const code = nanoid()
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+      const normalizedInviteeEmail = req.body.inviteeEmail
+        ? req.body.inviteeEmail.trim().toLowerCase()
+        : undefined
       const invite = await FriendInvite.create({
         code,
         inviter: req.user._id,
-        inviteeEmail: req.body.inviteeEmail,
+        inviteeEmail: normalizedInviteeEmail,
         expiresAt,
         metadata: { message: req.body.message },
       })
 
       const inviteUrl = `${process.env.CLIENT_URL || "http://localhost:3000"}/invite/${code}`
 
-      if (req.body.inviteeEmail) {
+      if (normalizedInviteeEmail) {
         const inviter = await User.findById(req.user._id).select("firstName")
         await sendEmail({
           to: req.body.inviteeEmail,
@@ -126,7 +130,7 @@ router.post(
         })
 
         // If the invitee already has an account, notify them in real time
-        const existingUser = await User.findOne({ email: req.body.inviteeEmail }).select("_id")
+        const existingUser = await User.findOne({ email: { $regex: new RegExp(`^${normalizedInviteeEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }).select("_id")
         if (existingUser) {
           req.io.to(`user_${existingUser._id}`).emit("friend:invited", {
             code,

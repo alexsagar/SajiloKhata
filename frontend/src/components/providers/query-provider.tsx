@@ -12,13 +12,13 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            // Cache data for reasonable time but allow fresh data when needed
-            staleTime: 2 * 60 * 1000, // 2 minutes
+            // Enterprise-safe defaults: prefer cache, opt-in to refetch per query
+            staleTime: 5 * 60 * 1000, // 5 minutes — queries stay fresh longer
             gcTime: 10 * 60 * 1000,
             retry: 2,
-            refetchOnWindowFocus: true,
-            refetchOnMount: true,
-            refetchOnReconnect: true,
+            refetchOnWindowFocus: false, // opt-in per query where freshness matters
+            refetchOnMount: true, // refetch only when stale (respects staleTime)
+            refetchOnReconnect: false, // avoid reconnect storms
             placeholderData: keepPreviousData,
           },
         },

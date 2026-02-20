@@ -137,13 +137,42 @@ export function DirectMessages() {
         const dmConvs = convs
           .filter((c: any) => c.type === "dm")
           .map((c: any) => {
-            const otherId = (c.participants || []).map((p: any) => String(p)).find((id: string) => id !== String(myId))
-            const friend = mappedFriends.find((f) => f.id === otherId)
-            const friendFallback: Friend = friend || {
-              id: otherId || "unknown",
-              name: "Friend",
-              email: "",
-              avatar: undefined,
+            // Participants may be populated objects (with firstName etc.) or plain ObjectId strings
+            const participants = c.participants || []
+            const otherParticipant = participants.find((p: any) => {
+              const pid = typeof p === 'object' ? String(p._id) : String(p)
+              return pid !== String(myId)
+            })
+            const otherId = typeof otherParticipant === 'object'
+              ? String(otherParticipant._id)
+              : String(otherParticipant || '')
+
+            // Derive friend name: populated participant data → friends list → fallback
+            let friendName = 'Friend'
+            let friendEmail = ''
+            let friendAvatar: string | undefined
+
+            if (typeof otherParticipant === 'object' && otherParticipant) {
+              const p = otherParticipant
+              friendName = [p.firstName, p.lastName].filter(Boolean).join(' ')
+                || p.username || p.email || 'Friend'
+              friendEmail = p.email || ''
+              friendAvatar = p.avatar || undefined
+            }
+
+            // Also try friends list as enrichment (may have fresher data)
+            const friendFromList = mappedFriends.find((f) => f.id === otherId)
+            if (friendFromList) {
+              friendName = friendFromList.name || friendName
+              friendEmail = friendFromList.email || friendEmail
+              friendAvatar = friendFromList.avatar || friendAvatar
+            }
+
+            const friendFallback: Friend = {
+              id: otherId || 'unknown',
+              name: friendName,
+              email: friendEmail,
+              avatar: friendAvatar,
               isOnline: false,
             }
             const conv: Conversation = {
@@ -248,6 +277,10 @@ export function DirectMessages() {
       const currentUserId = String((user as any)?._id || (user as any)?.id || '')
       const senderId = String(msg.sender || '')
       const isFromCurrentUser = !!(currentUserId && senderId === currentUserId)
+
+      // Sender already has the message via optimistic insert + HTTP reconciliation.
+      // Ignore socket echo entirely to prevent duplicates.
+      if (isFromCurrentUser) return
 
       const newMsg: DirectMessage = {
         id: String(msg._id || Date.now()),

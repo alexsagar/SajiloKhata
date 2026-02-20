@@ -1,27 +1,17 @@
 "use client"
 
+import { useMemo } from "react"
 import { KanbanCard, KanbanCardContent, KanbanCardHeader, KanbanCardTitle } from "@/components/ui/kanban-card"
 import { DollarSign, TrendingUp, TrendingDown, Users, CreditCard, PiggyBank } from "lucide-react"
-import { useQuery } from "@tanstack/react-query"
-import { expenseAPI } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
 import { formatCurrencyWithSymbol } from "@/lib/currency"
-import { ComponentLoading } from "@/components/ui/loading"
+import { useExpensesQuery } from "@/hooks/use-expenses-query"
 
 export function BalanceOverview() {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || 'USD'
 
-  // Fetch expense summary data
-  const { data: expenseSummary, isLoading, error } = useQuery({
-    queryKey: ["expense-summary"],
-    queryFn: async () => {
-      const response = await expenseAPI.getExpenses()
-      return response.data
-    },
-    enabled: !!user,
-    refetchInterval: 30000, // Refresh every 30 seconds
-  })
+  const { data: expenseSummary, isLoading, error } = useExpensesQuery()
 
   // Show loading state
   if (isLoading) {
@@ -62,7 +52,7 @@ export function BalanceOverview() {
     )
   }
 
-  // Calculate personal vs group expense breakdown
+  // Calculate personal vs group expense breakdown (memoized for render stability)
   const payload = expenseSummary?.data?.data ? expenseSummary.data.data : expenseSummary?.data
   const expensesData = payload?.expenses || expenseSummary?.expenses || []
   const personalExpenses = expensesData.filter((exp: any) => !exp.groupId)

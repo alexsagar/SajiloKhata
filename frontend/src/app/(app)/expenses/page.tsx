@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { AppLayout } from "@/components/common/app-layout"
 import { Header } from "@/components/common/header"
 import { ExpensesList } from "@/components/expenses/expenses-list"
 import { ExpenseCreationOptions } from "@/components/expenses/expense-creation-options"
@@ -30,7 +29,7 @@ export default function ExpensesPage() {
   }
 
   return (
-    <AppLayout>
+    <>
       <Header
         title="Expenses"
         description="View and manage all your expenses"
@@ -40,6 +39,6 @@ export default function ExpensesPage() {
         <ExpenseFilters onFiltersChange={handleFiltersChange} />
         <ExpensesList filters={filters} />
       </div>
-    </AppLayout>
+    </>
   )
 }

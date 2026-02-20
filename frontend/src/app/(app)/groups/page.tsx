@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { AppLayout } from "@/components/common/app-layout"
 import { Header } from "@/components/common/header"
 import { GroupsListWithDelete } from "@/components/groups/groups-list-with-delete"
 import { CreateGroupDialog } from "@/components/groups/create-group-dialog"
@@ -13,7 +12,7 @@ export default function GroupsPage() {
   const [showCreateGroup, setShowCreateGroup] = useState(false)
 
   return (
-    <AppLayout>
+    <>
       <Header
         title="Groups"
         description="Manage your expense groups"
@@ -36,10 +35,10 @@ export default function GroupsPage() {
         <GroupsListWithDelete />
       </div>
 
-      <CreateGroupDialog 
-        open={showCreateGroup} 
+      <CreateGroupDialog
+        open={showCreateGroup}
         onOpenChange={setShowCreateGroup}
       />
-    </AppLayout>
+    </>
   )
 }

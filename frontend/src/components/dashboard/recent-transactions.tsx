@@ -1,35 +1,28 @@
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
-import { expenseAPI } from "@/lib/api"
+import { useMemo } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import { formatCurrencyWithSymbol } from "@/lib/currency"
 import { formatDistanceToNow } from "date-fns"
 import { CreditCard, Users } from "lucide-react"
+import { useExpensesQuery } from "@/hooks/use-expenses-query"
 
 export function RecentTransactions() {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || 'USD'
 
-  const { data: expenseData, isLoading } = useQuery({
-    queryKey: ["recent-expenses"],
-    queryFn: async () => {
-      const response = await expenseAPI.getExpenses({ limit: 8, sort: '-createdAt' })
-      return response.data
-    },
-    enabled: !!user,
-    refetchInterval: 15000, // Refresh every 15 seconds
-    refetchOnWindowFocus: true,
-  })
+  const { data: expenseData, isLoading } = useExpensesQuery({ limit: 8, sort: '-createdAt' })
 
-  // Support both shapes and enforce newest-first ordering with safe date parsing
-  const rawExpenses = expenseData?.data?.expenses || expenseData?.expenses || []
-  const getSafeTime = (exp: any): number => {
-    const val = exp?.createdAt || exp?.updatedAt || exp?.date
-    const t = val ? Date.parse(val) : NaN
-    return Number.isFinite(t) ? t : Date.now()
-  }
-  const recentExpenses = [...rawExpenses].sort((a: any, b: any) => getSafeTime(b) - getSafeTime(a))
+  // Memoize sorting to prevent re-computation on every render
+  const recentExpenses = useMemo(() => {
+    const rawExpenses = expenseData?.data?.expenses || expenseData?.expenses || []
+    const getSafeTime = (exp: any): number => {
+      const val = exp?.createdAt || exp?.updatedAt || exp?.date
+      const t = val ? Date.parse(val) : NaN
+      return Number.isFinite(t) ? t : Date.now()
+    }
+    return [...rawExpenses].sort((a: any, b: any) => getSafeTime(b) - getSafeTime(a))
+  }, [expenseData])
 
   if (isLoading) {
     return (
@@ -60,7 +53,7 @@ export function RecentTransactions() {
           const dateStr = expense?.createdAt || expense?.updatedAt || expense?.date
           const parsed = dateStr ? new Date(dateStr) : new Date()
           const expenseDate = isNaN(parsed.getTime()) ? new Date() : parsed
-          
+
           return (
             <div
               key={expense._id}
@@ -68,11 +61,10 @@ export function RecentTransactions() {
             >
               {/* Left: Icon + Info */}
               <div className="flex items-center gap-2 min-w-0 flex-1">
-                <div className={`p-1.5 rounded-full shrink-0 ${
-                  isPersonal 
-                    ? 'bg-blue-500/20 text-blue-400' 
+                <div className={`p-1.5 rounded-full shrink-0 ${isPersonal
+                    ? 'bg-blue-500/20 text-blue-400'
                     : 'bg-green-500/20 text-green-400'
-                }`}>
+                  }`}>
                   {isPersonal ? <CreditCard className="h-3.5 w-3.5" /> : <Users className="h-3.5 w-3.5" />}
                 </div>
                 <div className="min-w-0 flex-1">

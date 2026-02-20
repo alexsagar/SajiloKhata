@@ -116,6 +116,20 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         window.dispatchEvent(new CustomEvent("socket:presence:state", { detail: payload }))
       })
 
+      // Friend invite received (recipient sees new pending invite)
+      newSocket.on("friend:invited", (payload) => {
+        window.dispatchEvent(new CustomEvent("socket:friend:invited", { detail: payload }))
+        toast({
+          title: "New Friend Invite",
+          description: `${payload?.inviter?.firstName || "Someone"} sent you a friend invite!`,
+        })
+      })
+
+      // Friend invite accepted (inviter sees new friend)
+      newSocket.on("friend:accepted", (payload) => {
+        window.dispatchEvent(new CustomEvent("socket:friend:accepted", { detail: payload }))
+      })
+
       // Listen for expense updates
       newSocket.on("expense_added", (data) => {
         toast({

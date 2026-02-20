@@ -1,47 +1,46 @@
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
-import { expenseAPI } from "@/lib/api"
+import { useMemo } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import { formatCurrencyWithSymbol } from "@/lib/currency"
 import { CreditCard, Users, TrendingUp, TrendingDown } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { useExpensesQuery } from "@/hooks/use-expenses-query"
 
 export function ExpenseChart() {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || 'USD'
 
-  const { data: expenseData, isLoading } = useQuery({
-    queryKey: ["expense-chart-data"],
-    queryFn: async () => {
-      const response = await expenseAPI.getExpenses({ limit: 100 })
-      return response.data
-    },
-    enabled: !!user,
-    refetchInterval: 30000, // Refresh every 30 seconds
-  })
+  const { data: expenseData, isLoading } = useExpensesQuery({ limit: 100 })
 
   const expenses = expenseData?.data?.expenses || expenseData?.expenses || []
 
-  // Calculate expense breakdowns
-  const personalExpenses = expenses.filter((exp: any) => !exp.groupId)
-  const groupExpenses = expenses.filter((exp: any) => exp.groupId)
+  // Memoize expensive category breakdown computation
+  const { personalExpenses, groupExpenses, personalTotal, groupTotal, totalSpent, topPersonalCategories } = useMemo(() => {
+    const personal = expenses.filter((exp: any) => !exp.groupId)
+    const group = expenses.filter((exp: any) => exp.groupId)
+    const pTotal = personal.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
+    const gTotal = group.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
 
-  const personalTotal = personalExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
-  const groupTotal = groupExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
-  const totalSpent = personalTotal + groupTotal
+    const categoryBreakdown = personal.reduce((acc: any, exp: any) => {
+      const category = exp.category || 'other'
+      acc[category] = (acc[category] || 0) + (exp.amountCents || 0)
+      return acc
+    }, {})
 
-  // Calculate category breakdown for personal expenses
-  const personalCategoryBreakdown = personalExpenses.reduce((acc: any, exp: any) => {
-    const category = exp.category || 'other'
-    acc[category] = (acc[category] || 0) + (exp.amountCents || 0)
-    return acc
-  }, {})
+    const topCategories = Object.entries(categoryBreakdown)
+      .sort(([, a], [, b]) => (b as number) - (a as number))
+      .slice(0, 5)
 
-  // Get top 5 personal expense categories
-  const topPersonalCategories = Object.entries(personalCategoryBreakdown)
-    .sort(([,a], [,b]) => (b as number) - (a as number))
-    .slice(0, 5)
+    return {
+      personalExpenses: personal,
+      groupExpenses: group,
+      personalTotal: pTotal,
+      groupTotal: gTotal,
+      totalSpent: pTotal + gTotal,
+      topPersonalCategories: topCategories,
+    }
+  }, [expenses])
 
   if (isLoading) {
     return (
