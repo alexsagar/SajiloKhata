@@ -18,24 +18,24 @@ export function UserSettings() {
       </div>
 
       <Tabs defaultValue="profile" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="profile" className="flex items-center gap-2">
+        <TabsList className="w-full overflow-x-auto no-scrollbar flex items-center gap-2 p-1 h-auto">
+          <TabsTrigger value="profile" className="flex items-center gap-2 whitespace-nowrap shrink-0">
             <User className="h-4 w-4" />
             Profile
           </TabsTrigger>
-          <TabsTrigger value="preferences" className="flex items-center gap-2">
+          <TabsTrigger value="preferences" className="flex items-center gap-2 whitespace-nowrap shrink-0">
             <Settings className="h-4 w-4" />
             Preferences
           </TabsTrigger>
-          <TabsTrigger value="security" className="flex items-center gap-2">
+          <TabsTrigger value="security" className="flex items-center gap-2 whitespace-nowrap shrink-0">
             <Shield className="h-4 w-4" />
             Security
           </TabsTrigger>
-          <TabsTrigger value="notifications" className="flex items-center gap-2">
+          <TabsTrigger value="notifications" className="flex items-center gap-2 whitespace-nowrap shrink-0">
             <Bell className="h-4 w-4" />
             Notifications
           </TabsTrigger>
-          <TabsTrigger value="privacy" className="flex items-center gap-2">
+          <TabsTrigger value="privacy" className="flex items-center gap-2 whitespace-nowrap shrink-0">
             <Eye className="h-4 w-4" />
             Privacy
           </TabsTrigger>

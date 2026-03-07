@@ -19,14 +19,14 @@ export default function GroupsPage() {
         actions={
           <div className="flex gap-2">
             <JoinGroupDialog>
-              <Button variant="outline" size="sm">
-                <Users className="h-4 w-4 mr-2" />
-                Join Group
+              <Button variant="outline" size="sm" className="h-9 w-9 p-0 sm:w-auto sm:px-3">
+                <Users className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Join Group</span>
               </Button>
             </JoinGroupDialog>
-            <Button size="sm" onClick={() => setShowCreateGroup(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Create Group
+            <Button size="sm" className="h-9 w-9 p-0 sm:w-auto sm:px-3" onClick={() => setShowCreateGroup(true)}>
+              <Plus className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Create Group</span>
             </Button>
           </div>
         }

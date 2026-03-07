@@ -14,10 +14,10 @@ function AppLayoutInner({ children, className = "" }: AppLayoutProps) {
 
   return (
     <div
-      className={`AppLayout flex min-h-screen w-full bg-background text-foreground overflow-hidden ${className}`}
+      className={`AppLayout flex h-[100dvh] max-h-[100dvh] min-h-0 w-full bg-background text-foreground overflow-hidden ${className}`}
     >
       {/* Desktop Sidebar */}
-      <div className="shrink-0 hidden lg:block h-screen sticky top-0">
+      <div className="shrink-0 hidden lg:block h-[100dvh] sticky top-0 self-start">
         <AppSidebar />
       </div>
 
@@ -37,9 +37,9 @@ function AppLayoutInner({ children, className = "" }: AppLayoutProps) {
       </div>
 
       {/* Main content column */}
-      <main className="flex-1 flex flex-col w-full min-w-0 max-w-full overflow-x-hidden overflow-y-auto">
-        <div className="w-full flex-1 flex flex-col px-0">
-          <div className="w-full max-w-none pl-3 sm:pl-4 lg:pl-6 pr-0 flex-1 flex flex-col">
+      <main className="flex-1 flex flex-col w-full min-w-0 min-h-0 max-w-full overflow-hidden">
+        <div className="w-full flex-1 min-h-0 flex flex-col">
+          <div className="w-full max-w-none px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:px-4 lg:px-6 flex-1 min-h-0 flex flex-col overflow-y-auto overflow-x-hidden overscroll-contain">
             {children}
           </div>
         </div>

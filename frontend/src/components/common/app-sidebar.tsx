@@ -160,7 +160,7 @@ export function AppSidebar() {
   }, [prefetchRoute, prefetchDataForRoute, warmRouteInDev])
 
   return (
-    <div className="font-sans bg-[#12151c] text-slate-200 border-r border-white/10 h-screen w-[280px] flex flex-col">
+    <div className="font-sans bg-[#12151c] text-slate-200 border-r border-white/10 h-[100dvh] w-[280px] max-w-[85vw] flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-4 border-b border-white/10">
         <Link href="/" className="flex items-center gap-3">

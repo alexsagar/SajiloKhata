@@ -22,6 +22,15 @@ const protectedRoutes = [
   "/calendar",
   "/chat",
   "/settings",
+  // Mobile routes
+  "/m/dashboard",
+  "/m/groups",
+  "/m/expenses",
+  "/m/notifications",
+  "/m/settings",
+  "/m/friends",
+  "/m/analytics",
+  "/m/calendar",
 ]
 
 // Routes that should redirect to home if already authenticated

@@ -333,28 +333,28 @@ export function FriendInvitationWithDelete() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">Friends & Invitations</h2>
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-xl sm:text-2xl font-bold">Friends & Invitations</h2>
           <p className="text-muted-foreground">
             Invite friends to join SajiloKhata and manage shared expenses together
           </p>
         </div>
-        <Button onClick={() => setIsInviteDialogOpen(true)}>
+        <Button onClick={() => setIsInviteDialogOpen(true)} className="w-full sm:w-auto">
           <UserPlus className="h-4 w-4 mr-2" />
           Invite Friends
         </Button>
       </div>
 
       {/* Quick Stats */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         <KanbanCard>
           <KanbanCardHeader className="pb-2">
             <KanbanCardTitle className="text-sm font-medium">Total Friends</KanbanCardTitle>
           </KanbanCardHeader>
           <KanbanCardContent>
-            <div className="text-2xl font-bold">{friends.length}</div>
+            <div className="text-xl sm:text-2xl font-bold">{friends.length}</div>
           </KanbanCardContent>
         </KanbanCard>
         <KanbanCard>
@@ -362,7 +362,7 @@ export function FriendInvitationWithDelete() {
             <KanbanCardTitle className="text-sm font-medium">Pending Invitations</KanbanCardTitle>
           </KanbanCardHeader>
           <KanbanCardContent>
-            <div className="text-2xl font-bold">{pendingInvitations.length}</div>
+            <div className="text-xl sm:text-2xl font-bold">{pendingInvitations.length}</div>
           </KanbanCardContent>
         </KanbanCard>
         <KanbanCard>
@@ -370,7 +370,7 @@ export function FriendInvitationWithDelete() {
             <KanbanCardTitle className="text-sm font-medium">Total Balance</KanbanCardTitle>
           </KanbanCardHeader>
           <KanbanCardContent>
-            <div className="text-2xl font-bold text-green-600">
+            <div className="text-xl sm:text-2xl font-bold text-green-600 break-all">
               {formatCurrencyWithSymbol(friends.reduce((sum, f) => sum + f.balance, 0), userCurrency)}
             </div>
           </KanbanCardContent>
@@ -380,7 +380,7 @@ export function FriendInvitationWithDelete() {
             <KanbanCardTitle className="text-sm font-medium">Shared Expenses</KanbanCardTitle>
           </KanbanCardHeader>
           <KanbanCardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-xl sm:text-2xl font-bold">
               {friends.reduce((sum, f) => sum + f.totalExpenses, 0)}
             </div>
           </KanbanCardContent>
@@ -388,7 +388,7 @@ export function FriendInvitationWithDelete() {
       </div>
 
       <Tabs defaultValue="friends" className="space-y-4">
-        <TabsList>
+        <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="friends">Friends ({friends.length})</TabsTrigger>
           <TabsTrigger value="pending">Pending ({pendingInvitations.length})</TabsTrigger>
         </TabsList>
@@ -398,19 +398,19 @@ export function FriendInvitationWithDelete() {
             <div className="grid gap-4">
               {friends.map((friend) => (
                 <KanbanCard key={friend.id}>
-                  <KanbanCardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
+                  <KanbanCardContent className="p-3 sm:p-4">
+                    <div className="flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-3 min-w-0">
                         <Avatar className="h-12 w-12">
                           <AvatarImage src={friend.avatar} />
                           <AvatarFallback>
                             {friend.name.split(' ').map(n => n[0]).join('').toUpperCase()}
                           </AvatarFallback>
                         </Avatar>
-                        <div>
-                          <h3 className="font-semibold">{friend.name}</h3>
-                          <p className="text-sm text-muted-foreground">{friend.email}</p>
-                          <div className="flex items-center gap-2 mt-1">
+                        <div className="min-w-0">
+                          <h3 className="font-semibold break-words">{friend.name}</h3>
+                          <p className="text-sm text-muted-foreground break-all">{friend.email}</p>
+                          <div className="flex flex-wrap items-center gap-2 mt-1">
                             {getStatusBadge(friend.status)}
                             <span className="text-xs text-muted-foreground">
                               Joined {new Date(friend.joinedDate).toLocaleDateString()}
@@ -419,10 +419,10 @@ export function FriendInvitationWithDelete() {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-4">
-                        <div className="text-right">
+                      <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+                        <div className="text-left sm:text-right">
                           <div className="text-sm text-muted-foreground">Balance</div>
-                          <div className={`font-semibold ${friend.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          <div className={`font-semibold break-all ${friend.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                             {formatCurrencyWithSymbol(Math.abs(friend.balance), userCurrency)}
                             <span className="text-xs ml-1">
                               {friend.balance >= 0 ? 'owes you' : 'you owe'}
@@ -430,12 +430,12 @@ export function FriendInvitationWithDelete() {
                           </div>
                         </div>
 
-                        <div className="text-right">
+                        <div className="text-left sm:text-right">
                           <div className="text-sm text-muted-foreground">Expenses</div>
                           <div className="font-semibold">{friend.totalExpenses}</div>
                         </div>
 
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 ml-auto sm:ml-0">
                           <Button
                             variant="outline"
                             size="sm"
@@ -508,20 +508,20 @@ export function FriendInvitationWithDelete() {
             <div className="grid gap-4">
               {pendingInvitations.map((invitation) => (
                 <KanbanCard key={invitation.code}>
-                  <KanbanCardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
+                  <KanbanCardContent className="p-3 sm:p-4">
+                    <div className="flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-3 min-w-0">
                         <Avatar className="h-12 w-12">
                           <AvatarImage src={invitation.inviter.avatar} />
                           <AvatarFallback>
                             {invitation.inviter.firstName[0]}
                           </AvatarFallback>
                         </Avatar>
-                        <div>
+                        <div className="min-w-0">
                           <h3 className="font-semibold">
                             {invitation.inviter.firstName} {invitation.inviter.lastName}
                           </h3>
-                          <p className="text-sm text-muted-foreground">{invitation.inviter.email}</p>
+                          <p className="text-sm text-muted-foreground break-all">{invitation.inviter.email}</p>
                           <p className="text-sm text-muted-foreground">
                             Invited on {new Date(invitation.invitedDate).toLocaleDateString()}
                           </p>
@@ -531,7 +531,7 @@ export function FriendInvitationWithDelete() {
                         </div>
                       </div>
 
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 sm:justify-end">
                         <Button
                           variant="default"
                           size="sm"

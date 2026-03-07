@@ -92,6 +92,7 @@ export function AnalyticsDashboard() {
     return 'overview'
   })
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
+  const [showFiltersOnMobile, setShowFiltersOnMobile] = useState(false)
 
   // Responsive state for mobile
   const [isMobile, setIsMobile] = useState(false)
@@ -329,12 +330,22 @@ export function AnalyticsDashboard() {
       <Card>
         <CardHeader className="px-2 md:px-3 py-1 md:py-1 pb-0">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+            <div className="hidden sm:flex items-center gap-2">
               <Filter className="h-4 w-4" />
               <CardTitle className="text-responsive-lg">Filters</CardTitle>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <DataStatusBadge />
+              {/* Mobile filter toggle */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowFiltersOnMobile(v => !v)}
+                className="h-8 px-2 sm:hidden"
+              >
+                <Filter className="h-3 w-3 mr-1" />
+                {showFiltersOnMobile ? 'Hide' : 'Filters'}
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"
@@ -343,18 +354,18 @@ export function AnalyticsDashboard() {
               >
                 {viewMode === 'simple' ? <><Layers className="h-3 w-3 mr-1" />Advanced</> : <><Eye className="h-3 w-3 mr-1" />Simple</>}
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => setShowAdvancedFilters(v => !v)} className="h-8 px-2">
+              <Button variant="ghost" size="sm" onClick={() => setShowAdvancedFilters(v => !v)} className="h-8 px-2 hidden sm:inline-flex">
                 {showAdvancedFilters ? 'Hide filters' : 'More filters'}
               </Button>
               <Button variant="outline" size="sm" onClick={handleCSVExport} className="touch-friendly">
-                <Download className="h-4 w-4 mr-2" />
+                <Download className="h-4 w-4 sm:mr-2" />
                 <span className="hidden sm:inline">Export CSV</span>
-                <span className="sm:hidden">Export</span>
               </Button>
             </div>
           </div>
         </CardHeader>
-        <CardContent className="px-2 md:px-3 pt-0 pb-2">
+        {/* Filters: always visible on desktop, collapsible on mobile */}
+        <CardContent className={`px-2 md:px-3 pt-0 pb-2 ${!showFiltersOnMobile ? 'hidden sm:block' : ''}`}>
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-1 md:gap-2 items-end">
             {/* Mode Filter */}
             <div className="space-y-0.5">
@@ -471,14 +482,14 @@ export function AnalyticsDashboard() {
       </Card>
 
       {/* KPIs Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-        <Card>
+      <div className="flex gap-3 overflow-x-auto no-scrollbar snap-x snap-mandatory sm:grid sm:grid-cols-2 lg:grid-cols-4 sm:overflow-visible">
+        <Card className="shrink-0 snap-start w-[84vw] sm:w-auto">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3">
             <CardTitle className="text-sm font-medium">Total Spend</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="p-3 pt-0">
-            <div className="text-xl md:text-2xl font-bold">
+            <div className="text-lg md:text-2xl font-bold break-all leading-tight">
               {formatCurrency((kpis.totalSpendBaseCents || 0) / 100, baseCurrency)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -491,13 +502,13 @@ export function AnalyticsDashboard() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shrink-0 snap-start w-[84vw] sm:w-auto">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3">
             <CardTitle className="text-sm font-medium">Net Balance</CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="p-3 pt-0">
-            <div className={`text-xl md:text-2xl font-bold ${(kpis.netBalanceBaseCents || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            <div className={`text-lg md:text-2xl font-bold break-all leading-tight ${(kpis.netBalanceBaseCents || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
               {formatCurrency(Math.abs(kpis.netBalanceBaseCents || 0) / 100, baseCurrency)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -506,16 +517,16 @@ export function AnalyticsDashboard() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shrink-0 snap-start w-[84vw] sm:w-auto">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3">
             <CardTitle className="text-sm font-medium">Expenses</CardTitle>
             <Receipt className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="p-3 pt-0">
-            <div className="text-xl md:text-2xl font-bold">
+            <div className="text-lg md:text-2xl font-bold">
               {(kpis.expensesCount?.personal || 0) + (kpis.expensesCount?.group || 0)}
             </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mt-1">
               <span>Personal: {kpis.expensesCount?.personal || 0}</span>
               <span>Group: {kpis.expensesCount?.group || 0}</span>
             </div>
@@ -523,13 +534,13 @@ export function AnalyticsDashboard() {
         </Card>
 
         {/* Personal vs Group Expense Breakdown */}
-        <Card>
+        <Card className="shrink-0 snap-start w-[84vw] sm:w-auto">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3">
             <CardTitle className="text-sm font-medium">Personal Expenses</CardTitle>
             <User className="h-4 w-4 text-blue-400" />
           </CardHeader>
           <CardContent className="p-3 pt-0">
-            <div className="text-xl md:text-2xl font-bold text-blue-400">
+            <div className="text-lg md:text-2xl font-bold text-blue-400 break-all leading-tight">
               {formatCurrency((spendSplit.personal || 0) / 100, baseCurrency)}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
@@ -538,13 +549,13 @@ export function AnalyticsDashboard() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shrink-0 snap-start w-[84vw] sm:w-auto">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3">
             <CardTitle className="text-sm font-medium">Group Expenses</CardTitle>
             <Group className="h-4 w-4 text-green-400" />
           </CardHeader>
           <CardContent className="p-3 pt-0">
-            <div className="text-xl md:text-2xl font-bold text-green-400">
+            <div className="text-lg md:text-2xl font-bold text-green-400 break-all leading-tight">
               {formatCurrency((spendSplit.group || 0) / 100, baseCurrency)}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
@@ -553,7 +564,7 @@ export function AnalyticsDashboard() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shrink-0 snap-start w-[84vw] sm:w-auto">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3">
             <CardTitle className="text-sm font-medium">Avg Settlement</CardTitle>
             <Clock className="h-4 w-4 text-muted-foreground" />
@@ -602,14 +613,14 @@ export function AnalyticsDashboard() {
       {/* Advanced view: Full tabbed analytics */}
       {viewMode === 'advanced' && (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 md:space-y-6">
-          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-1">
-            <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
-            <TabsTrigger value="spending" className="text-xs">Spending</TabsTrigger>
-            <TabsTrigger value="categories" className="text-xs">Categories</TabsTrigger>
-            <TabsTrigger value="partners" className="text-xs">Partners</TabsTrigger>
-            <TabsTrigger value="aging" className="text-xs">Aging</TabsTrigger>
-            <TabsTrigger value="trends" className="text-xs">Trends</TabsTrigger>
-            <TabsTrigger value="ledger" className="text-xs">Ledger</TabsTrigger>
+          <TabsList className="w-full overflow-x-auto no-scrollbar flex items-center gap-1 h-auto p-1" style={{ WebkitOverflowScrolling: 'touch' }}>
+            <TabsTrigger value="overview" className="text-xs shrink-0 whitespace-nowrap px-2 sm:px-3">Overview</TabsTrigger>
+            <TabsTrigger value="spending" className="text-xs shrink-0 whitespace-nowrap px-2 sm:px-3">Spending</TabsTrigger>
+            <TabsTrigger value="categories" className="text-xs shrink-0 whitespace-nowrap px-2 sm:px-3">Categories</TabsTrigger>
+            <TabsTrigger value="partners" className="text-xs shrink-0 whitespace-nowrap px-2 sm:px-3">Partners</TabsTrigger>
+            <TabsTrigger value="aging" className="text-xs shrink-0 whitespace-nowrap px-2 sm:px-3">Aging</TabsTrigger>
+            <TabsTrigger value="trends" className="text-xs shrink-0 whitespace-nowrap px-2 sm:px-3">Trends</TabsTrigger>
+            <TabsTrigger value="ledger" className="text-xs shrink-0 whitespace-nowrap px-2 sm:px-3">Ledger</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-4 md:space-y-6">
@@ -1030,8 +1041,8 @@ function TopPartnersList({ data, baseCurrency }: { data: Array<{ _id: string; na
     <div className="space-y-2">
       {safe.slice(0, 10).map((p) => (
         <div key={p._id} className="flex items-center justify-between text-sm">
-          <span>{p.name}</span>
-          <span>{formatCurrency((p.totalBaseCents || 0) / 100, baseCurrency)}</span>
+          <span className="truncate pr-2">{p.name}</span>
+          <span className="shrink-0">{formatCurrency((p.totalBaseCents || 0) / 100, baseCurrency)}</span>
         </div>
       ))}
     </div>
@@ -1045,8 +1056,8 @@ function TopGroupsList({ data, baseCurrency }: { data: Array<{ _id: string; name
     <div className="space-y-2">
       {safe.slice(0, 10).map((g) => (
         <div key={g._id} className="flex items-center justify-between text-sm">
-          <span>{g.name}</span>
-          <span>{formatCurrency((g.totalBaseCents || 0) / 100, baseCurrency)}</span>
+          <span className="truncate pr-2">{g.name}</span>
+          <span className="shrink-0">{formatCurrency((g.totalBaseCents || 0) / 100, baseCurrency)}</span>
         </div>
       ))}
     </div>

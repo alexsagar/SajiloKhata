@@ -17,45 +17,43 @@ export function ChatInterface() {
   }, [searchParams])
 
   return (
-    <div className="h-full min-h-[420px] space-y-4">
+    <div className="h-full min-h-[520px] space-y-3 sm:space-y-4">
       {/* Navigation Buttons */}
-      <div className="flex items-center justify-center gap-4">
+      <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-white/5 p-1">
         <Button
-          variant="outline"
-          size="lg"
+          variant={activeTab === "groups" ? "default" : "ghost"}
+          size="sm"
           onClick={() => setActiveTab("groups")}
           className={`
-            px-6 py-3 h-auto transition-all duration-200 
-            hover:shadow-lg hover:shadow-primary/20 hover:scale-105
+            h-10 transition-all duration-200
             ${activeTab === "groups" 
-              ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30" 
-              : "bg-background/50 hover:bg-background/80"
+              ? "bg-primary text-primary-foreground shadow"
+              : "text-muted-foreground hover:text-foreground"
             }
           `}
         >
-          <Users className="h-5 w-5 mr-2" />
+          <Users className="h-4 w-4 mr-2" />
           Group Chats
         </Button>
         <Button
-          variant="outline"
-          size="lg"
+          variant={activeTab === "direct" ? "default" : "ghost"}
+          size="sm"
           onClick={() => setActiveTab("direct")}
           className={`
-            px-6 py-3 h-auto transition-all duration-200 
-            hover:shadow-lg hover:shadow-primary/20 hover:scale-105
+            h-10 transition-all duration-200
             ${activeTab === "direct" 
-              ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30" 
-              : "bg-background/50 hover:bg-background/80"
+              ? "bg-primary text-primary-foreground shadow"
+              : "text-muted-foreground hover:text-foreground"
             }
           `}
         >
-          <MessageSquare className="h-5 w-5 mr-2" />
+          <MessageSquare className="h-4 w-4 mr-2" />
           Direct Messages
         </Button>
       </div>
 
       {/* Content panels */}
-      <div className="h-[calc(100%-6rem)]">
+      <div className="h-[calc(100%-3.25rem)] min-h-[420px]">
         {activeTab === "groups" ? (
           <GroupChat />
         ) : (

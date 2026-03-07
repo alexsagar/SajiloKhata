@@ -8,7 +8,7 @@ interface AuthShellProps {
 export function AuthShell({ children }: AuthShellProps) {
   return (
     // Full-bleed wrapper: take the whole viewport width & height
-    <div className="min-h-dvh w-screen overflow-hidden grid min-[1024px]:grid-cols-[30%_70%]">
+    <div className="min-h-dvh w-full overflow-hidden grid min-[1024px]:grid-cols-[30%_70%]">
       {/* Left: form pane (smaller width) */}
       <div className="min-w-0 flex items-center justify-center px-6 py-10">
         <div className="w-full max-w-xs">{children}</div>

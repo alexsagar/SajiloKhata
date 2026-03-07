@@ -7,7 +7,7 @@ export default function AnalyticsPage() {
   return (
     <>
       <Header title="Analytics" description="Insights into your spending patterns" />
-      <div className="flex flex-1 flex-col gap-4 p-4">
+      <div className="flex flex-1 flex-col gap-3 sm:gap-4 py-2 sm:py-4">
         <AnalyticsDashboardClient />
       </div>
     </>

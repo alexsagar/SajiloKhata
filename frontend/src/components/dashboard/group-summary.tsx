@@ -57,19 +57,19 @@ export function GroupSummary() {
   }
 
   return (
-    <div className="bg-[var(--card)] rounded-xl p-6 border border-white/5">
-      <h3 className="text-lg font-semibold text-white mb-4">Expense Summary</h3>
+    <div className="bg-[var(--card)] rounded-xl p-3 sm:p-6 border border-white/5">
+      <h3 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">Expense Summary</h3>
 
       {/* Overall Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 bg-blue-500/20 rounded-full">
-              <CreditCard className="h-5 w-5 text-blue-400" />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
+        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 sm:p-4">
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:flex items-center justify-center w-9 h-9 shrink-0 bg-blue-500/20 rounded-full">
+              <CreditCard className="h-5 w-5 shrink-0 text-blue-400" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-sm text-muted-foreground">Personal</div>
-              <div className="text-xl font-bold text-blue-400">
+              <div className="text-lg sm:text-xl font-bold text-blue-400 break-all">
                 {formatCurrencyWithSymbol(personalExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0) / 100, userCurrency)}
               </div>
               <div className="text-xs text-muted-foreground">
@@ -79,14 +79,14 @@ export function GroupSummary() {
           </div>
         </div>
 
-        <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 bg-green-500/20 rounded-full">
-              <Users className="h-5 w-5 text-green-400" />
+        <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 sm:p-4">
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:flex items-center justify-center w-9 h-9 shrink-0 bg-green-500/20 rounded-full">
+              <Users className="h-5 w-5 shrink-0 text-green-400" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-sm text-muted-foreground">Group</div>
-              <div className="text-xl font-bold text-green-400">
+              <div className="text-lg sm:text-xl font-bold text-green-400 break-all">
                 {formatCurrencyWithSymbol(groupExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0) / 100, userCurrency)}
               </div>
               <div className="text-xs text-muted-foreground">
@@ -96,14 +96,14 @@ export function GroupSummary() {
           </div>
         </div>
 
-        <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 bg-purple-500/20 rounded-full">
-              <Building2 className="h-5 w-5 text-purple-400" />
+        <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-3 sm:p-4">
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:flex items-center justify-center w-9 h-9 shrink-0 bg-purple-500/20 rounded-full">
+              <Building2 className="h-5 w-5 shrink-0 text-purple-400" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-sm text-muted-foreground">Active Groups</div>
-              <div className="text-xl font-bold text-purple-400">
+              <div className="text-lg sm:text-xl font-bold text-purple-400">
                 {groups.length}
               </div>
               <div className="text-xs text-muted-foreground">
@@ -120,20 +120,20 @@ export function GroupSummary() {
           <h4 className="text-md font-medium text-white">Group Breakdown</h4>
           <div className="space-y-3">
             {groups.map((group: any) => (
-              <div key={group.id} className="flex items-center justify-between p-3 rounded-lg border border-white/10 bg-white/5">
-                <div className="flex items-center space-x-3">
+              <div key={group.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg border border-white/10 bg-white/5">
+                <div className="flex items-center space-x-3 min-w-0">
                   <div className="p-2 bg-green-500/20 rounded-full">
                     <Users className="h-4 w-4 text-green-400" />
                   </div>
-                  <div>
-                    <div className="text-sm font-medium text-white">{group.name}</div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-white break-words">{group.name}</div>
                     <div className="text-xs text-muted-foreground">
                       {group.count} expense{group.count !== 1 ? 's' : ''}
                     </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-sm font-semibold text-white">
+                <div className="text-left sm:text-right">
+                  <div className="text-sm font-semibold text-white break-all">
                     {formatCurrencyWithSymbol(group.total / 100, userCurrency)}
                   </div>
                   <div className="text-xs text-muted-foreground">{userCurrency}</div>
@@ -154,19 +154,19 @@ export function GroupSummary() {
         <div className="mt-6 pt-6 border-t border-white/10">
           <h4 className="text-md font-medium text-white mb-3">Expense Distribution</h4>
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center space-x-2 min-w-0">
                 <Badge variant="secondary" className="text-xs">Personal</Badge>
-                <span className="text-sm text-muted-foreground">Your individual expenses</span>
+                <span className="text-sm text-muted-foreground break-words">Your individual expenses</span>
               </div>
               <div className="text-sm font-medium text-blue-400">
                 {personalExpenses.length > 0 ? Math.round((personalExpenses.length / expenses.length) * 100) : 0}%
               </div>
             </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center space-x-2 min-w-0">
                 <Badge variant="default" className="text-xs">Group</Badge>
-                <span className="text-sm text-muted-foreground">Shared expenses with others</span>
+                <span className="text-sm text-muted-foreground break-words">Shared expenses with others</span>
               </div>
               <div className="text-sm font-medium text-green-400">
                 {groupExpenses.length > 0 ? Math.round((groupExpenses.length / expenses.length) * 100) : 0}%

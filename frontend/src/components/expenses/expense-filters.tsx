@@ -71,9 +71,9 @@ export function ExpenseFilters({ onFiltersChange }: ExpenseFiltersProps) {
 
   return (
     <KanbanCard>
-      <KanbanCardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <KanbanCardTitle className="text-lg flex items-center gap-2">
+      <KanbanCardHeader className="pb-2 sm:pb-3">
+        <div className="flex items-center justify-between gap-2">
+          <KanbanCardTitle className="text-base sm:text-lg flex items-center gap-2">
             <Filter className="h-5 w-5" />
             Filters
           </KanbanCardTitle>
@@ -85,8 +85,8 @@ export function ExpenseFilters({ onFiltersChange }: ExpenseFiltersProps) {
           )}
         </div>
       </KanbanCardHeader>
-      <KanbanCardContent className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <KanbanCardContent className="space-y-3 sm:space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
           <div className="space-y-2">
             <Label htmlFor="search">Search</Label>
             <div className="relative">
@@ -121,7 +121,7 @@ export function ExpenseFilters({ onFiltersChange }: ExpenseFiltersProps) {
             </Select>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2 sm:col-span-2 lg:col-span-1">
             <Label htmlFor="group">Group</Label>
             <Select value={filters.groupId} onValueChange={(value) => updateFilter("groupId", value)}>
               <SelectTrigger>

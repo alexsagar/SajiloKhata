@@ -110,15 +110,15 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
   return (
     <>
       {/* Expense Summary Header */}
-      <div className="bg-white/5 border border-white/10 rounded-lg p-4 mb-6">
-        <h3 className="text-lg font-semibold text-white mb-4">Expense Summary</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="bg-white/5 border border-white/10 rounded-lg p-3 sm:p-4 mb-4 sm:mb-6">
+        <h3 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">Expense Summary</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
             <div className="flex items-center space-x-2">
               <CreditCard className="h-4 w-4 text-blue-400" />
               <span className="text-sm text-muted-foreground">Personal</span>
             </div>
-            <div className="text-xl font-bold text-blue-400 mt-1">
+            <div className="text-lg sm:text-xl font-bold text-blue-400 mt-1 break-all">
               {formatCurrencyWithSymbol(personalTotal / 100, userCurrency)}
             </div>
             <div className="text-xs text-muted-foreground">
@@ -131,7 +131,7 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
               <Building2 className="h-4 w-4 text-green-400" />
               <span className="text-sm text-muted-foreground">Group</span>
             </div>
-            <div className="text-xl font-bold text-green-400 mt-1">
+            <div className="text-lg sm:text-xl font-bold text-green-400 mt-1 break-all">
               {formatCurrencyWithSymbol(groupTotal / 100, userCurrency)}
             </div>
             <div className="text-xs text-muted-foreground">
@@ -144,7 +144,7 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
               <Receipt className="h-4 w-4 text-purple-400" />
               <span className="text-sm text-muted-foreground">Total</span>
             </div>
-            <div className="text-xl font-bold text-purple-400 mt-1">
+            <div className="text-lg sm:text-xl font-bold text-purple-400 mt-1 break-all">
               {formatCurrencyWithSymbol((personalTotal + groupTotal) / 100, userCurrency)}
             </div>
             <div className="text-xs text-muted-foreground">
@@ -160,9 +160,9 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
 
           return (
             <KanbanCard key={expense._id} className="hover:-translate-y-0.5 hover:bg-white/[0.06] cursor-pointer">
-              <KanbanCardContent className="p-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start space-x-4 flex-1">
+              <KanbanCardContent className="p-3 sm:p-4 lg:p-6">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
                     {/* Expense Type Indicator */}
                     <div className={`p-2 rounded-full ${isPersonal
                       ? 'bg-blue-500/20 text-blue-400'
@@ -175,7 +175,7 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
                       )}
                     </div>
 
-                    <Avatar className="h-10 w-10">
+                    <Avatar className="h-9 w-9 sm:h-10 sm:w-10">
                       <AvatarImage src={expense.paidBy?.avatar || "/placeholder.svg"} />
                       <AvatarFallback>
                         {getInitials(expense.paidBy?.firstName || "", expense.paidBy?.lastName || "")}
@@ -183,8 +183,8 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
                     </Avatar>
 
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-semibold text-lg truncate">{expense.description}</h3>
+                      <div className="flex flex-wrap items-center gap-2 mb-1">
+                        <h3 className="font-semibold text-base sm:text-lg break-words">{expense.description}</h3>
                         <Badge className={getCategoryColor(expense.category)}>
                           {expense.category}
                         </Badge>
@@ -193,7 +193,7 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
                         </Badge>
                       </div>
 
-                      <div className="flex items-center gap-4 text-sm text-muted-foreground mb-2">
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm text-muted-foreground mb-2">
                         <div className="flex items-center gap-1">
                           <Calendar className="h-4 w-4" />
                           <span>{formatDate(expense.date)}</span>
@@ -212,7 +212,7 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
                         )}
                       </div>
 
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-xs sm:text-sm text-muted-foreground">
                         Paid by {expense.paidBy?.firstName} {expense.paidBy?.lastName}
                       </p>
 
@@ -310,15 +310,15 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <div className="text-right">
-                      <div className="text-2xl font-bold">{
+                  <div className="flex items-center justify-between gap-2 lg:justify-end">
+                    <div className="text-left lg:text-right min-w-0">
+                      <div className="text-lg sm:text-xl lg:text-2xl font-bold break-all">{
                         formatCurrencyWithSymbol(
                           ((expense.amountCents != null ? expense.amountCents : (expense.amount != null ? Math.round(expense.amount * 100) : 0)) / 100),
                           userCurrency
                         )
                       }</div>
-                      <div className="text-sm text-muted-foreground">{expense.currencyCode || expense.currency || userCurrency}</div>
+                      <div className="text-xs sm:text-sm text-muted-foreground">{expense.currencyCode || expense.currency || userCurrency}</div>
                     </div>
 
                     <DropdownMenu>

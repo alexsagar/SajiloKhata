@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
-import { Send, Users, Search, MoreVertical, Phone, Video, Plus, MessageSquare } from "lucide-react"
+import { Send, Users, Search, MoreVertical, Phone, Video, Plus, MessageSquare, ChevronLeft } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
 import { EnhancedCreateGroupDialog } from "../groups/enhanced-create-group-dialog"
@@ -43,6 +43,7 @@ export function GroupChat() {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null)
   const [message, setMessage] = useState("")
   const [searchTerm, setSearchTerm] = useState("")
+  const [isMobile, setIsMobile] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const processedMessageIds = useRef<Set<string>>(new Set())
   const { toast } = useToast()
@@ -56,6 +57,13 @@ export function GroupChat() {
   useEffect(() => {
     scrollToBottom()
   }, [selectedGroup?.messages])
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 1024)
+    check()
+    window.addEventListener("resize", check)
+    return () => window.removeEventListener("resize", check)
+  }, [])
 
   // Fetch groups on mount
   useEffect(() => {
@@ -323,10 +331,12 @@ export function GroupChat() {
     joinGroups([newGroup.id])
   }
 
+  const showGroupList = !isMobile || !selectedGroup
+
   return (
-    <div className="flex h-full gap-4">
+    <div className="grid grid-cols-1 lg:grid-cols-[20rem_minmax(0,1fr)] h-full gap-3 sm:gap-4 min-h-[520px]">
       {/* Groups Sidebar */}
-      <div className="w-80 flex flex-col">
+      <div className={cn("flex flex-col", showGroupList ? "block" : "hidden lg:block")}>
         <KanbanCard className="flex-1">
           <KanbanCardHeader className="pb-3">
             <div className="flex items-center justify-between">
@@ -353,7 +363,7 @@ export function GroupChat() {
             </div>
           </KanbanCardHeader>
           <KanbanCardContent className="p-0">
-            <ScrollArea className="h-[calc(100vh-18rem)]">
+            <ScrollArea className="h-[55dvh] lg:h-[calc(100vh-18rem)]">
               <div className="space-y-1 p-3">
                 {filteredGroups.length > 0 ? (
                   filteredGroups.map((group) => (
@@ -426,7 +436,7 @@ export function GroupChat() {
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 flex flex-col">
+      <div className={cn("flex flex-col min-w-0", showGroupList ? "hidden lg:flex" : "flex")}>
         <KanbanCard className="flex-1 flex flex-col">
           {selectedGroup ? (
             <>
@@ -434,6 +444,16 @@ export function GroupChat() {
               <KanbanCardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
+                    {isMobile && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        onClick={() => setSelectedGroup(null)}
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                    )}
                     <Avatar className="h-8 w-8">
                       <AvatarImage src={selectedGroup.avatar} />
                       <AvatarFallback>
@@ -466,7 +486,7 @@ export function GroupChat() {
 
               {/* Messages Area */}
               <KanbanCardContent className="flex-1 p-0">
-                <ScrollArea className="h-[calc(100vh-20rem)] p-4">
+                <ScrollArea className="h-[58dvh] lg:h-[calc(100vh-20rem)] p-3 sm:p-4">
                   {selectedGroup.messages.length > 0 ? (
                     <div className="space-y-4">
                       {selectedGroup.messages.map((msg, index) => {
@@ -510,8 +530,8 @@ export function GroupChat() {
                                 msg.senderId === 'system'
                                   ? "bg-blue-50 text-blue-800 border border-blue-200"
                                   : msg.isCurrentUser
-                                    ? "bg-primary text-primary-foreground"
-                                    : "bg-muted"
+                                    ? "bg-emerald-600 text-emerald-50"
+                                    : "bg-blue-900/75 text-blue-50"
                               )}>
                                 {msg.content}
                               </div>

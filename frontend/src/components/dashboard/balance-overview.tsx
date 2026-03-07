@@ -25,9 +25,9 @@ export function BalanceOverview() {
   // Show loading state
   if (isLoading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="contents">
         {Array.from({ length: 6 }).map((_, i) => (
-          <KanbanCard key={i}>
+          <KanbanCard key={i} className="shrink-0 snap-start w-[84vw] sm:w-[68vw] md:w-auto">
             <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <div className="h-4 w-20 bg-slate-700 rounded animate-pulse" />
               <div className="h-4 w-4 bg-slate-700 rounded animate-pulse" />
@@ -45,9 +45,9 @@ export function BalanceOverview() {
   // Show error state
   if (error) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="contents">
         {Array.from({ length: 6 }).map((_, i) => (
-          <KanbanCard key={i} className="border-red-500/20">
+          <KanbanCard key={i} className="border-red-500/20 shrink-0 snap-start w-[84vw] sm:w-[68vw] md:w-auto">
             <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <KanbanCardTitle className="text-sm font-medium text-slate-400">Error Loading Data</KanbanCardTitle>
               <div className="h-4 w-4 bg-red-500/20 rounded" />
@@ -78,52 +78,52 @@ export function BalanceOverview() {
 
   return (
     <>
-      <KanbanCard>
+      <KanbanCard className="shrink-0 snap-start w-[84vw] sm:w-[68vw] md:w-auto">
         <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <KanbanCardTitle className="text-sm font-medium text-slate-400">Total Balance</KanbanCardTitle>
-          <DollarSign className="h-5 w-5 sm:h-4 sm:w-4 text-slate-400" />
+          <KanbanCardTitle className="text-xs sm:text-sm font-medium text-slate-400">Total Balance</KanbanCardTitle>
+          <DollarSign className="hidden sm:block h-4 w-4 text-slate-400" />
         </KanbanCardHeader>
         <KanbanCardContent>
-          <div className="text-2xl font-bold text-slate-100">
+          <div className="text-lg sm:text-2xl font-bold text-slate-100 leading-tight">
             {formatCurrencyWithSymbol(totalBalance / 100, userCurrency)}
           </div>
           <p className="text-xs text-slate-400 mt-1">Your overall balance</p>
         </KanbanCardContent>
       </KanbanCard>
 
-      <KanbanCard>
+      <KanbanCard className="shrink-0 snap-start w-[84vw] sm:w-[68vw] md:w-auto">
         <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <KanbanCardTitle className="text-sm font-medium text-slate-400">You're Owed</KanbanCardTitle>
-          <TrendingUp className="h-5 w-5 sm:h-4 sm:w-4 text-emerald-400" />
+          <KanbanCardTitle className="text-xs sm:text-sm font-medium text-slate-400">You're Owed</KanbanCardTitle>
+          <TrendingUp className="hidden sm:block h-4 w-4 text-emerald-400" />
         </KanbanCardHeader>
         <KanbanCardContent>
-          <div className="text-2xl font-bold text-emerald-400">
+          <div className="text-lg sm:text-2xl font-bold text-emerald-400 leading-tight">
             {formatCurrencyWithSymbol(youreOwed / 100, userCurrency)}
           </div>
           <p className="text-xs text-slate-400 mt-1">Money coming to you</p>
         </KanbanCardContent>
       </KanbanCard>
 
-      <KanbanCard>
+      <KanbanCard className="shrink-0 snap-start w-[84vw] sm:w-[68vw] md:w-auto">
         <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <KanbanCardTitle className="text-sm font-medium text-slate-400">You Owe</KanbanCardTitle>
-          <TrendingDown className="h-5 w-5 sm:h-4 sm:w-4 text-rose-400" />
+          <KanbanCardTitle className="text-xs sm:text-sm font-medium text-slate-400">You Owe</KanbanCardTitle>
+          <TrendingDown className="hidden sm:block h-4 w-4 text-rose-400" />
         </KanbanCardHeader>
         <KanbanCardContent>
-          <div className="text-2xl font-bold text-rose-400">
+          <div className="text-lg sm:text-2xl font-bold text-rose-400 leading-tight">
             {formatCurrencyWithSymbol(youOwe / 100, userCurrency)}
           </div>
           <p className="text-xs text-slate-400 mt-1">Money you need to pay</p>
         </KanbanCardContent>
       </KanbanCard>
 
-      <KanbanCard>
+      <KanbanCard className="shrink-0 snap-start w-[84vw] sm:w-[68vw] md:w-auto">
         <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <KanbanCardTitle className="text-sm font-medium text-slate-400">Personal Expenses</KanbanCardTitle>
-          <CreditCard className="h-5 w-5 sm:h-4 sm:w-4 text-slate-400" />
+          <KanbanCardTitle className="text-xs sm:text-sm font-medium text-slate-400">Personal Expenses</KanbanCardTitle>
+          <CreditCard className="hidden sm:block h-4 w-4 text-slate-400" />
         </KanbanCardHeader>
         <KanbanCardContent>
-          <div className="text-2xl font-bold text-slate-100">
+          <div className="text-lg sm:text-2xl font-bold text-slate-100 leading-tight">
             {formatCurrencyWithSymbol(personalTotal / 100, userCurrency)}
           </div>
           <p className="text-xs text-slate-400 mt-1">
@@ -132,13 +132,13 @@ export function BalanceOverview() {
         </KanbanCardContent>
       </KanbanCard>
 
-      <KanbanCard>
+      <KanbanCard className="shrink-0 snap-start w-[84vw] sm:w-[68vw] md:w-auto">
         <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <KanbanCardTitle className="text-sm font-medium text-slate-400">Group Expenses</KanbanCardTitle>
-          <Users className="h-5 w-5 sm:h-4 sm:w-4 text-slate-400" />
+          <KanbanCardTitle className="text-xs sm:text-sm font-medium text-slate-400">Group Expenses</KanbanCardTitle>
+          <Users className="hidden sm:block h-4 w-4 text-slate-400" />
         </KanbanCardHeader>
         <KanbanCardContent>
-          <div className="text-2xl font-bold text-slate-100">
+          <div className="text-lg sm:text-2xl font-bold text-slate-100 leading-tight">
             {formatCurrencyWithSymbol(groupTotal / 100, userCurrency)}
           </div>
           <p className="text-xs text-slate-400 mt-1">
@@ -147,13 +147,13 @@ export function BalanceOverview() {
         </KanbanCardContent>
       </KanbanCard>
 
-      <KanbanCard>
+      <KanbanCard className="shrink-0 snap-start w-[84vw] sm:w-[68vw] md:w-auto">
         <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <KanbanCardTitle className="text-sm font-medium text-slate-400">Total Expenses</KanbanCardTitle>
-          <PiggyBank className="h-5 w-5 sm:h-4 sm:w-4 text-slate-400" />
+          <KanbanCardTitle className="text-xs sm:text-sm font-medium text-slate-400">Total Expenses</KanbanCardTitle>
+          <PiggyBank className="hidden sm:block h-4 w-4 text-slate-400" />
         </KanbanCardHeader>
         <KanbanCardContent>
-          <div className="text-2xl font-bold text-slate-100">
+          <div className="text-lg sm:text-2xl font-bold text-slate-100 leading-tight">
             {formatCurrencyWithSymbol((personalTotal + groupTotal) / 100, userCurrency)}
           </div>
           <p className="text-xs text-slate-400 mt-1">

@@ -128,7 +128,7 @@ export function Header({
   }
 
   return (
-    <header className="sticky top-0 z-40 h-auto bg-[var(--panel)]/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b border-white/5">
+    <header className="sticky top-0 z-40 h-auto -mx-3 sm:-mx-4 lg:-mx-6 bg-[var(--panel)]/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b border-white/5 pt-[env(safe-area-inset-top)]">
       <div className="flex items-center sm:items-center h-full px-3 sm:px-4 gap-2 sm:gap-3 py-1.5 sm:py-2">
         {/* Left Section - Mobile Menu & Title */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 sm:flex-none">
@@ -293,7 +293,7 @@ export function Header({
                 )}
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80">
+            <DropdownMenuContent align="end" className="w-80 max-w-[calc(100vw-1rem)]">
               <div className="p-3 border-b border-white/10">
                 <div className="flex items-center justify-between">
                   <h3 className="font-semibold text-white">Notifications</h3>
@@ -382,7 +382,7 @@ export function Header({
                 </div>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuContent align="end" className="w-56 max-w-[calc(100vw-1rem)]">
               <div className="p-3 border-b border-white/10">
                 <div className="flex items-center space-x-3">
                   <Avatar className="h-10 w-10">

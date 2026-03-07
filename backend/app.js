@@ -51,7 +51,7 @@ const io = new Server(server, {
 
 // Connect to MongoDB
 connectDB()
-ensureCacheConnection().catch(() => {})
+ensureCacheConnection().catch(() => { })
 
 // Security middleware
 app.use(helmet())
@@ -70,14 +70,14 @@ const apiLimiter = rateLimit({
   message: { message: "Too many requests from this IP, please try again later." },
 })
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: Number(process.env.AUTH_RATE_LIMIT_MAX || 30),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: "Too many authentication attempts, please try again later." },
-  skip: (req) => req.path === "/oauth" || req.path.includes("callback"),
-})
+// const authLimiter = rateLimit({
+//   windowMs: 15 * 60 * 1000,
+//   max: Number(process.env.AUTH_RATE_LIMIT_MAX || 30),
+//   standardHeaders: true,
+//   legacyHeaders: false,
+//   message: { message: "Too many authentication attempts, please try again later." },
+//   skip: (req) => req.path === "/oauth" || req.path.includes("callback"),
+// })
 
 const writeLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -105,7 +105,7 @@ const messageLimiter = rateLimit({
   message: { message: "Too many messages sent. Please wait a moment." },
 })
 
-app.use("/api/auth", authLimiter)
+// app.use("/api/auth", authLimiter)
 app.use("/api", apiLimiter)
 app.use("/api", writeLimiter)
 app.use("/api/receipts", uploadLimiter)

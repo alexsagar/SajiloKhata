@@ -20,7 +20,8 @@ import {
   UserPlus,
   Plus,
   RefreshCw,
-  Loader2
+  Loader2,
+  ChevronLeft
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
@@ -66,6 +67,7 @@ const processedMessageIds = new Set<string>()
 
 // Track messages currently being added to prevent React Strict Mode double-invocation from creating duplicates
 const messagesBeingAdded = new Set<string>()
+const MONGO_OBJECT_ID_REGEX = /^[a-f\d]{24}$/i
 
 export function DirectMessages() {
   const [conversations, setConversations] = useState<Conversation[]>(mockConversations)
@@ -77,6 +79,7 @@ export function DirectMessages() {
   const [typingUsers, setTypingUsers] = useState<Record<string, string[]>>({})
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState<Record<string, boolean>>({})
+  const [isMobile, setIsMobile] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -87,6 +90,13 @@ export function DirectMessages() {
     return () => {
       // Cleanup
     }
+  }, [])
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 1024)
+    check()
+    window.addEventListener("resize", check)
+    return () => window.removeEventListener("resize", check)
   }, [])
 
   // Deduplicate messages in conversations on mount
@@ -101,6 +111,7 @@ export function DirectMessages() {
   const { user } = useAuth()
   const searchParams = useSearchParams()
   const { socket, isConnected, onlineUsers, joinConversations } = useSocket()
+  const isServerConversationId = useCallback((id: string) => MONGO_OBJECT_ID_REGEX.test(String(id || "")), [])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -278,10 +289,6 @@ export function DirectMessages() {
       const senderId = String(msg.sender || '')
       const isFromCurrentUser = !!(currentUserId && senderId === currentUserId)
 
-      // Sender already has the message via optimistic insert + HTTP reconciliation.
-      // Ignore socket echo entirely to prevent duplicates.
-      if (isFromCurrentUser) return
-
       const newMsg: DirectMessage = {
         id: String(msg._id || Date.now()),
         senderId: senderId,
@@ -289,6 +296,7 @@ export function DirectMessages() {
         content: msg.text || '',
         timestamp: new Date(msg.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         isCurrentUser: isFromCurrentUser,
+        _status: 'sent',
       }
 
       setConversations((prev) => {
@@ -328,9 +336,20 @@ export function DirectMessages() {
         setTimeout(() => messagesBeingAdded.delete(msgId), 100) // Cleanup after React finishes
 
         const updated = [...prev]
+        const pendingIndex = existing.messages.findIndex(
+          (m) =>
+            m.isCurrentUser &&
+            m._status === 'sending' &&
+            m.content === newMsg.content
+        )
+        const nextMessages =
+          pendingIndex >= 0
+            ? existing.messages.map((m, idx) => (idx === pendingIndex ? newMsg : m))
+            : [...existing.messages, newMsg]
+
         updated[existingIndex] = {
           ...existing,
-          messages: [...existing.messages, newMsg],
+          messages: nextMessages,
           lastMessage: newMsg
         }
 
@@ -341,7 +360,17 @@ export function DirectMessages() {
       setSelectedConversation((prev) => {
         if (prev && String(prev.id) === convId) {
           if (prev.messages.some(m => String(m.id) === String(newMsg.id))) return prev
-          return { ...prev, messages: [...prev.messages, newMsg], lastMessage: newMsg }
+          const pendingIndex = prev.messages.findIndex(
+            (m) =>
+              m.isCurrentUser &&
+              m._status === 'sending' &&
+              m.content === newMsg.content
+          )
+          const nextMessages =
+            pendingIndex >= 0
+              ? prev.messages.map((m, idx) => (idx === pendingIndex ? newMsg : m))
+              : [...prev.messages, newMsg]
+          return { ...prev, messages: nextMessages, lastMessage: newMsg }
         }
         return prev
       })
@@ -437,7 +466,34 @@ export function DirectMessages() {
   const handleSendMessage = async () => {
     if (!message.trim() || !selectedConversation) return
 
-    const convId = selectedConversation.id
+    const selectedConvId = String(selectedConversation.id)
+    let convId = selectedConvId
+    const friendId = String(selectedConversation.friend?.id || "")
+    if (!isServerConversationId(convId) && friendId) {
+      try {
+        const upsert = await conversationAPI.upsertDM(friendId)
+        const ensuredId = String(upsert.data?.data?._id || upsert.data?.data?.id || "")
+        if (!ensuredId) {
+          throw new Error("Unable to create conversation")
+        }
+        convId = ensuredId
+        joinConversations([convId])
+        setConversations((prev) =>
+          prev.map((c) => (String(c.id) === selectedConvId ? { ...c, id: convId } : c))
+        )
+        setSelectedConversation((prev) =>
+          prev && String(prev.id) === selectedConvId ? { ...prev, id: convId } : prev
+        )
+      } catch (e: any) {
+        toast({
+          title: "Failed to open chat",
+          description: e?.response?.data?.message || e?.message || "",
+          variant: "destructive",
+        })
+        return
+      }
+    }
+
     const text = message.trim()
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
@@ -520,7 +576,34 @@ export function DirectMessages() {
   // Retry a failed message
   const handleRetryMessage = async (failedMsg: DirectMessage) => {
     if (!selectedConversation) return
-    const convId = selectedConversation.id
+    const selectedConvId = String(selectedConversation.id)
+    let convId = selectedConvId
+    const friendId = String(selectedConversation.friend?.id || "")
+    if (!isServerConversationId(convId) && friendId) {
+      try {
+        const upsert = await conversationAPI.upsertDM(friendId)
+        const ensuredId = String(upsert.data?.data?._id || upsert.data?.data?.id || "")
+        if (!ensuredId) {
+          throw new Error("Unable to create conversation")
+        }
+        convId = ensuredId
+        joinConversations([convId])
+        setConversations((prev) =>
+          prev.map((c) => (String(c.id) === selectedConvId ? { ...c, id: convId } : c))
+        )
+        setSelectedConversation((prev) =>
+          prev && String(prev.id) === selectedConvId ? { ...prev, id: convId } : prev
+        )
+      } catch (e: any) {
+        toast({
+          title: 'Retry failed',
+          description: e?.response?.data?.message || e?.message || '',
+          variant: 'destructive',
+        })
+        return
+      }
+    }
+
     const tempId = failedMsg.id
 
     // Mark as sending again
@@ -601,7 +684,7 @@ export function DirectMessages() {
   const loadOlderMessages = async () => {
     if (!selectedConversation || loadingMore) return
     const convId = selectedConversation.id
-    if (convId.startsWith('local-') || hasMore[convId] === false) return
+    if (!isServerConversationId(String(convId)) || hasMore[convId] === false) return
     const msgs = selectedConversation.messages
     if (msgs.length === 0) return
 
@@ -663,7 +746,7 @@ export function DirectMessages() {
 
   const startNewConversation = (friend: Friend) => {
     const newConversation: Conversation = {
-      id: Date.now().toString(),
+      id: `local-${friend.id}`,
       friend,
       unreadCount: 0,
       messages: []
@@ -684,7 +767,7 @@ export function DirectMessages() {
       conv.id === conversationId ? { ...conv, unreadCount: 0 } : conv
     ))
     // Fire API call (non-blocking)
-    if (!conversationId.startsWith('local-')) {
+    if (isServerConversationId(conversationId)) {
       conversationAPI.markAsRead(conversationId).catch(err => {
         console.error('[Chat] markAsRead error:', err?.message)
       })
@@ -693,7 +776,7 @@ export function DirectMessages() {
 
   // Load messages when a conversation is selected
   useEffect(() => {
-    if (!selectedConversation || selectedConversation.id.startsWith('local-')) return
+    if (!selectedConversation || !isServerConversationId(String(selectedConversation.id))) return
 
     const loadMessages = async () => {
       try {
@@ -730,12 +813,14 @@ export function DirectMessages() {
     }
 
     loadMessages()
-  }, [selectedConversation?.id, user])
+  }, [selectedConversation?.id, user, isServerConversationId])
+
+  const showConversationList = !isMobile || !selectedConversation
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 h-full">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 h-full min-h-[520px]">
       {/* Conversations List */}
-      <div className="lg:col-span-1">
+      <div className={cn("lg:col-span-1", showConversationList ? "block" : "hidden lg:block")}>
         <KanbanCard className="h-full">
           <KanbanCardHeader className="pb-3">
             <div className="flex items-center justify-between mb-3">
@@ -761,7 +846,7 @@ export function DirectMessages() {
             </div>
           </KanbanCardHeader>
           <KanbanCardContent className="p-0">
-            <ScrollArea className="h-[calc(100vh-24rem)]">
+            <ScrollArea className="h-[55dvh] lg:h-[calc(100vh-24rem)]">
               <div className="space-y-1 p-2">
                 {filteredConversations.length > 0 ? (
                   filteredConversations.map((conversation) => (
@@ -807,13 +892,6 @@ export function DirectMessages() {
                             </Badge>
                           )}
                         </div>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1">
-                          <span className={cn(
-                            "h-1.5 w-1.5 rounded-full",
-                            conversation.friend.isOnline ? "bg-green-500" : "bg-gray-400"
-                          )} />
-                          {conversation.friend.isOnline ? "Online" : "Offline"}
-                        </p>
                       </div>
                     </div>
                   ))
@@ -848,7 +926,7 @@ export function DirectMessages() {
       </div>
 
       {/* Chat Area */}
-      <div className="lg:col-span-2 flex flex-col">
+      <div className={cn("lg:col-span-2 flex flex-col", showConversationList ? "hidden lg:flex" : "flex")}>
         <KanbanCard className="flex-1 flex flex-col">
           {selectedConversation ? (
             <>
@@ -856,6 +934,16 @@ export function DirectMessages() {
               <KanbanCardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
+                    {isMobile && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        onClick={() => setSelectedConversation(null)}
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                    )}
                     <div className="relative">
                       <Avatar className="h-10 w-10">
                         <AvatarImage src={selectedConversation.friend.avatar} />
@@ -871,7 +959,7 @@ export function DirectMessages() {
                     <div>
                       <h3 className="font-semibold text-sm">{selectedConversation.friend.name}</h3>
                       <p className="text-xs text-muted-foreground">
-                        {selectedConversation.friend.isOnline ? "Online" : selectedConversation.friend.lastSeen || "Offline"}
+                        {selectedConversation.friend.lastSeen || "Direct message"}
                       </p>
                     </div>
                   </div>
@@ -893,7 +981,7 @@ export function DirectMessages() {
 
               {/* Messages Area */}
               <KanbanCardContent className="flex-1 p-0">
-                <ScrollArea ref={scrollAreaRef} className="h-[calc(100vh-26rem)] p-3 bg-gradient-to-b from-transparent via-muted/10 to-transparent"
+                <ScrollArea ref={scrollAreaRef} className="h-[58dvh] lg:h-[calc(100vh-26rem)] p-3 bg-gradient-to-b from-transparent via-muted/10 to-transparent"
                   onScrollCapture={(e: any) => {
                     const el = e.target as HTMLElement
                     if (el.scrollTop < 60 && !loadingMore) {
@@ -953,9 +1041,9 @@ export function DirectMessages() {
                                     ? msg._status === 'error'
                                       ? "bg-destructive/80 text-destructive-foreground rounded-br-md"
                                       : msg._status === 'sending'
-                                        ? "bg-primary/60 text-primary-foreground rounded-br-md"
-                                        : "bg-primary text-primary-foreground rounded-br-md"
-                                    : "bg-muted rounded-bl-md"
+                                        ? "bg-emerald-600/55 text-emerald-50 rounded-br-md"
+                                        : "bg-emerald-600 text-emerald-50 rounded-br-md"
+                                    : "bg-blue-900/75 text-blue-50 rounded-bl-md"
                                 )}
                               >
                                 {msg.content}
@@ -1085,13 +1173,7 @@ export function DirectMessages() {
                     <div className="flex-1">
                       <p className="font-medium text-xs">{friend.name}</p>
                       <p className="text-xs text-muted-foreground">{friend.email}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {friend.isOnline ? (
-                          <span className="text-green-600">Online</span>
-                        ) : (
-                          `Last seen ${friend.lastSeen}`
-                        )}
-                      </p>
+                      <p className="text-xs text-muted-foreground">{friend.email}</p>
                     </div>
                   </div>
                 ))}

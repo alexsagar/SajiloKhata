@@ -8,7 +8,7 @@ export default function ChatPage() {
         title="Chat"
         description="Communicate with your group members"
       />
-      <div className="flex flex-1 flex-col p-4">
+      <div className="flex flex-1 flex-col py-2 sm:py-4">
         <ChatInterface />
       </div>
     </>
