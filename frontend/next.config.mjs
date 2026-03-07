@@ -2,22 +2,19 @@ import nextPWA from 'next-pwa';
 import bundleAnalyzer from '@next/bundle-analyzer';
 
 const isTurbopack = process.env.TURBOPACK === '1';
+const allowUnsafeBuild = process.env.ALLOW_UNSAFE_BUILD_ERRORS === 'true'
 
 /** @type {import('next').NextConfig} */
 const withAnalyzer = bundleAnalyzer({ enabled: process.env.ANALYZE === 'true' })
 
 const nextConfig = {
   eslint: {
-    // Warning: This allows production builds to successfully complete even if
-    // your project has ESLint errors.
-    ignoreDuringBuilds: true,
+    // Keep production safe; allow override only for local emergency builds.
+    ignoreDuringBuilds: allowUnsafeBuild,
   },
   typescript: {
-    // !! WARN !!
-    // Dangerously allow production builds to successfully complete even if
-    // your project has type errors.
-    // !! WARN !!
-    ignoreBuildErrors: true,
+    // Keep production safe; allow override only for local emergency builds.
+    ignoreBuildErrors: allowUnsafeBuild,
   },
   images: {
     remotePatterns: [

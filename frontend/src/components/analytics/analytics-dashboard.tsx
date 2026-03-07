@@ -3,8 +3,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import dynamic from "next/dynamic"
 import { useQuery } from "@tanstack/react-query"
-import { analyticsAPI, expenseAPI, serializeAnalyticsFilters } from "@/lib/api"
-import { useAuth } from "@/contexts/auth-context"
+import { analyticsAPI } from "@/lib/api"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -59,6 +58,18 @@ interface AnalyticsFilters {
   paidBy?: string[]
 }
 
+interface AnalyticsKpiPayload {
+  totalSpendBaseCents?: number | { personal?: number; group?: number }
+  personalSpendBaseCents?: number
+  groupSpendBaseCents?: number
+  netBalanceBaseCents?: number
+  expensesCount?: { personal?: number; group?: number }
+  avgExpenseSizeBaseCents?: number
+  activeGroups?: number
+  activeMembers?: number
+  avgSettlementDays?: number
+}
+
 // Default filters
 const defaultFilters: AnalyticsFilters = {
   mode: 'all',
@@ -73,7 +84,6 @@ const defaultFilters: AnalyticsFilters = {
 
 export function AnalyticsDashboard() {
   const { currency: userCurrency } = useCurrency()
-  const { user } = useAuth()
   const [filters, setFilters] = useState<AnalyticsFilters>(defaultFilters)
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -114,17 +124,18 @@ export function AnalyticsDashboard() {
 
   // Build effective filters for API: when ALL_TIME, omit time to fetch across all expenses
   const effectiveFilters = useMemo(() => {
-    const f: any = { ...filters, baseCurrency: userCurrency }
-    if (f.time?.range === 'ALL_TIME') {
-      delete f.time?.from
-      delete f.time?.to
+    const f: Record<string, unknown> = { ...filters, baseCurrency: userCurrency }
+    const time = f.time as { range?: string; from?: string; to?: string } | undefined
+    if (time?.range === 'ALL_TIME') {
+      delete time.from
+      delete time.to
       delete f.time
     }
     return f
   }, [filters, userCurrency])
 
   // Fetch KPIs data
-  const { data: kpisData, isLoading: kpisLoading, isError: kpisError } = useQuery({
+  const { data: kpisData, isError: kpisError } = useQuery({
     queryKey: ['analytics-kpis', effectiveFilters],
     queryFn: () => analyticsAPI.getKPIs(effectiveFilters),
     staleTime: 5 * 60 * 1000,
@@ -171,120 +182,113 @@ export function AnalyticsDashboard() {
     retry: 1,
   })
 
-  // Fallback: fetch raw expenses to compute analytics when API returns empty/zeros
-  const { data: expensesRaw } = useQuery({
-    queryKey: ['analytics-fallback-expenses'],
-    queryFn: () => expenseAPI.getExpenses(),
-    staleTime: 60 * 1000,
-  })
+  // Unwrap axios + API envelope: axiosResponse.data.data
+  const unwrapApiData = (response: unknown) => {
+    if (!response || typeof response !== "object") return undefined
+    const axiosData = (response as { data?: unknown }).data
+    if (!axiosData || typeof axiosData !== "object") return undefined
+    return (axiosData as { data?: unknown }).data
+  }
 
-  const fallback = useMemo(() => {
-    const payload = (expensesRaw?.data && (expensesRaw.data as any).data) ? (expensesRaw.data as any).data : (expensesRaw as any)?.data
-    const list: any[] = Array.isArray(payload?.expenses) ? payload.expenses : []
-    const toDate = (d: any) => new Date(d || Date.now()).toISOString().split('T')[0]
-    let totalCents = 0
-    let totalPersonalCents = 0
-    let totalGroupCents = 0
-    const counts = { personal: 0, group: 0 }
-    const byDate: Record<string, { personal: number; group: number }> = {}
-    const byCategory: Record<string, { totalCents: number; count: number; personal: number; group: number }> = {}
-    const currentUserId = (user as any)?.id || (user as any)?._id
-    let netBalanceBaseCents = 0
-    const settledDays: number[] = []
-    list.forEach((e) => {
-      const cents = e?.amountCents ?? Math.round((e?.amount || 0) * 100)
-      totalCents += cents
-      const isGroup = !!e?.groupId
-      if (isGroup) counts.group += 1; else counts.personal += 1
-      if (isGroup) totalGroupCents += cents; else totalPersonalCents += cents
-      const day = toDate(e?.date)
-      byDate[day] ||= { personal: 0, group: 0 }
-      if (isGroup) byDate[day].group += cents; else byDate[day].personal += cents
-      const cat = (e?.category || 'other') as string
-      byCategory[cat] ||= { totalCents: 0, count: 0, personal: 0, group: 0 }
-      byCategory[cat].totalCents += cents
-      byCategory[cat].count += 1
-      if (isGroup) byCategory[cat].group += cents; else byCategory[cat].personal += cents
-
-      // Net balance estimation from splits
-      if (currentUserId && Array.isArray(e?.splits)) {
-        const payerId = e?.paidBy?._id || e?.paidBy?.id || e?.paidBy
-        for (const s of e.splits) {
-          const sid = s?.user?._id || s?.user?.id || s?.user
-          const shareCents = (s?.amountCents != null) ? s.amountCents : Math.round(((s?.amount ?? 0) as number) * 100)
-          if (!Number.isFinite(shareCents)) continue
-          if (payerId === currentUserId && sid !== currentUserId) {
-            netBalanceBaseCents += shareCents
-          } else if (sid === currentUserId && payerId !== currentUserId) {
-            netBalanceBaseCents -= shareCents
-          }
-        }
-      }
-
-      // Avg settlement days (if available)
-      if (e?.status === 'settled' && e?.settledAt && e?.date) {
-        const days = Math.floor((new Date(e.settledAt as any).getTime() - new Date(e.date as any).getTime()) / (1000 * 60 * 60 * 24))
-        if (Number.isFinite(days)) settledDays.push(days)
-      }
-    })
-    const spendOverTime = Object.keys(byDate).sort().map((date) => ({
-      date,
-      personal: { baseCents: byDate[date].personal, amountCents: byDate[date].personal, count: 0 },
-      group: { baseCents: byDate[date].group, amountCents: byDate[date].group, count: 0 },
-    }))
-    const categories = Object.entries(byCategory).map(([k, v]) => ({
-      _id: k,
-      totalCents: v.totalCents,
-      totalBaseCents: v.totalCents,
-      count: v.count,
-      personal: v.personal,
-      group: v.group,
-    }))
-    const avgSettlementDays = settledDays.length ? Math.round(settledDays.reduce((a, b) => a + b, 0) / settledDays.length) : 0
-    return { totalCents, counts, spendOverTime, categories, totalPersonalCents, totalGroupCents, netBalanceBaseCents, avgSettlementDays }
-  }, [expensesRaw?.data, user])
-
-  // Merge KPIs with fallback values when API returns empty/zero
-  const kpisApi = kpisData?.data || {}
+  // KPI payload from analytics API (no extra fallback query)
   const kpis = useMemo(() => {
-    const apiTotal = (kpisApi?.totalSpendBaseCents ?? 0)
-    const totalSpendBaseCents = apiTotal || fallback.totalCents || 0
-    const expensesCount = kpisApi?.expensesCount || fallback.counts
-    const netBalanceBaseCents = (kpisApi?.netBalanceBaseCents ?? null) !== null ? kpisApi.netBalanceBaseCents : (fallback.netBalanceBaseCents || 0)
-    const totalSpendSplit = kpisApi?.totalSpendBaseCents && typeof kpisApi.totalSpendBaseCents === 'object'
-      ? kpisApi.totalSpendBaseCents
-      : { personal: fallback.totalPersonalCents || 0, group: fallback.totalGroupCents || 0 }
-    const avgSettlementDays = (kpisApi?.avgSettlementDays ?? null) !== null ? kpisApi.avgSettlementDays : (fallback.avgSettlementDays || 0)
-    return { ...kpisApi, totalSpendBaseCents, expensesCount, netBalanceBaseCents, totalSpendBaseCentsSplit: totalSpendSplit, avgSettlementDays }
-  }, [kpisApi, fallback])
+    const kpisApi = (unwrapApiData(kpisData) as AnalyticsKpiPayload | undefined) || {}
+    return {
+      totalSpendBaseCents: typeof kpisApi?.totalSpendBaseCents === "number" ? kpisApi.totalSpendBaseCents : 0,
+      netBalanceBaseCents: kpisApi?.netBalanceBaseCents || 0,
+      expensesCount: kpisApi?.expensesCount || { personal: 0, group: 0 },
+      avgExpenseSizeBaseCents: kpisApi?.avgExpenseSizeBaseCents || 0,
+      activeGroups: kpisApi?.activeGroups || 0,
+      activeMembers: kpisApi?.activeMembers || 0,
+      avgSettlementDays: kpisApi?.avgSettlementDays || 0,
+    }
+  }, [kpisData])
   const baseCurrency = userCurrency
 
 
 
   // Ensure data is properly structured for chart components (memoized)
   const safeSpendOverTimeData = useMemo(() => {
-    const api = Array.isArray(spendOverTimeData?.data) ? spendOverTimeData.data : []
-    return api.length > 0 ? api : (fallback.spendOverTime || [])
-  }, [spendOverTimeData?.data, fallback])
+    const api = (unwrapApiData(spendOverTimeData) as { data?: unknown } | undefined)?.data
+    const rows = Array.isArray(api) ? api : []
+    return rows
+  }, [spendOverTimeData])
   const safeCategoryData = useMemo(() => {
-    const api = Array.isArray(categoryData?.data) ? categoryData.data : []
-    return api.length > 0 ? api : (fallback.categories || [])
-  }, [categoryData?.data, fallback])
+    const api = (unwrapApiData(categoryData) as { data?: unknown } | undefined)?.data
+    const rows = Array.isArray(api) ? api : []
+    return rows
+  }, [categoryData])
   const safePartnersData = useMemo(
-    () => ({
-      topUsers: Array.isArray(partnersData?.data?.topUsers) ? partnersData.data.topUsers : [],
-      topGroups: Array.isArray(partnersData?.data?.topGroups) ? partnersData.data.topGroups : []
-    }),
-    [partnersData?.data]
+    () => {
+      const api = (unwrapApiData(partnersData) as { topUsers?: unknown; topGroups?: unknown } | undefined) || {}
+      return {
+        topUsers: Array.isArray(api.topUsers) ? api.topUsers : [],
+        topGroups: Array.isArray(api.topGroups) ? api.topGroups : []
+      }
+    },
+    [partnersData]
   )
-  const safeAgingData = useMemo(
-    () => (agingData?.data && typeof agingData.data === 'object' ? agingData.data : {}),
-    [agingData?.data]
+  const safeAgingData = useMemo<Record<string, { count?: number; amountCents?: number }>>(
+    () => {
+      const api = (unwrapApiData(agingData) as { data?: unknown } | undefined)?.data
+      if (!api || typeof api !== 'object') {
+        return {
+          '0-7': { count: 0, amountCents: 0 },
+          '8-30': { count: 0, amountCents: 0 },
+          '31-60': { count: 0, amountCents: 0 },
+          '60+': { count: 0, amountCents: 0 },
+        }
+      }
+
+      const buckets = api as Record<string, { count?: number; amountCents?: number }>
+
+      // Support both legacy and current bucket keys.
+      return {
+        '0-7': buckets['0-7'] || buckets['0-30'] || { count: 0, amountCents: 0 },
+        '8-30': buckets['8-30'] || { count: 0, amountCents: 0 },
+        '31-60': buckets['31-60'] || { count: 0, amountCents: 0 },
+        '60+': buckets['60+'] || buckets['61-90'] || buckets['90+'] || { count: 0, amountCents: 0 },
+      }
+    },
+    [agingData]
   )
   const safeLedgerData = useMemo(
-    () => (Array.isArray(ledgerData?.data) ? ledgerData.data : []),
-    [ledgerData?.data]
+    () => {
+      const api = (unwrapApiData(ledgerData) as { data?: unknown } | undefined)?.data
+      return Array.isArray(api) ? api : []
+    },
+    [ledgerData]
   )
+
+  const spendSplit = useMemo(() => {
+    const kpisApi = (unwrapApiData(kpisData) as AnalyticsKpiPayload | undefined) || {}
+    if (
+      typeof kpisApi.personalSpendBaseCents === "number" ||
+      typeof kpisApi.groupSpendBaseCents === "number"
+    ) {
+      return {
+        personal: Number(kpisApi.personalSpendBaseCents || 0),
+        group: Number(kpisApi.groupSpendBaseCents || 0),
+      }
+    }
+    if (kpisApi.totalSpendBaseCents && typeof kpisApi.totalSpendBaseCents === "object") {
+      return {
+        personal: Number(kpisApi.totalSpendBaseCents.personal || 0),
+        group: Number(kpisApi.totalSpendBaseCents.group || 0),
+      }
+    }
+
+    const personal = safeSpendOverTimeData.reduce(
+      (sum, row) => sum + Number(row?.personal?.baseCents || 0),
+      0,
+    )
+    const group = safeSpendOverTimeData.reduce(
+      (sum, row) => sum + Number(row?.group?.baseCents || 0),
+      0,
+    )
+
+    return { personal, group }
+  }, [kpisData, safeSpendOverTimeData])
 
   // Handle filter changes with debounce to reduce refetches
   const filterTimer = useRef<NodeJS.Timeout | null>(null)
@@ -305,14 +309,10 @@ export function AnalyticsDashboard() {
   const dataStatus = useMemo(() => {
     const errors = [kpisError, spendError, catError, partnersError, agingError, ledgerError]
     const errorCount = errors.filter(Boolean).length
-    const useFallback = (
-      (!kpisData?.data && fallback.totalCents > 0) ||
-      (!Array.isArray(spendOverTimeData?.data) && fallback.spendOverTime.length > 0)
-    )
     if (errorCount === errors.length) return 'error' as const
-    if (errorCount > 0 || useFallback) return 'partial' as const
+    if (errorCount > 0) return 'partial' as const
     return 'live' as const
-  }, [kpisError, spendError, catError, partnersError, agingError, ledgerError, kpisData, spendOverTimeData, fallback])
+  }, [kpisError, spendError, catError, partnersError, agingError, ledgerError])
 
   const DataStatusBadge = () => {
     if (dataStatus === 'live') {
@@ -323,22 +323,6 @@ export function AnalyticsDashboard() {
     }
     return <Badge variant="outline" className="text-red-500 border-red-500/30 text-[10px]"><AlertCircle className="h-3 w-3 mr-1" />Error</Badge>
   }
-
-
-
-  if (kpisLoading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <ComponentLoading
-          text="Loading Analytics"
-          subtitle="Please wait while we load your financial insights..."
-        />
-      </div>
-    )
-  }
-
-
-
   return (
     <div className="space-y-4 md:space-y-6 max-w-full overflow-hidden">
       {/* Filter Bar */}
@@ -546,7 +530,7 @@ export function AnalyticsDashboard() {
           </CardHeader>
           <CardContent className="p-3 pt-0">
             <div className="text-xl md:text-2xl font-bold text-blue-400">
-              {formatCurrency(((kpis.totalSpendBaseCentsSplit?.personal) || (kpis.totalSpendBaseCents?.personal) || 0) / 100, baseCurrency)}
+              {formatCurrency((spendSplit.personal || 0) / 100, baseCurrency)}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
               {kpis.expensesCount?.personal || 0} individual expense{(kpis.expensesCount?.personal || 0) !== 1 ? 's' : ''}
@@ -561,7 +545,7 @@ export function AnalyticsDashboard() {
           </CardHeader>
           <CardContent className="p-3 pt-0">
             <div className="text-xl md:text-2xl font-bold text-green-400">
-              {formatCurrency(((kpis.totalSpendBaseCentsSplit?.group) || (kpis.totalSpendBaseCents?.group) || 0) / 100, baseCurrency)}
+              {formatCurrency((spendSplit.group || 0) / 100, baseCurrency)}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
               {kpis.expensesCount?.group || 0} shared expense{(kpis.expensesCount?.group || 0) !== 1 ? 's' : ''}
@@ -701,7 +685,7 @@ export function AnalyticsDashboard() {
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-muted-foreground">Total Spent:</span>
                         <span className="font-semibold text-blue-400">
-                          {formatCurrency((kpis.totalSpendBaseCents?.personal || 0) / 100, baseCurrency)}
+                          {formatCurrency((spendSplit.personal || 0) / 100, baseCurrency)}
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
@@ -714,7 +698,7 @@ export function AnalyticsDashboard() {
                         <span className="text-sm text-muted-foreground">Average:</span>
                         <span className="font-semibold text-white">
                           {kpis.expensesCount?.personal ?
-                            formatCurrency(((kpis.totalSpendBaseCents?.personal || 0) / (kpis.expensesCount?.personal || 1)) / 100, baseCurrency)
+                            formatCurrency(((spendSplit.personal || 0) / (kpis.expensesCount?.personal || 1)) / 100, baseCurrency)
                             : formatCurrency(0, baseCurrency)}
                         </span>
                       </div>
@@ -731,7 +715,7 @@ export function AnalyticsDashboard() {
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-muted-foreground">Total Spent:</span>
                         <span className="font-semibold text-green-400">
-                          {formatCurrency((kpis.totalSpendBaseCents?.group || 0) / 100, baseCurrency)}
+                          {formatCurrency((spendSplit.group || 0) / 100, baseCurrency)}
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
@@ -744,7 +728,7 @@ export function AnalyticsDashboard() {
                         <span className="text-sm text-muted-foreground">Average:</span>
                         <span className="font-semibold text-white">
                           {kpis.expensesCount?.group ?
-                            formatCurrency(((kpis.totalSpendBaseCents?.group || 0) / (kpis.expensesCount?.group || 1)) / 100, baseCurrency)
+                            formatCurrency(((spendSplit.group || 0) / (kpis.expensesCount?.group || 1)) / 100, baseCurrency)
                             : formatCurrency(0, baseCurrency)}
                         </span>
                       </div>
@@ -753,7 +737,7 @@ export function AnalyticsDashboard() {
                 </div>
 
                 {/* Spending Distribution Chart */}
-                {((kpis.totalSpendBaseCents?.personal || 0) + (kpis.totalSpendBaseCents?.group || 0)) > 0 && (
+                {((spendSplit.personal || 0) + (spendSplit.group || 0)) > 0 && (
                   <div className="mt-6 pt-6 border-t border-white/10">
                     <h5 className="text-sm font-medium text-white mb-3">Spending Distribution</h5>
                     <div className="space-y-2">
@@ -763,7 +747,7 @@ export function AnalyticsDashboard() {
                           <span className="text-sm text-muted-foreground">Personal</span>
                         </div>
                         <span className="text-sm font-medium text-blue-400">
-                          {Math.round(((kpis.totalSpendBaseCents?.personal || 0) / ((kpis.totalSpendBaseCents?.personal || 0) + (kpis.totalSpendBaseCents?.group || 0))) * 100)}%
+                          {Math.round(((spendSplit.personal || 0) / ((spendSplit.personal || 0) + (spendSplit.group || 0))) * 100)}%
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
@@ -772,7 +756,7 @@ export function AnalyticsDashboard() {
                           <span className="text-sm text-muted-foreground">Group</span>
                         </div>
                         <span className="text-sm font-medium text-green-400">
-                          {Math.round(((kpis.totalSpendBaseCents?.group || 0) / ((kpis.totalSpendBaseCents?.personal || 0) + (kpis.totalSpendBaseCents?.group || 0))) * 100)}%
+                          {Math.round(((spendSplit.group || 0) / ((spendSplit.personal || 0) + (spendSplit.group || 0))) * 100)}%
                         </span>
                       </div>
                     </div>
@@ -914,6 +898,10 @@ export function AnalyticsDashboard() {
                         subtitle="Please wait while we load your monthly trends..."
                       />
                     </div>
+                  ) : spendError ? (
+                    <div className="min-h-[300px] flex items-center justify-center text-sm text-red-400">
+                      <AlertCircle className="h-4 w-4 mr-2" />Failed to load monthly trends.
+                    </div>
                   ) : (
                     <MonthlyTrendsChart data={safeSpendOverTimeData} baseCurrency={baseCurrency} />
                   )}
@@ -934,6 +922,10 @@ export function AnalyticsDashboard() {
                         text="Loading Category Trends"
                         subtitle="Please wait while we load your category trends..."
                       />
+                    </div>
+                  ) : catError ? (
+                    <div className="min-h-[300px] flex items-center justify-center text-sm text-red-400">
+                      <AlertCircle className="h-4 w-4 mr-2" />Failed to load category trends.
                     </div>
                   ) : (
                     <CategoryTrendsChart data={safeCategoryData} baseCurrency={baseCurrency} />
@@ -1062,13 +1054,16 @@ function TopGroupsList({ data, baseCurrency }: { data: Array<{ _id: string; name
 }
 
 function AgingBucketsChart({ data, baseCurrency }: { data: Record<string, { count?: number; amountCents?: number }>; baseCurrency: string }) {
-  const keys = ["0-30", "31-60", "61-90", "90+"]
+  const keys = ["0-7", "8-30", "31-60", "60+"]
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
       {keys.map((k) => (
         <div key={k} className="p-3 bg-[var(--card)] border border-gray-100/10 rounded-md text-center">
           <div className="text-xs text-muted-foreground">{k} days</div>
           <div className="text-sm font-semibold">{data?.[k]?.count || 0} items</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            {formatCurrency(((data?.[k]?.amountCents || 0) as number) / 100, baseCurrency)}
+          </div>
         </div>
       ))}
     </div>

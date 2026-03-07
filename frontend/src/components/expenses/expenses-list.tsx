@@ -4,7 +4,7 @@ import { KanbanCard, KanbanCardContent } from "@/components/ui/kanban-card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Receipt, Calendar, Users, MoreHorizontal, Edit, Trash2, CreditCard, Building2 } from "lucide-react"
+import { Receipt, Calendar, Users, MoreHorizontal, Edit, Trash2, CreditCard, Building2, CheckCircle2, Clock3 } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { expenseAPI } from "@/lib/api"
 import { LoadingSpinner } from "@/components/common/loading-spinner"
@@ -35,7 +35,7 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
 
   const { data: expenses, isLoading } = useQuery({
     queryKey: ["expenses", groupId, filters],
-    queryFn: () => expenseAPI.getExpenses(groupId),
+    queryFn: () => expenseAPI.getExpenses({ ...(filters || {}), ...(groupId ? { groupId } : {}) }),
   })
 
   const deleteExpenseMutation = useMutation({
@@ -44,7 +44,7 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
     },
     onSuccess: () => {
       toast({ title: "Expense deleted" })
-      queryClient.invalidateQueries({ queryKey: ["expenses", groupId] })
+      queryClient.invalidateQueries({ queryKey: ["expenses"] })
       if (groupId) {
         queryClient.invalidateQueries({ queryKey: ["group-balance", groupId] })
       }
@@ -62,9 +62,9 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
     deleteExpenseMutation.mutate(expenseId)
   }
 
-  
-  
-  
+
+
+
 
   if (isLoading) {
     return (
@@ -157,18 +157,17 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
       <div className="space-y-4">
         {expensesList.map((expense: any) => {
           const isPersonal = !expense.groupId
-          
+
           return (
             <KanbanCard key={expense._id} className="hover:-translate-y-0.5 hover:bg-white/[0.06] cursor-pointer">
               <KanbanCardContent className="p-6">
                 <div className="flex items-start justify-between">
                   <div className="flex items-start space-x-4 flex-1">
                     {/* Expense Type Indicator */}
-                    <div className={`p-2 rounded-full ${
-                      isPersonal 
-                        ? 'bg-blue-500/20 text-blue-400' 
-                        : 'bg-green-500/20 text-green-400'
-                    }`}>
+                    <div className={`p-2 rounded-full ${isPersonal
+                      ? 'bg-blue-500/20 text-blue-400'
+                      : 'bg-green-500/20 text-green-400'
+                      }`}>
                       {isPersonal ? (
                         <CreditCard className="h-5 w-5" />
                       ) : (
@@ -217,6 +216,71 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
                         Paid by {expense.paidBy?.firstName} {expense.paidBy?.lastName}
                       </p>
 
+                      {/* Personalized "you owe" / "owes you" context for group expenses */}
+                      {!isPersonal && (() => {
+                        const currentUserId = (user as any)?._id || user?.id
+                        const payerId = expense.paidBy?._id
+                        const mySplit = expense.splits?.find((s: any) => s.user?._id === currentUserId)
+                        const myShareCents = mySplit?.amountCents ?? (mySplit?.amount != null ? Math.round(mySplit.amount * 100) : 0)
+                        const iPaid = payerId === currentUserId
+                        const unsettledOtherSharesCents = (expense.splits || [])
+                          .filter((s: any) => !s?.settled && s?.user?._id !== currentUserId)
+                          .reduce((sum: number, s: any) => {
+                            const cents = s?.amountCents ?? (s?.amount != null ? Math.round(s.amount * 100) : 0)
+                            return sum + Math.max(0, cents)
+                          }, 0)
+
+                        if (iPaid && mySplit) {
+                          const othersOweMe = unsettledOtherSharesCents
+                          if (othersOweMe > 0) {
+                            return (
+                              <div className="mt-1 flex items-center gap-2">
+                                <p className="text-sm leading-5 font-medium text-green-500">
+                                  You are owed {formatCurrencyWithSymbol(othersOweMe / 100, userCurrency)}
+                                </p>
+                                <span className="inline-flex h-6 items-center gap-1 rounded-full bg-amber-500/15 text-amber-300 px-2 text-[11px] font-medium leading-none ring-1 ring-amber-500/30 shrink-0">
+                                  <Clock3 className="h-3 w-3" />
+                                  Pending
+                                </span>
+                              </div>
+                            )
+                          }
+                          return (
+                            <div className="mt-1 flex items-center gap-2">
+                              <p className="text-sm leading-5 font-medium text-emerald-400">Settled up</p>
+                              <span className="inline-flex h-6 items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-300 px-2 text-[11px] font-medium leading-none ring-1 ring-emerald-500/30 shrink-0">
+                                <CheckCircle2 className="h-3 w-3" />
+                                Settled
+                              </span>
+                            </div>
+                          )
+                        } else if (mySplit && !mySplit.settled && myShareCents > 0) {
+                          return (
+                            <div className="mt-1 flex items-center gap-2">
+                              <p className="text-sm leading-5 font-medium text-red-500">
+                                You owe {formatCurrencyWithSymbol(myShareCents / 100, userCurrency)} to {expense.paidBy?.firstName}
+                              </p>
+                              <span className="inline-flex h-6 items-center gap-1 rounded-full bg-rose-500/15 text-rose-300 px-2 text-[11px] font-medium leading-none ring-1 ring-rose-500/30 shrink-0">
+                                <Clock3 className="h-3 w-3" />
+                                Unpaid
+                              </span>
+                            </div>
+                          )
+                        }
+                        if (mySplit?.settled) {
+                          return (
+                            <div className="mt-1 flex items-center gap-2">
+                              <p className="text-sm leading-5 font-medium text-emerald-400">Your share is settled</p>
+                              <span className="inline-flex h-6 items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-300 px-2 text-[11px] font-medium leading-none ring-1 ring-emerald-500/30 shrink-0">
+                                <CheckCircle2 className="h-3 w-3" />
+                                Settled
+                              </span>
+                            </div>
+                          )
+                        }
+                        return null
+                      })()}
+
                       {expense.notes && (
                         <p className="text-sm text-muted-foreground mt-2 italic">
                           "{expense.notes}"
@@ -227,7 +291,7 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
                         <div className="text-xs text-muted-foreground mb-1">Split between:</div>
                         <div className="flex flex-wrap gap-2">
                           {expense.splits?.map((split: any) => (
-                            <div key={split.user._id} className="flex items-center gap-1 text-xs">
+                            <div key={split.user._id} className={`flex items-center gap-1 text-xs rounded-full px-2 py-1 ring-1 ${split.settled ? "bg-emerald-500/10 ring-emerald-500/30" : "bg-white/5 ring-white/10"}`}>
                               <Avatar className="h-5 w-5">
                                 <AvatarImage src={split.user.avatar || "/placeholder.svg"} />
                                 <AvatarFallback className="text-xs">
@@ -235,9 +299,9 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
                                 </AvatarFallback>
                               </Avatar>
                               <span>{split.user.firstName}</span>
-                              <span className="font-medium">{formatCurrencyWithSymbol(split.amount, userCurrency)}</span>
+                              <span className="font-medium">{formatCurrencyWithSymbol(((split.amountCents != null ? split.amountCents : (split.amount != null ? Math.round(split.amount * 100) : 0)) / 100), userCurrency)}</span>
                               {split.settled && (
-                                <Badge variant="secondary" className="text-xs">Settled</Badge>
+                                <span className="inline-flex h-5 items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-300 px-1.5 text-[10px] font-medium leading-none ring-1 ring-emerald-500/30 shrink-0"><CheckCircle2 className="h-3 w-3" />Settled</span>
                               )}
                             </div>
                           ))}
@@ -276,7 +340,7 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
                             <Link href={`/expenses/${expense._id}/receipt`}>View Receipt</Link>
                           </DropdownMenuItem>
                         )}
-                        <DropdownMenuItem 
+                        <DropdownMenuItem
                           className="text-destructive"
                           onClick={() => handleDelete(expense._id)}
                         >
@@ -303,3 +367,6 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
     </>
   )
 }
+
+
+

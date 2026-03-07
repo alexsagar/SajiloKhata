@@ -4,6 +4,7 @@
 
 - Node.js 18+ 
 - MongoDB 6+
+- Redis 6+ (recommended for queues + API cache)
 - SMTP server for email (or Mailgun/SendGrid)
 
 ---
@@ -19,6 +20,12 @@ NODE_ENV=production
 
 # MongoDB
 MONGODB_URI=mongodb://localhost:27017/sajilokhata
+
+# Redis (queues + API response cache)
+REDIS_URL=redis://127.0.0.1:6379
+REDIS_CACHE_ENABLED=true
+REDIS_CACHE_DEFAULT_TTL=120
+REDIS_CACHE_PREFIX=splitwise:cache
 
 # JWT
 JWT_SECRET=<generate-secure-random-string>

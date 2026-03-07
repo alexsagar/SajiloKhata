@@ -36,6 +36,24 @@ const settlementSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    paymentLink: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    paymentProvider: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    lastReminderAt: {
+      type: Date,
+      default: null,
+    },
+    reminderSnoozedUntil: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

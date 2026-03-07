@@ -1,15 +1,30 @@
 const express = require("express")
 const bcrypt = require("bcryptjs")
+const crypto = require("crypto")
 const { body, validationResult } = require("express-validator")
 const User = require("../models/User")
 const Group = require("../models/Group")
 const Expense = require("../models/Expense")
+const Settlement = require("../models/Settlement")
 const { requireRole } = require("../middleware/auth")
+const { getPagination, escapeRegex } = require("../utils/query")
+const { ok, fail } = require("../utils/http")
 const multer = require("multer")
 const path = require("path")
 const fs = require("fs")
+const { sendEmail } = require("../services/emailService")
 
 const router = express.Router()
+const EMAIL_OTP_LENGTH = 6
+const EMAIL_OTP_TTL_MS = 10 * 60 * 1000
+const EMAIL_OTP_RESEND_COOLDOWN_MS = 60 * 1000
+const EMAIL_OTP_MAX_RESENDS = 5
+
+function generateOtp() {
+  const max = Math.pow(10, EMAIL_OTP_LENGTH)
+  const n = crypto.randomInt(0, max)
+  return String(n).padStart(EMAIL_OTP_LENGTH, "0")
+}
 
 // Configure multer for avatar uploads
 const storage = multer.diskStorage({
@@ -144,6 +159,146 @@ router.put(
   },
 )
 
+router.post(
+  "/email-change/request",
+  [body("newEmail").isEmail().normalizeEmail(), body("password").optional().isString()],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req)
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() })
+      }
+
+      const newEmail = String(req.body.newEmail || "").toLowerCase().trim()
+      const password = String(req.body.password || "")
+      const user = await User.findById(req.user._id).select("+password")
+      if (!user) return res.status(404).json({ message: "User not found" })
+
+      if (newEmail === String(user.email || "").toLowerCase()) {
+        return res.status(400).json({ message: "New email must be different from current email" })
+      }
+
+      const existing = await User.findOne({ email: newEmail, _id: { $ne: user._id } }).select("_id")
+      if (existing) {
+        return res.status(400).json({ message: "Email already in use" })
+      }
+
+      // Require password verification only for password-based accounts
+      if (user.password) {
+        const isValid = await bcrypt.compare(password, user.password)
+        if (!isValid) return res.status(400).json({ message: "Current password is incorrect" })
+      }
+
+      const otp = generateOtp()
+      user.pendingEmail = newEmail
+      user.emailChangeOtpHash = await bcrypt.hash(otp, 12)
+      user.emailChangeOtpExpiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS)
+      user.emailChangeOtpSentAt = new Date()
+      user.emailChangeResendCount = 0
+      await user.save()
+
+      await sendEmail({
+        to: newEmail,
+        subject: "Verify your new SajiloKhata email",
+        html: `<!DOCTYPE html><html><body><p>Hi ${user.firstName},</p><p>Your email change verification code is:</p><h2 style="letter-spacing:2px;">${otp}</h2><p>This code expires in 10 minutes.</p></body></html>`,
+        text: `Hi ${user.firstName},\n\nYour email change verification code is: ${otp}\n\nThis code expires in 10 minutes.`,
+      })
+
+      return res.json({
+        message: "OTP sent to your new email address",
+        ...(process.env.NODE_ENV !== "production" ? { devOtp: otp } : {}),
+      })
+    } catch (error) {
+      return res.status(500).json({ message: "Server error" })
+    }
+  },
+)
+
+router.post("/email-change/resend", async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select("+emailChangeOtpHash +emailChangeOtpExpiresAt")
+    if (!user) return res.status(404).json({ message: "User not found" })
+    if (!user.pendingEmail) {
+      return res.status(400).json({ message: "No pending email change request found" })
+    }
+
+    const now = Date.now()
+    const sentAt = user.emailChangeOtpSentAt ? new Date(user.emailChangeOtpSentAt).getTime() : 0
+    if (sentAt && now - sentAt < EMAIL_OTP_RESEND_COOLDOWN_MS) {
+      return res.status(429).json({ message: "Please wait before requesting another OTP" })
+    }
+    if ((user.emailChangeResendCount || 0) >= EMAIL_OTP_MAX_RESENDS) {
+      return res.status(429).json({ message: "Too many OTP requests. Please try again later." })
+    }
+
+    const otp = generateOtp()
+    user.emailChangeOtpHash = await bcrypt.hash(otp, 12)
+    user.emailChangeOtpExpiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS)
+    user.emailChangeOtpSentAt = new Date()
+    user.emailChangeResendCount = (user.emailChangeResendCount || 0) + 1
+    await user.save()
+
+    await sendEmail({
+      to: user.pendingEmail,
+      subject: "Verify your new SajiloKhata email",
+      html: `<!DOCTYPE html><html><body><p>Hi ${user.firstName},</p><p>Your email change verification code is:</p><h2 style="letter-spacing:2px;">${otp}</h2><p>This code expires in 10 minutes.</p></body></html>`,
+      text: `Hi ${user.firstName},\n\nYour email change verification code is: ${otp}\n\nThis code expires in 10 minutes.`,
+    })
+
+    return res.json({
+      message: "OTP resent to your new email address",
+      ...(process.env.NODE_ENV !== "production" ? { devOtp: otp } : {}),
+    })
+  } catch (error) {
+    return res.status(500).json({ message: "Server error" })
+  }
+})
+
+router.post(
+  "/email-change/verify",
+  [body("otp").isLength({ min: EMAIL_OTP_LENGTH, max: EMAIL_OTP_LENGTH })],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req)
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() })
+      }
+
+      const otp = String(req.body.otp || "")
+      const user = await User.findById(req.user._id).select("+emailChangeOtpHash +emailChangeOtpExpiresAt")
+      if (!user) return res.status(404).json({ message: "User not found" })
+      if (!user.pendingEmail || !user.emailChangeOtpHash || !user.emailChangeOtpExpiresAt) {
+        return res.status(400).json({ message: "No pending email change request found" })
+      }
+      if (new Date(user.emailChangeOtpExpiresAt).getTime() < Date.now()) {
+        return res.status(400).json({ message: "OTP expired. Please request a new one." })
+      }
+
+      const isValidOtp = await bcrypt.compare(otp, user.emailChangeOtpHash)
+      if (!isValidOtp) {
+        return res.status(400).json({ message: "Invalid OTP" })
+      }
+
+      const existing = await User.findOne({ email: user.pendingEmail, _id: { $ne: user._id } }).select("_id")
+      if (existing) return res.status(400).json({ message: "Email already in use" })
+
+      user.email = String(user.pendingEmail).toLowerCase()
+      user.pendingEmail = null
+      user.emailChangeOtpHash = null
+      user.emailChangeOtpExpiresAt = null
+      user.emailChangeOtpSentAt = null
+      user.emailChangeResendCount = 0
+      user.isEmailVerified = true
+      await user.save()
+
+      const safeUser = await User.findById(user._id).select("-password -refreshTokens")
+      return res.json({ message: "Email updated successfully", user: safeUser })
+    } catch (error) {
+      return res.status(500).json({ message: "Server error" })
+    }
+  },
+)
+
 // Upload avatar
 router.post("/avatar", upload.single("avatar"), async (req, res) => {
   try {
@@ -190,6 +345,7 @@ router.put(
     body("autoSplit").optional().isBoolean(),
     body("defaultSplitType").optional().isIn(["equal", "percentage", "exact"]),
     body("notifications").optional().isObject(),
+    body("privacy").optional().isObject(),
   ],
   async (req, res) => {
     try {
@@ -198,7 +354,7 @@ router.put(
         return res.status(400).json({ errors: errors.array() })
       }
 
-      const { language, currency, timezone, dateFormat, theme, autoSplit, defaultSplitType, notifications } = req.body
+      const { language, currency, timezone, dateFormat, theme, autoSplit, defaultSplitType, notifications, privacy } = req.body
       
       const updateData = {}
       
@@ -210,6 +366,11 @@ router.put(
       if (autoSplit !== undefined) updateData["preferences.autoSplit"] = autoSplit
       if (defaultSplitType !== undefined) updateData["preferences.defaultSplitType"] = defaultSplitType
       if (notifications !== undefined) updateData["preferences.notifications"] = notifications
+      if (privacy !== undefined && typeof privacy === "object" && privacy !== null) {
+        if (privacy.profileVisibility !== undefined) {
+          updateData["preferences.privacy.profileVisibility"] = privacy.profileVisibility
+        }
+      }
       
       updateData.updatedAt = new Date()
 
@@ -286,29 +447,39 @@ router.get("/groups", async (req, res) => {
   try {
     const groups = await Group.find({ "members.user": req.user._id })
       .select('name members createdBy updatedAt')
-      .populate({ path: "members", select: "firstName lastName username avatar email" })
+      .populate({ path: "members.user", select: "firstName lastName username avatar email" })
       .populate({ path: "createdBy", select: "firstName lastName username" })
       .sort({ updatedAt: -1 })
       .lean()
 
-    // Get group statistics
-    const groupsWithStats = await Promise.all(
-      groups.map(async (group) => {
-        const expenseCount = await Expense.countDocuments({ groupId: group._id })
-        const totalSpent = await Expense.aggregate([
-          { $match: { groupId: group._id } },
-          { $group: { _id: null, total: { $sum: "$amount" } } },
-        ])
+    const groupIds = groups.map((g) => g._id)
+    const stats = await Expense.aggregate([
+      {
+        $match: {
+          groupId: { $in: groupIds },
+          status: { $ne: "deleted" },
+        },
+      },
+      {
+        $group: {
+          _id: "$groupId",
+          expenseCount: { $sum: 1 },
+          totalSpentCents: { $sum: "$amountCents" },
+        },
+      },
+    ])
+    const statsMap = new Map(stats.map((s) => [String(s._id), s]))
 
-        return {
-          ...group.toObject(),
-          stats: {
-            expenseCount,
-            totalSpent: totalSpent[0]?.total || 0,
-          },
-        }
-      }),
-    )
+    const groupsWithStats = groups.map((group) => {
+      const groupStats = statsMap.get(String(group._id))
+      return {
+        ...group,
+        stats: {
+          expenseCount: groupStats?.expenseCount || 0,
+          totalSpent: (groupStats?.totalSpentCents || 0) / 100,
+        },
+      }
+    })
 
     res.json({ groups: groupsWithStats })
   } catch (error) {
@@ -320,9 +491,7 @@ router.get("/groups", async (req, res) => {
 // Get user's recent expenses
 router.get("/expenses/recent", async (req, res) => {
   try {
-    const limit = Number.parseInt(req.query.limit) || 10
-    const page = Number.parseInt(req.query.page) || 1
-    const skip = (page - 1) * limit
+    const { page, limit, skip } = getPagination(req.query, { defaultLimit: 10, maxLimit: 200 })
 
     const expenses = await Expense.find({
       $or: [{ paidBy: req.user._id }, { "splits.user": req.user._id }],
@@ -332,8 +501,8 @@ router.get("/expenses/recent", async (req, res) => {
       .populate({ path: "groupId", select: "name" })
       .populate({ path: "splits.user", select: "firstName lastName username" })
       .sort({ createdAt: -1 })
-      .limit(Number(limit))
-      .skip(Number(skip))
+      .limit(limit)
+      .skip(skip)
       .lean()
 
     const total = await Expense.countDocuments({
@@ -356,15 +525,183 @@ router.get("/expenses/recent", async (req, res) => {
 })
 
 // Search users (for adding to groups)
-router.get("/search", async (req, res) => {
+router.get("/search/global", async (req, res) => {
   try {
-    const { q, limit = 10 } = req.query
+    const { q } = req.query
+    const { limit } = getPagination({ ...req.query, page: 1 }, { defaultLimit: 10, maxLimit: 25 })
 
     if (!q || q.trim().length < 2) {
       return res.status(400).json({ message: "Search query must be at least 2 characters" })
     }
 
-    const searchRegex = new RegExp(q.trim(), "i")
+    const term = q.trim()
+    const searchRegex = new RegExp(escapeRegex(term), "i")
+
+    const [users, groups, expenses] = await Promise.all([
+      User.find({
+        _id: { $ne: req.user._id },
+        isActive: true,
+        $or: [
+          { firstName: searchRegex },
+          { lastName: searchRegex },
+          { username: searchRegex },
+          { email: searchRegex },
+        ],
+      })
+        .select("firstName lastName username avatar email")
+        .limit(limit)
+        .lean(),
+      Group.find({
+        "members.user": req.user._id,
+        isActive: true,
+        name: searchRegex,
+      })
+        .select("name members")
+        .sort({ updatedAt: -1 })
+        .limit(limit)
+        .lean(),
+      Expense.find({
+        status: "active",
+        description: searchRegex,
+        $or: [{ paidBy: req.user._id }, { "splits.user": req.user._id }],
+      })
+        .select("description amountCents currencyCode category date")
+        .sort({ date: -1 })
+        .limit(limit)
+        .lean(),
+    ])
+
+    return res.json({ users, groups, expenses })
+  } catch (error) {
+    return res.status(500).json({ message: "Server error" })
+  }
+})
+
+// Splitwise-style debt summary for dashboard cards (across all groups).
+router.get("/balance-summary", async (req, res) => {
+  try {
+    const currentUserId = String(req.user._id)
+    const groups = await Group.find({
+      "members.user": req.user._id,
+      isActive: true,
+    }).select("_id").lean()
+
+    const groupIds = groups.map((g) => g._id)
+    if (groupIds.length === 0) {
+      return ok(res, {
+        youAreOwedCents: 0,
+        youOweCents: 0,
+        totalBalanceCents: 0,
+        youAreOwed: 0,
+        youOwe: 0,
+        totalBalance: 0,
+      })
+    }
+
+    const [expenseEdges, settlementEdges] = await Promise.all([
+      Expense.aggregate([
+        { $match: { groupId: { $in: groupIds }, status: "active" } },
+        { $unwind: "$splits" },
+        {
+          $project: {
+            fromUserId: "$splits.user",
+            toUserId: "$paidBy",
+            amountCents: {
+              $cond: [
+                { $eq: ["$splits.settled", true] },
+                0,
+                { $ifNull: ["$splits.amountCents", 0] },
+              ],
+            },
+          },
+        },
+        {
+          $match: {
+            $expr: {
+              $and: [
+                { $gt: ["$amountCents", 0] },
+                { $ne: ["$fromUserId", "$toUserId"] },
+              ],
+            },
+          },
+        },
+        {
+          $group: {
+            _id: { fromUserId: "$fromUserId", toUserId: "$toUserId" },
+            amountCents: { $sum: "$amountCents" },
+          },
+        },
+      ]),
+      Settlement.aggregate([
+        { $match: { groupId: { $in: groupIds }, status: "CONFIRMED" } },
+        {
+          $group: {
+            _id: { fromUserId: "$fromUserId", toUserId: "$toUserId" },
+            amountCents: { $sum: "$amountCents" },
+          },
+        },
+      ]),
+    ])
+
+    // Pairwise net relative to current user, so owe/owed do not incorrectly cancel across counterparties.
+    const netByCounterparty = new Map()
+    const bumpPair = (counterpartyId, deltaCents) => {
+      const key = String(counterpartyId)
+      netByCounterparty.set(key, (netByCounterparty.get(key) || 0) + deltaCents)
+    }
+
+    for (const edge of expenseEdges) {
+      const fromId = String(edge?._id?.fromUserId || "")
+      const toId = String(edge?._id?.toUserId || "")
+      const cents = Math.round(Number(edge?.amountCents || 0))
+      if (cents <= 0) continue
+
+      if (toId === currentUserId && fromId !== currentUserId) bumpPair(fromId, cents)
+      if (fromId === currentUserId && toId !== currentUserId) bumpPair(toId, -cents)
+    }
+
+    for (const edge of settlementEdges) {
+      const fromId = String(edge?._id?.fromUserId || "")
+      const toId = String(edge?._id?.toUserId || "")
+      const cents = Math.round(Number(edge?.amountCents || 0))
+      if (cents <= 0) continue
+
+      // Settlement from -> to means from paid to (debt reduced in that direction).
+      if (fromId === currentUserId && toId !== currentUserId) bumpPair(toId, cents)
+      if (toId === currentUserId && fromId !== currentUserId) bumpPair(fromId, -cents)
+    }
+
+    let youAreOwedCents = 0
+    let youOweCents = 0
+    for (const value of netByCounterparty.values()) {
+      if (value > 0) youAreOwedCents += value
+      if (value < 0) youOweCents += Math.abs(value)
+    }
+
+    const totalBalanceCents = youAreOwedCents - youOweCents
+    return ok(res, {
+      youAreOwedCents,
+      youOweCents,
+      totalBalanceCents,
+      youAreOwed: youAreOwedCents / 100,
+      youOwe: youOweCents / 100,
+      totalBalance: totalBalanceCents / 100,
+    })
+  } catch (error) {
+    return fail(res, "Failed to calculate balance summary", 500)
+  }
+})
+
+router.get("/search", async (req, res) => {
+  try {
+    const { q } = req.query
+    const { limit } = getPagination({ ...req.query, page: 1 }, { defaultLimit: 10, maxLimit: 50 })
+
+    if (!q || q.trim().length < 2) {
+      return res.status(400).json({ message: "Search query must be at least 2 characters" })
+    }
+
+    const searchRegex = new RegExp(escapeRegex(q.trim()), "i")
 
     const users = await User.find({
       $and: [
@@ -381,7 +718,7 @@ router.get("/search", async (req, res) => {
       ],
     })
       .select("firstName lastName username avatar email")
-      .limit(Number.parseInt(limit))
+      .limit(limit)
 
     res.json({ users })
   } catch (error) {
@@ -515,13 +852,13 @@ router.delete(
 // Admin routes
 router.get("/admin/all", requireRole(["admin"]), async (req, res) => {
   try {
-    const { page = 1, limit = 20, search, status } = req.query
-    const skip = (page - 1) * limit
+    const { search, status } = req.query
+    const { page, limit, skip } = getPagination(req.query, { defaultLimit: 20, maxLimit: 200 })
 
     const query = {}
 
     if (search) {
-      const searchRegex = new RegExp(search, "i")
+      const searchRegex = new RegExp(escapeRegex(search), "i")
       query.$or = [
         { firstName: searchRegex },
         { lastName: searchRegex },
@@ -537,7 +874,7 @@ router.get("/admin/all", requireRole(["admin"]), async (req, res) => {
     const users = await User.find(query)
       .select("-password -refreshTokens")
       .sort({ createdAt: -1 })
-      .limit(Number.parseInt(limit))
+      .limit(limit)
       .skip(skip)
 
     const total = await User.countDocuments(query)
@@ -545,8 +882,8 @@ router.get("/admin/all", requireRole(["admin"]), async (req, res) => {
     res.json({
       users,
       pagination: {
-        page: Number.parseInt(page),
-        limit: Number.parseInt(limit),
+        page,
+        limit,
         total,
         pages: Math.ceil(total / limit),
       },

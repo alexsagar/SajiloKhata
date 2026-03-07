@@ -1,194 +1,289 @@
 const Notification = require("../models/Notification")
-const User = require("../models/User")
-const { sendEmail } = require("./emailService")
+const Settlement = require("../models/Settlement")
+const Group = require("../models/Group")
+
+const normalizeId = (value) => String(value)
 
 class NotificationService {
-  static async createNotification({ userId, type, title, message, data = {} }) {
-    try {
-      const notification = new Notification({
-        userId,
-        type,
-        title,
-        message,
-        data,
+  static async createNotification(payload, options = {}) {
+    const {
+      userId,
+      type,
+      title,
+      message,
+      data = {},
+      entityType = "system",
+      entityId = null,
+      groupId = null,
+      priority = "medium",
+      actionUrl,
+      expiresAt,
+    } = payload
+
+    const notification = await Notification.create({
+      userId,
+      type,
+      title,
+      message,
+      data,
+      entityType,
+      entityId: entityId ? normalizeId(entityId) : null,
+      groupId: groupId || null,
+      priority,
+      actionUrl,
+      expiresAt,
+    })
+
+    if (options.io) {
+      options.io.to(`user_${userId}`).emit("notification", {
+        id: notification._id,
+        title: notification.title,
+        message: notification.message,
+        type: notification.type,
       })
-
-      await notification.save()
-
-      // Get user preferences
-      const user = await User.findById(userId).select("preferences")
-
-      // Send email notification if enabled
-      if (user?.preferences?.notifications?.email) {
-        await this.sendEmailNotification(user, notification)
-      }
-
-      return notification
-    } catch (error) {
-      
-      throw error
     }
+
+    return notification
   }
 
-  static async sendEmailNotification(user, notification) {
-    try {
-      const emailTemplates = {
-        expense_added: {
-          subject: "New Expense Added",
-          template: "expenseAdded",
-        },
-        expense_updated: {
-          subject: "Expense Updated",
-          template: "expenseUpdated",
-        },
-        payment_reminder: {
-          subject: "Payment Reminder",
-          template: "paymentReminder",
-        },
-        group_invite: {
-          subject: "Group Invitation",
-          template: "groupInvite",
-        },
-        settlement_request: {
-          subject: "Settlement Request",
-          template: "settlementRequest",
-        },
-      }
+  static async createManyNotifications(recipients, payload, options = {}) {
+    const uniqueRecipients = [...new Set((recipients || []).map((id) => normalizeId(id)))]
+    if (!uniqueRecipients.length) return []
 
-      const template = emailTemplates[notification.type]
-      if (!template) {
-        
-        return
-      }
+    const docs = uniqueRecipients.map((userId) => ({
+      userId,
+      type: payload.type,
+      title: payload.title,
+      message: payload.message,
+      data: payload.data || {},
+      entityType: payload.entityType || "system",
+      entityId: payload.entityId ? normalizeId(payload.entityId) : null,
+      groupId: payload.groupId || null,
+      priority: payload.priority || "medium",
+      actionUrl: payload.actionUrl,
+      expiresAt: payload.expiresAt,
+    }))
 
-      await sendEmail({
-        to: user.email,
-        subject: template.subject,
-        template: template.template,
-        data: {
-          firstName: user.firstName,
+    const inserted = await Notification.insertMany(docs, { ordered: false })
+
+    if (options.io) {
+      for (const notification of inserted) {
+        options.io.to(`user_${notification.userId}`).emit("notification", {
+          id: notification._id,
           title: notification.title,
           message: notification.message,
-          ...notification.data,
-        },
-      })
-    } catch (error) {
-      
+          type: notification.type,
+        })
+      }
     }
+
+    return inserted
+  }
+
+  static async batchNotifications(recipients, config, options = {}) {
+    const {
+      groupId = null,
+      type,
+      timeWindowMs = 2 * 60 * 1000,
+      batchKey,
+      title,
+      message,
+      entityType = "group",
+      entityId = null,
+      data = {},
+      buildContent,
+    } = config
+
+    const since = new Date(Date.now() - timeWindowMs)
+    const uniqueRecipients = [...new Set((recipients || []).map((id) => normalizeId(id)))]
+    const results = []
+
+    for (const userId of uniqueRecipients) {
+      const existing = await Notification.findOne({
+        userId,
+        type,
+        groupId: groupId || null,
+        "data.batchKey": batchKey || null,
+        createdAt: { $gte: since },
+      }).sort({ createdAt: -1 })
+
+      if (!existing) {
+        const created = await this.createNotification(
+          {
+            userId,
+            type,
+            title,
+            message,
+            entityType,
+            entityId,
+            groupId,
+            data: {
+              ...data,
+              batchCount: 1,
+              batchKey: batchKey || null,
+            },
+          },
+          options,
+        )
+        results.push(created)
+        continue
+      }
+
+      const nextCount = Math.max(1, Number(existing.data?.batchCount || 1) + 1)
+      const nextContent = typeof buildContent === "function" ? buildContent(nextCount) : { title, message }
+
+      existing.title = nextContent.title
+      existing.message = nextContent.message
+      existing.entityType = entityType
+      existing.entityId = entityId ? normalizeId(entityId) : existing.entityId
+      existing.groupId = groupId || existing.groupId
+      existing.data = {
+        ...(existing.data || {}),
+        ...data,
+        batchCount: nextCount,
+        batchKey: batchKey || null,
+      }
+      await existing.save()
+
+      if (options.io) {
+        options.io.to(`user_${userId}`).emit("notification", {
+          id: existing._id,
+          title: existing.title,
+          message: existing.message,
+          type: existing.type,
+        })
+      }
+
+      results.push(existing)
+    }
+
+    return results
   }
 
   static async markAsRead(notificationId, userId) {
-    try {
-      const notification = await Notification.findOneAndUpdate(
-        { _id: notificationId, userId },
-        { read: true, readAt: new Date() },
-        { new: true },
-      )
-
-      return notification
-    } catch (error) {
-      
-      throw error
-    }
+    return Notification.findOneAndUpdate(
+      { _id: notificationId, userId },
+      { read: true, readAt: new Date() },
+      { new: true },
+    )
   }
 
   static async markAllAsRead(userId) {
-    try {
-      await Notification.updateMany({ userId, read: false }, { read: true, readAt: new Date() })
-    } catch (error) {
-      
-      throw error
-    }
+    return Notification.updateMany({ userId, read: false }, { read: true, readAt: new Date() })
   }
 
   static async getUserNotifications(userId, { page = 1, limit = 20, unreadOnly = false } = {}) {
-    try {
-      const query = { userId }
-      if (unreadOnly) {
-        query.read = false
-      }
+    const query = { userId: normalizeId(userId) }
+    if (unreadOnly) query.read = false
 
-      const notifications = await Notification.find(query)
-        .sort({ createdAt: -1 })
-        .limit(limit * 1)
-        .skip((page - 1) * limit)
+    const notifications = await Notification.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .skip((page - 1) * limit)
+      .lean()
 
-      const total = await Notification.countDocuments(query)
-      const unreadCount = await Notification.countDocuments({ userId, read: false })
+    const total = await Notification.countDocuments(query)
+    const unreadCount = await Notification.countDocuments({ userId: normalizeId(userId), read: false })
 
-      return {
-        notifications,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit),
-        },
-        unreadCount,
-      }
-    } catch (error) {
-      
-      throw error
+    return {
+      notifications: notifications.map((n) => ({
+        ...n,
+        id: n._id,
+        isRead: Boolean(n.read),
+      })),
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+      unreadCount,
     }
+  }
+
+  static async getUnreadCount(userId) {
+    return Notification.countDocuments({ userId: normalizeId(userId), read: false })
   }
 
   static async deleteNotification(notificationId, userId) {
-    try {
-      await Notification.findOneAndDelete({ _id: notificationId, userId })
-    } catch (error) {
-      
-      throw error
-    }
+    return Notification.findOneAndDelete({ _id: notificationId, userId })
   }
 
-  static async sendBulkNotifications(userIds, { type, title, message, data = {} }) {
-    try {
-      const notifications = userIds.map((userId) => ({
-        userId,
-        type,
-        title,
-        message,
-        data,
-      }))
+  static async createSettlementRemindersForUser(userId, options = {}) {
+    const days = Number(options.days || process.env.SETTLEMENT_REMINDER_DAYS || 7)
+    const cooldownDays = Number(options.cooldownDays || 7)
+    const userObjectId = userId
+    const overdueBefore = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+    const cooldownSince = new Date(Date.now() - cooldownDays * 24 * 60 * 60 * 1000)
 
-      await Notification.insertMany(notifications)
+    const overdueByGroup = await Settlement.aggregate([
+      {
+        $match: {
+          fromUserId: userObjectId,
+          status: "PENDING",
+          createdAt: { $lte: overdueBefore },
+          $or: [
+            { reminderSnoozedUntil: null },
+            { reminderSnoozedUntil: { $lte: new Date() } },
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: "$groupId",
+          totalOwedCents: { $sum: "$amountCents" },
+          oldestCreatedAt: { $min: "$createdAt" },
+          anyPaymentLink: { $max: "$paymentLink" },
+        },
+      },
+      { $match: { totalOwedCents: { $gt: 0 } } },
+    ])
 
-      // Send email notifications for users who have email notifications enabled
-      const users = await User.find({
-        _id: { $in: userIds },
-        "preferences.notifications.email": true,
-      }).select("email firstName preferences")
+    if (!overdueByGroup.length) return []
 
-      for (const user of users) {
-        const notification = { type, title, message, data }
-        await this.sendEmailNotification(user, notification)
-      }
-    } catch (error) {
-      
-      throw error
+    const groupIds = overdueByGroup.map((r) => r._id)
+    const groups = await Group.find({ _id: { $in: groupIds } }).select("_id name").lean()
+    const groupNameById = new Map(groups.map((g) => [normalizeId(g._id), g.name]))
+    const existingRecent = await Notification.find({
+      userId: userObjectId,
+      type: "SETTLEMENT_REMINDER",
+      groupId: { $in: groupIds },
+      createdAt: { $gte: cooldownSince },
+    }).select("groupId").lean()
+    const existingGroupIds = new Set(existingRecent.map((n) => normalizeId(n.groupId)))
+    const notifications = []
+
+    for (const row of overdueByGroup) {
+      if (existingGroupIds.has(normalizeId(row._id))) continue
+
+      const amount = Number(row.totalOwedCents || 0) / 100
+      const groupName = groupNameById.get(normalizeId(row._id)) || "your group"
+
+      const created = await this.createNotification(
+        {
+          userId: userObjectId,
+          type: "SETTLEMENT_REMINDER",
+          title: "Settlement reminder",
+          message: `You still owe ${amount.toFixed(2)} in ${groupName}.`,
+          entityType: "settlement",
+          entityId: normalizeId(row._id),
+          groupId: row._id,
+          data: {
+            totalOwedCents: row.totalOwedCents,
+            oldestCreatedAt: row.oldestCreatedAt,
+            paymentLink: row.anyPaymentLink || null,
+            actionUrl: `/groups/${row._id}`,
+          },
+          actionUrl: `/groups/${row._id}`,
+        },
+        options,
+      )
+      notifications.push(created)
     }
-  }
 
-  // Cleanup old notifications (can be run as a cron job)
-  static async cleanupOldNotifications(daysOld = 30) {
-    try {
-      const cutoffDate = new Date()
-      cutoffDate.setDate(cutoffDate.getDate() - daysOld)
-
-      const result = await Notification.deleteMany({
-        createdAt: { $lt: cutoffDate },
-        read: true,
-      })
-
-      
-      return result.deletedCount
-    } catch (error) {
-      
-      throw error
-    }
+    return notifications
   }
 }
 
-// Export both the class and a convenience function
 module.exports = NotificationService
 module.exports.createNotification = NotificationService.createNotification.bind(NotificationService)

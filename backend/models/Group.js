@@ -86,4 +86,9 @@ groupSchema.pre("save", function (next) {
   next()
 })
 
+// Hot-path indexes for membership and invite lookups
+groupSchema.index({ "members.user": 1, isActive: 1, updatedAt: -1 })
+groupSchema.index({ inviteCode: 1, isActive: 1 })
+groupSchema.index({ createdBy: 1, isActive: 1, updatedAt: -1 })
+
 module.exports = mongoose.model("Group", groupSchema)

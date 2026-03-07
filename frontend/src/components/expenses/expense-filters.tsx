@@ -34,25 +34,40 @@ export function ExpenseFilters({ onFiltersChange }: ExpenseFiltersProps) {
     queryFn: () => groupAPI.getGroups(),
   })
 
+  const emitNormalizedFilters = (source: typeof filters) => {
+    onFiltersChange({
+      search: source.search.trim(),
+      category: source.category === "all" ? "" : source.category,
+      groupId: source.groupId === "all" ? "" : source.groupId,
+      startDate: source.startDate,
+      endDate: source.endDate,
+    })
+  }
+
   const updateFilter = (key: string, value: string) => {
     const newFilters = { ...filters, [key]: value }
     setFilters(newFilters)
-    onFiltersChange(newFilters)
+    emitNormalizedFilters(newFilters)
   }
 
   const clearFilters = () => {
     const clearedFilters = {
       search: "",
-      category: "",
-      groupId: "",
+      category: "all",
+      groupId: "all",
       startDate: "",
       endDate: "",
     }
     setFilters(clearedFilters)
-    onFiltersChange(clearedFilters)
+    emitNormalizedFilters(clearedFilters)
   }
 
-  const hasActiveFilters = Object.values(filters).some(value => value !== "")
+  const hasActiveFilters =
+    filters.search.trim() !== "" ||
+    filters.category !== "all" ||
+    filters.groupId !== "all" ||
+    filters.startDate !== "" ||
+    filters.endDate !== ""
 
   return (
     <KanbanCard>

@@ -116,6 +116,35 @@ const expenseSchema = new mongoose.Schema(
       type: String,
       maxlength: 500,
     },
+    comments: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+        },
+        text: {
+          type: String,
+          required: true,
+          trim: true,
+          maxlength: 1000,
+        },
+        mentions: [
+          {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+          },
+        ],
+        editedAt: {
+          type: Date,
+          default: null,
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
     status: {
       type: String,
       enum: ["active", "deleted", "archived", "settled", "disputed"],
@@ -147,6 +176,8 @@ const expenseSchema = new mongoose.Schema(
 
 // Indexes for analytics queries
 expenseSchema.index({ groupId: 1, date: -1 })
+expenseSchema.index({ groupId: 1, status: 1, date: -1 })
+expenseSchema.index({ groupId: 1, status: 1, createdAt: -1 })
 expenseSchema.index({ paidBy: 1, date: -1 })
 expenseSchema.index({ "splits.user": 1, date: -1 })
 expenseSchema.index({ category: 1, date: -1 })

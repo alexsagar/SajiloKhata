@@ -9,38 +9,58 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Scan, Upload, Camera, FileText, CheckCircle, AlertCircle, Loader2 } from "lucide-react"
+import { Upload, Camera, FileText, CheckCircle, AlertCircle, Loader2 } from "lucide-react"
 import { useDropzone } from "react-dropzone"
 import { useMutation } from "@tanstack/react-query"
 import { receiptAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
-import { formatCurrency } from "@/lib/utils"
+import { formatCurrencyWithSymbol } from "@/lib/currency"
 import { useAuth } from "@/contexts/auth-context"
+import { normalizeReceiptParsedData, type NormalizedReceiptData } from "@/lib/receipt-normalizer"
 
 interface SmartReceiptScannerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onReceiptProcessed?: (receiptData: any) => void
+  onReceiptProcessed?: (receiptData: NormalizedReceiptData & { receipt?: File | null }) => void
 }
 
 interface OCRResult {
-  merchantName: string
+  merchant: string | null
+  currency: string | null
   date: string | null
-  total: number
-  subtotal: number
-  tax: number
+  total: number | null
+  subtotal: number | null
+  discount: number | null
+  serviceCharge: number | null
+  vat: number | null
+  tax: number | null
   items: Array<{
     description: string
-    amount: number
+    quantity?: number
+    unitPrice?: number
+    totalPrice?: number
   }>
   confidence: number
-  suggestedCategory: string
+}
+
+type ReceiptParsedDataRecord = Record<string, unknown> & { items?: unknown[] }
+type ReceiptRecord = {
+  ocrData?: {
+    parsedData?: ReceiptParsedDataRecord
+    processingStatus?: string
+    processingError?: string
+    confidence?: number
+  }
+}
+
+function toNumber(value: unknown): number | null {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
 }
 
 export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: SmartReceiptScannerProps) {
@@ -49,6 +69,11 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null)
   const [processingStep, setProcessingStep] = useState<'upload' | 'processing' | 'results'>('upload')
   const [uploadProgress, setUploadProgress] = useState(0)
+  const preferredCurrency = (user?.preferences?.currency || "NPR").toUpperCase()
+  const detectedCurrency = (ocrResult?.currency || "").toUpperCase()
+  const usePreferredCurrency =
+    !detectedCurrency || (detectedCurrency === "USD" && preferredCurrency !== "USD")
+  const effectiveCurrency = (usePreferredCurrency ? preferredCurrency : detectedCurrency || preferredCurrency || "NPR").toUpperCase()
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: {
@@ -61,6 +86,27 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
     }
   })
 
+  const pollReceiptResult = async (receiptId: string) => {
+    const maxAttempts = 30
+    const timeoutMs = 30_000
+    const intervalMs = 1_000
+    const start = Date.now()
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      if (Date.now() - start >= timeoutMs) {
+        throw new Error("Receipt OCR timed out")
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+      const result = await receiptAPI.getReceipt(receiptId)
+      const receipt = (result as { data?: { receipt?: ReceiptRecord } })?.data?.receipt
+      const status = receipt?.ocrData?.processingStatus
+      if (status === "completed") return receipt
+      if (status === "failed") {
+        throw new Error(receipt?.ocrData?.processingError || "OCR processing failed")
+      }
+    }
+    throw new Error("Receipt OCR timed out")
+  }
+
   const processReceiptMutation = useMutation({
     mutationFn: async (file: File) => {
       const formData = new FormData()
@@ -70,32 +116,34 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
       setUploadProgress(10)
       
       const response = await receiptAPI.uploadReceipt(formData)
-      
+      const payload = (response as { data?: { data?: { id?: string } } })?.data?.data || {}
+
       // Simulate OCR processing progress
       setUploadProgress(50)
-      await new Promise(resolve => setTimeout(resolve, 500))
+      const completedReceipt = payload?.id ? await pollReceiptResult(String(payload.id)) : null
       setUploadProgress(80)
       await new Promise(resolve => setTimeout(resolve, 500))
       setUploadProgress(100)
-      
-      return response
+
+      return completedReceipt
     },
-    onSuccess: (response) => {
-      const data = (response as any)?.data?.data || (response as any)?.data || {}
-      
-      // Use the direct fields from the response (updated backend format)
+    onSuccess: (receipt) => {
+      const data = (receipt?.ocrData?.parsedData || {}) as ReceiptParsedDataRecord
+      const normalized = normalizeReceiptParsedData(data)
+      const fallbackTax = toNumber(data.tax ?? data.vat)
+
       const mapped: OCRResult = {
-        merchantName: data.merchant || "",
-        date: data.date || null,
-        total: data.total || 0,
-        subtotal: data.subtotal || data.total || 0,
-        tax: data.tax || 0,
-        items: Array.isArray(data.items) ? data.items.map((it: any) => ({
-          description: it.description || "Item",
-          amount: it.amount || 0,
-        })) : [],
-        confidence: data.confidence || 0,
-        suggestedCategory: 'other', // Could be enhanced based on merchant
+        merchant: normalized.merchant,
+        currency: normalized.currency,
+        date: normalized.date,
+        total: normalized.total,
+        subtotal: toNumber(data.subtotal),
+        discount: toNumber(data.discount),
+        serviceCharge: toNumber(data.serviceCharge),
+        vat: toNumber(data.vat),
+        tax: fallbackTax,
+        items: normalized.items,
+        confidence: receipt?.ocrData?.confidence || 0,
       }
       
       setOcrResult(mapped)
@@ -103,8 +151,9 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
       setUploadProgress(0) // Reset progress
       
     },
-    onError: (error: any) => {
-      console.error("Receipt processing error:", error)
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Try again"
+      toast({ title: "Receipt processing failed", description: message, variant: "destructive" })
       setProcessingStep('upload')
       setUploadProgress(0)
     },
@@ -119,28 +168,20 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
 
   const handleUseResults = () => {
     if (ocrResult && onReceiptProcessed) {
-      console.log("Smart Receipt Scanner - Sending data:", {
-        description: ocrResult.merchantName || "Receipt expense",
-        amount: ocrResult.total,
-        category: ocrResult.suggestedCategory,
+      const normalizedPayload: NormalizedReceiptData = {
+        merchant: ocrResult.merchant,
+        total: ocrResult.total,
+        currency: effectiveCurrency,
         date: ocrResult.date,
-        receipt: selectedFile,
-        ocrData: ocrResult,
-      })
-      
-      // Process the receipt data first
+        items: ocrResult.items,
+      }
       onReceiptProcessed({
-        description: ocrResult.merchantName || "Receipt expense",
-        amount: ocrResult.total,
-        category: ocrResult.suggestedCategory,
-        date: ocrResult.date,
+        ...normalizedPayload,
         receipt: selectedFile,
-        ocrData: ocrResult,
       })
       
       // Close dialog with a delay to ensure parent dialog stays open
       setTimeout(() => {
-        console.log("Smart Receipt Scanner - Closing dialog")
         onOpenChange(false)
         resetState()
       }, 200)
@@ -282,7 +323,7 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
                   <div>
                     <p className="text-sm font-medium">Merchant</p>
                     <p className="text-sm text-muted-foreground">
-                      {ocrResult.merchantName || "Not detected"}
+                      {ocrResult.merchant || "Not detected"}
                     </p>
                   </div>
                   <div>
@@ -297,26 +338,48 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
                   <div>
                     <p className="text-sm font-medium">Subtotal</p>
                     <p className="text-sm text-muted-foreground">
-                      {ocrResult.subtotal ? formatCurrency(ocrResult.subtotal, user?.preferences?.currency || "NPR") : "N/A"}
+                      {ocrResult.subtotal ? formatCurrencyWithSymbol(ocrResult.subtotal, effectiveCurrency) : "N/A"}
                     </p>
                   </div>
                   <div>
                     <p className="text-sm font-medium">Tax</p>
                     <p className="text-sm text-muted-foreground">
-                      {ocrResult.tax ? formatCurrency(ocrResult.tax, user?.preferences?.currency || "NPR") : "N/A"}
+                      {ocrResult.tax ? formatCurrencyWithSymbol(ocrResult.tax, effectiveCurrency) : "N/A"}
                     </p>
                   </div>
                   <div>
                     <p className="text-sm font-medium">Total</p>
                     <p className="text-lg font-bold text-primary">
-                      {formatCurrency(ocrResult.total, user?.preferences?.currency || "NPR")}
+                      {ocrResult.total ? formatCurrencyWithSymbol(ocrResult.total, effectiveCurrency) : "N/A"}
                     </p>
                   </div>
                 </div>
+                {(ocrResult.discount || ocrResult.serviceCharge || ocrResult.vat) ? (
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <p className="text-sm font-medium">Discount</p>
+                      <p className="text-sm text-muted-foreground">
+                        {ocrResult.discount ? formatCurrencyWithSymbol(ocrResult.discount, effectiveCurrency) : "N/A"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Service</p>
+                      <p className="text-sm text-muted-foreground">
+                        {ocrResult.serviceCharge ? formatCurrencyWithSymbol(ocrResult.serviceCharge, effectiveCurrency) : "N/A"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">VAT</p>
+                      <p className="text-sm text-muted-foreground">
+                        {ocrResult.vat ? formatCurrencyWithSymbol(ocrResult.vat, effectiveCurrency) : "N/A"}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div>
-                  <p className="text-sm font-medium mb-2">Suggested Category</p>
-                  <Badge variant="secondary">{ocrResult.suggestedCategory}</Badge>
+                  <p className="text-sm font-medium mb-2">Currency</p>
+                  <Badge variant="secondary">{effectiveCurrency}</Badge>
                 </div>
 
                 {ocrResult.items && ocrResult.items.length > 0 && (
@@ -326,7 +389,9 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
                       {ocrResult.items.map((item, index) => (
                         <div key={index} className="flex justify-between text-sm">
                           <span className="truncate">{item.description}</span>
-                          <span className="font-medium">{formatCurrency(item.amount, user?.preferences?.currency || "NPR")}</span>
+                          <span className="font-medium">
+                            {formatCurrencyWithSymbol(item.totalPrice || item.unitPrice || 0, effectiveCurrency)}
+                          </span>
                         </div>
                       ))}
                     </div>

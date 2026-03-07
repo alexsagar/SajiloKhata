@@ -46,7 +46,7 @@ The Splitwise Analytics system provides comprehensive insights into both persona
 ```
 
 ### Authentication
-All endpoints require valid JWT token in Authorization header.
+All analytics endpoints are protected by backend auth middleware and rely on cookie-based JWT sessions in this project.
 
 ### Common Query Parameters
 
@@ -458,11 +458,7 @@ expenseSchema.index({ status: 1, date: -1 })
    - Validate currency code formats
 
 ### Debug Mode
-Enable debug logging in backend:
-```javascript
-
-
-```
+Use backend request logging and server logs (`backend/services/logger.js`) for route and performance diagnostics.
 
 ## Support
 

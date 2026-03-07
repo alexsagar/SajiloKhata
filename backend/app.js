@@ -5,7 +5,6 @@ const rateLimit = require("express-rate-limit")
 const compression = require("compression")
 const cookieParser = require('cookie-parser')
 const { setCsrfCookie, verifyCsrf } = require('./middleware/csrf')
-const morgan = require("morgan")
 const { createServer } = require("http")
 const path = require("path")
 const { Server } = require("socket.io")
@@ -30,8 +29,15 @@ const reminderRoutes = require("./routes/reminders")
 const settlementRoutes = require("./routes/settlements")
 const { handleMulterError } = require("./middleware/upload")
 const { initReminderNotifications } = require("./jobs/reminderNotifications")
+const { initReconciliationJob } = require("./jobs/reconciliationJob")
+const { ensureCacheConnection } = require("./services/cacheService")
+const logger = require("./services/logger")
+const { initSentry, sentryErrorHandler, captureException } = require("./services/sentry")
+const { requestContext } = require("./middleware/request-context")
 
 const app = express()
+const SLOW_REQUEST_MS = Number(process.env.SLOW_REQUEST_MS || 500)
+app.set("trust proxy", 1)
 // Track online users by userId
 const onlineUsers = new Set()
 const server = createServer(app)
@@ -45,6 +51,7 @@ const io = new Server(server, {
 
 // Connect to MongoDB
 connectDB()
+ensureCacheConnection().catch(() => {})
 
 // Security middleware
 app.use(helmet())
@@ -55,45 +62,88 @@ app.use(
   }),
 )
 
-// // Rate limiting - general API limiter
-// const limiter = rateLimit({
-//   windowMs: 15 * 60 * 1000, // 15 minutes
-//   max: 500, // limit each IP to 500 requests per windowMs
-//   message: "Too many requests from this IP, please try again later.",
-// })
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.RATE_LIMIT_MAX || 300),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many requests from this IP, please try again later." },
+})
 
-// More lenient rate limiter for auth routes (login, register, oauth)
-// const authLimiter = rateLimit({
-//   windowMs: 15 * 60 * 1000, // 15 minutes
-//   max: 50, // limit each IP to 50 auth requests per windowMs
-//   message: "Too many authentication attempts, please try again later.",
-//   skip: (req) => {
-//     // Skip rate limiting for OAuth callback (it's already protected by OAuth flow)
-//     return req.path === '/oauth' || req.path.includes('callback')
-//   }
-// })
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.AUTH_RATE_LIMIT_MAX || 30),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many authentication attempts, please try again later." },
+  skip: (req) => req.path === "/oauth" || req.path.includes("callback"),
+})
 
-// app.use("/api", limiter)
-// app.use("/api/auth", authLimiter)
+const writeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.WRITE_RATE_LIMIT_MAX || 120),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many write requests, please try again later." },
+  skip: (req) => req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
+})
+
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.UPLOAD_RATE_LIMIT_MAX || 20),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many uploads, please slow down." },
+  skip: (req) => req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
+})
+
+const messageLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: Number(process.env.MESSAGE_RATE_LIMIT_MAX || 60),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many messages sent. Please wait a moment." },
+})
+
+app.use("/api/auth", authLimiter)
+app.use("/api", apiLimiter)
+app.use("/api", writeLimiter)
+app.use("/api/receipts", uploadLimiter)
+app.use("/api/expenses", uploadLimiter)
+app.use("/api/conversations/messages", messageLimiter)
+
+initSentry(app)
+app.use(requestContext)
 
 // Body parsing middleware
 // Request timing middleware
 app.use((req, res, next) => {
   const start = Date.now()
-  res.on('finish', () => {
+  res.on("finish", () => {
     const duration = Date.now() - start
-    // Log slow requests as warnings, others as info (if logger existed, using console for now)
-    if (duration > 500) {
-      console.warn(`[HTTP] ${req.method} ${req.url} ${res.statusCode} ${duration}ms (SLOW)`)
+    if (duration >= SLOW_REQUEST_MS || res.statusCode >= 500) {
+      req.log?.warn(
+        {
+          statusCode: res.statusCode,
+          durationMs: duration,
+        },
+        "slow_or_error_request",
+      )
     } else {
-      console.log(`[HTTP] ${req.method} ${req.url} ${res.statusCode} ${duration}ms`)
+      req.log?.info(
+        {
+          statusCode: res.statusCode,
+          durationMs: duration,
+        },
+        "request_complete",
+      )
     }
   })
   next()
 })
 
-app.use(express.json({ limit: "10mb" }))
-app.use(express.urlencoded({ extended: true, limit: "10mb" }))
+app.use(express.json({ limit: process.env.API_BODY_LIMIT || "1mb" }))
+app.use(express.urlencoded({ extended: true, limit: process.env.API_BODY_LIMIT || "1mb" }))
 app.use(compression())
 app.use(cookieParser())
 app.use(setCsrfCookie)
@@ -107,11 +157,6 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads"), {
     res.setHeader('X-Content-Type-Options', 'nosniff')
   }
 }))
-
-// Logging
-if (process.env.NODE_ENV === "development") {
-  app.use(morgan("dev"))
-}
 
 // Socket.IO middleware
 app.use((req, res, next) => {
@@ -245,6 +290,7 @@ io.on("connection", (socket) => {
 })
 
 // Error handling middleware
+app.use(sentryErrorHandler())
 app.use(errorHandler)
 
 // multer error handling
@@ -259,6 +305,15 @@ const PORT = process.env.PORT || 5000
 
 server.listen(PORT, () => {
   initReminderNotifications(io)
+  initReconciliationJob()
+  logger.info({ port: PORT }, "server_started")
+})
+
+// Prevent crash on unhandled promise rejections (e.g. Redis connection failure)
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error({ reason, promise }, "unhandled_rejection")
+  captureException(reason instanceof Error ? reason : new Error(String(reason)), { type: "unhandledRejection" })
+  // Application specific logging, throwing an error, or other logic here
 })
 
 module.exports = { app, io }

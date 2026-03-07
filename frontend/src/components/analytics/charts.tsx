@@ -155,6 +155,7 @@ export function MonthlyTrendsChart({ data, baseCurrency }: { data: MonthlyItem[]
     // Group data by month
     const monthlyData: Record<string, MonthlyAgg> = safeData.reduce((acc: Record<string, MonthlyAgg>, item) => {
         const date = new Date(item.date)
+        if (Number.isNaN(date.getTime())) return acc
         const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 
         if (!acc[monthKey]) {

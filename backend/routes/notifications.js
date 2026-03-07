@@ -3,15 +3,16 @@ const { body, validationResult } = require("express-validator")
 const Notification = require("../models/Notification")
 const User = require("../models/User")
 const notificationService = require("../services/notificationService")
+const { getPagination } = require("../utils/query")
 
 const router = express.Router()
 
 // Get user notifications
 router.get("/", async (req, res) => {
   try {
-    const pageNum = Number.parseInt(req.query.page) || 1
-    const limitNum = Number.parseInt(req.query.limit) || 20
+    const { page: pageNum, limit: limitNum } = getPagination(req.query, { defaultLimit: 20, maxLimit: 200 })
     const unreadOnly = String(req.query.unreadOnly) === "true"
+    await notificationService.createSettlementRemindersForUser(req.user._id, { io: req.io })
 
     const result = await notificationService.getUserNotifications(req.user._id, {
       page: pageNum,
@@ -31,14 +32,20 @@ router.get("/", async (req, res) => {
   }
 })
 
-// Mark notification as read
-router.put("/:id/read", async (req, res) => {
+router.get("/unread-count", async (req, res) => {
   try {
-    const notification = await Notification.findOneAndUpdate(
-      { _id: req.params.id, userId: req.user._id },
-      { read: true, readAt: new Date() },
-      { new: true },
-    )
+    await notificationService.createSettlementRemindersForUser(req.user._id, { io: req.io })
+    const unreadCount = await notificationService.getUnreadCount(req.user._id)
+    return res.json({ unreadCount })
+  } catch (error) {
+    return res.status(500).json({ message: "Server error" })
+  }
+})
+
+// Mark notification as read
+async function markSingleAsRead(req, res) {
+  try {
+    const notification = await notificationService.markAsRead(req.params.id, req.user._id)
 
     if (!notification) {
       return res.status(404).json({ message: "Notification not found" })
@@ -49,20 +56,19 @@ router.put("/:id/read", async (req, res) => {
       notificationId: notification._id,
     })
 
-    res.json({ notification })
+    res.json({ notification: { ...notification.toObject(), id: notification._id, isRead: Boolean(notification.read) } })
   } catch (error) {
     
     res.status(500).json({ message: "Server error" })
   }
-})
+}
+router.patch("/:id/read", markSingleAsRead)
+router.put("/:id/read", markSingleAsRead)
 
 // Mark all notifications as read
-router.put("/read-all", async (req, res) => {
+async function markAllAsRead(req, res) {
   try {
-    const result = await Notification.updateMany(
-      { userId: req.user._id, read: false },
-      { read: true, readAt: new Date() },
-    )
+    const result = await notificationService.markAllAsRead(req.user._id)
 
     // Emit real-time update
     req.io.to(`user_${req.user._id}`).emit("notifications_read_all")
@@ -75,7 +81,9 @@ router.put("/read-all", async (req, res) => {
     
     res.status(500).json({ message: "Server error" })
   }
-})
+}
+router.patch("/read-all", markAllAsRead)
+router.put("/read-all", markAllAsRead)
 
 // Delete notification
 router.delete("/:id", async (req, res) => {

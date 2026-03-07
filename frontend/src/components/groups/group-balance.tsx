@@ -4,6 +4,8 @@ import { KanbanCard, KanbanCardContent, KanbanCardDescription, KanbanCardHeader,
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { groupAPI, expenseAPI, settlementAPI } from "@/lib/api"
 import { LoadingSpinner } from "@/components/common/loading-spinner"
@@ -11,6 +13,9 @@ import { formatCurrency as formatCurrencyUtil, getInitials } from "@/lib/utils"
 import { formatCurrency } from "@/lib/currency"
 import { TrendingUp, TrendingDown, DollarSign, ArrowRight } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
+import { useEffect, useState } from "react"
+import { useSocket } from "@/contexts/socket-context"
+import { toast } from "@/hooks/use-toast"
 
 interface GroupBalanceProps {
   groupId: string
@@ -20,7 +25,12 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || "USD"
   const queryClient = useQueryClient()
-  
+  const { socket, joinGroups } = useSocket()
+  const [isPaymentLinkDialogOpen, setIsPaymentLinkDialogOpen] = useState(false)
+  const [paymentLink, setPaymentLink] = useState("")
+  const [paymentProvider, setPaymentProvider] = useState("")
+  const [selectedSettlementId, setSelectedSettlementId] = useState<string | null>(null)
+
   const { data: balance, isLoading } = useQuery({
     queryKey: ["group-balance", groupId],
     queryFn: () => groupAPI.getBalances(groupId),
@@ -36,6 +46,9 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["group-settlements", groupId] })
       queryClient.invalidateQueries({ queryKey: ["group-balance", groupId] })
+      queryClient.invalidateQueries({ queryKey: ["group-expenses-for-balance", groupId] })
+      queryClient.invalidateQueries({ queryKey: ["my-balance"] })
+      queryClient.invalidateQueries({ queryKey: ["expenses"] })
     },
   })
 
@@ -43,14 +56,125 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
     mutationFn: (settlementId: string) => settlementAPI.confirm(settlementId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["group-settlements", groupId] })
+      queryClient.invalidateQueries({ queryKey: ["group-balance", groupId] })
+      queryClient.invalidateQueries({ queryKey: ["group-expenses-for-balance", groupId] })
+      queryClient.invalidateQueries({ queryKey: ["my-balance"] })
+      queryClient.invalidateQueries({ queryKey: ["user-balance-summary"] })
+      queryClient.invalidateQueries({ queryKey: ["expenses"] })
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Could not confirm payment",
+        description: error?.message || "Please try again.",
+        variant: "destructive",
+      })
     },
   })
+
+  const paymentLinkMutation = useMutation({
+    mutationFn: ({ settlementId, paymentLink, paymentProvider }: { settlementId: string; paymentLink: string; paymentProvider?: string }) =>
+      settlementAPI.setPaymentLink(settlementId, { paymentLink, paymentProvider }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["group-settlements", groupId] })
+      toast({ title: "Payment link saved" })
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Could not save payment link",
+        description: error?.message || "Please try again.",
+        variant: "destructive",
+      })
+    },
+  })
+
+  const remindMutation = useMutation({
+    mutationFn: (settlementId: string) => settlementAPI.remind(settlementId),
+    onSuccess: () => {
+      toast({ title: "Reminder sent" })
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Could not send reminder",
+        description: error?.message || "Please try again.",
+        variant: "destructive",
+      })
+    },
+  })
+
+  const openPaymentLinkDialog = (settlement: any) => {
+    setSelectedSettlementId(settlement._id)
+    setPaymentLink(settlement.paymentLink || "")
+    setPaymentProvider(settlement.paymentProvider || "")
+    setIsPaymentLinkDialogOpen(true)
+  }
+
+  const savePaymentLink = () => {
+    if (!selectedSettlementId) return
+    try {
+      // Basic URL check before API call
+      // eslint-disable-next-line no-new
+      new URL(paymentLink)
+    } catch (_) {
+      toast({
+        title: "Invalid link",
+        description: "Please enter a valid payment URL.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    paymentLinkMutation.mutate(
+      {
+        settlementId: selectedSettlementId,
+        paymentLink,
+        paymentProvider: paymentProvider || undefined,
+      },
+      {
+        onSuccess: () => {
+          setIsPaymentLinkDialogOpen(false)
+          setSelectedSettlementId(null)
+          setPaymentLink("")
+          setPaymentProvider("")
+        },
+      },
+    )
+  }
 
   // Fetch expenses to compute balances if API doesn't provide them
   const { data: expensesData } = useQuery({
     queryKey: ["group-expenses-for-balance", groupId],
     queryFn: () => expenseAPI.getExpenses(groupId),
   })
+
+  useEffect(() => {
+    joinGroups([groupId])
+  }, [joinGroups, groupId])
+
+  useEffect(() => {
+    if (!socket) return
+
+    const refetchGroupData = (payload: any) => {
+      if (String(payload?.groupId || "") !== String(groupId)) return
+      queryClient.invalidateQueries({ queryKey: ["group-settlements", groupId] })
+      queryClient.invalidateQueries({ queryKey: ["group-balance", groupId] })
+      queryClient.invalidateQueries({ queryKey: ["group-expenses-for-balance", groupId] })
+      queryClient.invalidateQueries({ queryKey: ["my-balance"] })
+      queryClient.invalidateQueries({ queryKey: ["user-balance-summary"] })
+      queryClient.invalidateQueries({ queryKey: ["expenses"] })
+    }
+
+    socket.on("settlement:confirmed", refetchGroupData)
+    socket.on("settlement:plan-updated", refetchGroupData)
+    socket.on("expense_updated", refetchGroupData)
+    socket.on("split_settled", refetchGroupData)
+
+    return () => {
+      socket.off("settlement:confirmed", refetchGroupData)
+      socket.off("settlement:plan-updated", refetchGroupData)
+      socket.off("expense_updated", refetchGroupData)
+      socket.off("split_settled", refetchGroupData)
+    }
+  }, [socket, groupId, queryClient])
 
   if (isLoading) {
     return (
@@ -61,16 +185,36 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
   }
 
   // Normalize API balances shape (object map or array) and compute fallback from expenses
-  const apiBalance = balance?.data || {}
+  const apiBalance = balance?.data?.data || balance?.data || {}
   let balancesMap: Record<string, any> = {}
   if (apiBalance?.balances) {
     if (Array.isArray(apiBalance.balances)) {
       apiBalance.balances.forEach((b: any) => {
         const uid = b?.user?._id || b?.userId || b?._id || "unknown"
-        balancesMap[uid] = b
+        const amount = typeof b?.amount === "number"
+          ? b.amount
+          : typeof b?.net === "number"
+            ? b.net
+            : typeof b?.netCents === "number"
+              ? b.netCents / 100
+              : (typeof b?.youAreOwed === "number" || typeof b?.youOwe === "number")
+                ? (Number(b?.youAreOwed || 0) - Number(b?.youOwe || 0))
+                : 0
+        balancesMap[uid] = { ...b, amount }
       })
     } else {
-      balancesMap = apiBalance.balances as Record<string, any>
+      Object.entries(apiBalance.balances as Record<string, any>).forEach(([uid, b]) => {
+        const amount = typeof b?.amount === "number"
+          ? b.amount
+          : typeof b?.net === "number"
+            ? b.net
+            : typeof b?.netCents === "number"
+              ? b.netCents / 100
+              : (typeof b?.youAreOwed === "number" || typeof b?.youOwe === "number")
+                ? (Number(b?.youAreOwed || 0) - Number(b?.youOwe || 0))
+                : 0
+        balancesMap[uid] = { ...b, amount }
+      })
     }
   }
 
@@ -108,6 +252,7 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
 
   const settlementsPayload = (settlementsResp?.data && (settlementsResp?.data as any).data) ? (settlementsResp?.data as any).data : (settlementsResp?.data as any)
   const settlements: any[] = settlementsPayload?.settlements || []
+  const currentUserId = String((user as any)?._id || (user as any)?.id || "")
   const settlementTotals = settlementsPayload?.totals || { pendingCents: 0, confirmedCents: 0 }
   const pendingTotal = (settlementTotals.pendingCents || 0) / 100
   const confirmedTotal = (settlementTotals.confirmedCents || 0) / 100
@@ -183,19 +328,18 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className={`text-lg font-bold ${
-                      balance.amount > 0 ? 'text-green-600' : 
-                      balance.amount < 0 ? 'text-red-600' : 
-                      'text-muted-foreground'
-                    }`}>
+                    <div className={`text-lg font-bold ${balance.amount > 0 ? 'text-green-600' :
+                        balance.amount < 0 ? 'text-red-600' :
+                          'text-muted-foreground'
+                      }`}>
                       {balance.amount > 0 ? '+' : ''}{formatCurrency(Math.abs(balance.amount), userCurrency)}
                     </div>
                     <Badge variant={
-                      balance.amount === 0 ? "secondary" : 
-                      balance.amount > 0 ? "default" : "destructive"
+                      balance.amount === 0 ? "secondary" :
+                        balance.amount > 0 ? "default" : "destructive"
                     }>
-                      {balance.amount === 0 ? 'Settled' : 
-                       balance.amount > 0 ? 'Is owed' : 'Owes'}
+                      {balance.amount === 0 ? 'Settled' :
+                        balance.amount > 0 ? 'Is owed' : 'Owes'}
                     </Badge>
                   </div>
                 </div>
@@ -245,6 +389,8 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
                 const toUser = s.toUserId
                 const amount = (s.amountCents || 0) / 100
                 const isPending = s.status === "PENDING"
+                const isPayer = String(fromUser?._id || fromUser) === currentUserId
+                const isCreditor = String(toUser?._id || toUser) === currentUserId
 
                 return (
                   <div key={s._id} className="flex items-center justify-between p-3 rounded-lg border bg-muted/50">
@@ -271,7 +417,7 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
                       <Badge variant={isPending ? "secondary" : "default"}>
                         {s.status}
                       </Badge>
-                      {isPending && (
+                      {isPending && isPayer && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -279,6 +425,33 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
                           disabled={confirmMutation.isPending}
                         >
                           Mark as Paid
+                        </Button>
+                      )}
+                      {isPending && isCreditor && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openPaymentLinkDialog(s)}
+                          disabled={paymentLinkMutation.isPending}
+                        >
+                          {s.paymentLink ? "Update Pay Link" : "Add Pay Link"}
+                        </Button>
+                      )}
+                      {isPending && isCreditor && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => remindMutation.mutate(s._id)}
+                          disabled={remindMutation.isPending}
+                        >
+                          Remind
+                        </Button>
+                      )}
+                      {isPending && isPayer && s.paymentLink && (
+                        <Button size="sm" variant="secondary" asChild>
+                          <a href={s.paymentLink} target="_blank" rel="noreferrer">
+                            Pay Link
+                          </a>
                         </Button>
                       )}
                     </div>
@@ -332,6 +505,43 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
           </KanbanCardContent>
         </KanbanCard>
       )}
+
+      <Dialog open={isPaymentLinkDialogOpen} onOpenChange={setIsPaymentLinkDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Payment Link</DialogTitle>
+            <DialogDescription>
+              Add an external payment link (eSewa/Khalti/Fonepay/etc.) for this settlement.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Payment URL</label>
+              <Input
+                placeholder="https://..."
+                value={paymentLink}
+                onChange={(e) => setPaymentLink(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Provider (optional)</label>
+              <Input
+                placeholder="eSewa / Khalti / Fonepay"
+                value={paymentProvider}
+                onChange={(e) => setPaymentProvider(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPaymentLinkDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={savePaymentLink} disabled={paymentLinkMutation.isPending || !paymentLink.trim()}>
+              Save Link
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

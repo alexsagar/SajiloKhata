@@ -1,12 +1,45 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
+import { Loader2 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useMutation } from "@tanstack/react-query"
+import { useAuth } from "@/contexts/auth-context"
+import { userAPI } from "@/lib/api"
+import { toast } from "@/hooks/use-toast"
 
 export function PrivacyControls() {
+  const { user, updateUser } = useAuth()
+  const [profileVisibility, setProfileVisibility] = useState<"public" | "friends" | "private">("friends")
+
+  useEffect(() => {
+    const next = (user as any)?.preferences?.privacy?.profileVisibility
+    if (next === "public" || next === "friends" || next === "private") {
+      setProfileVisibility(next)
+    }
+  }, [user])
+
+  const mutation = useMutation({
+    mutationFn: () => userAPI.updatePreferences({ privacy: { profileVisibility } }),
+    onSuccess: (response) => {
+      updateUser({ preferences: response.data?.user?.preferences })
+      toast({
+        title: "Privacy updated",
+        description: "Your privacy settings were saved.",
+      })
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to update privacy",
+        description: error?.message || "Please try again.",
+        variant: "destructive",
+      })
+    },
+  })
+
   return (
     <div className="space-y-6">
       <Card>
@@ -19,7 +52,11 @@ export function PrivacyControls() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="profileVisibility">Profile Visibility</Label>
-            <Select defaultValue="friends">
+            <Select
+              value={profileVisibility}
+              onValueChange={(value) => setProfileVisibility(value as "public" | "friends" | "private")}
+              disabled={mutation.isPending}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -30,50 +67,12 @@ export function PrivacyControls() {
               </SelectContent>
             </Select>
           </div>
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Data Sharing</CardTitle>
-          <CardDescription>
-            Manage how your data is used and shared.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="analytics">Analytics</Label>
-              <p className="text-sm text-muted-foreground">
-                Help improve the app by sharing anonymous usage data
-              </p>
-            </div>
-            <Switch id="analytics" defaultChecked />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="marketing">Marketing Communications</Label>
-              <p className="text-sm text-muted-foreground">
-                Receive emails about new features and updates
-              </p>
-            </div>
-            <Switch id="marketing" />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Data Export & Deletion</CardTitle>
-          <CardDescription>
-            Download your data or delete your account.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-2">
-            <Button variant="outline">Download My Data</Button>
-            <Button variant="destructive">Delete Account</Button>
+          <div className="flex justify-end">
+            <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+              {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save Privacy
+            </Button>
           </div>
         </CardContent>
       </Card>

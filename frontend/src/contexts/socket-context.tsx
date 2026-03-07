@@ -63,6 +63,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
           title: notification.title,
           description: notification.message,
         })
+        window.dispatchEvent(new CustomEvent("socket:notification", { detail: notification }))
       })
 
       // Listen for reminder notifications

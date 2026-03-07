@@ -2,14 +2,18 @@
 
 import { Home, Users, Receipt, BarChart3, Settings, Calendar, MessageSquare, UserPlus, X } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
+import { useCurrency } from "@/contexts/currency-context"
 import { useMobileSidebar } from "@/contexts/mobile-sidebar-context"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { LogOut } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
+import { useCallback, useEffect, useMemo } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { getInitials, cn } from "@/lib/utils"
+import { analyticsAPI, calendarAPI, expenseAPI, reminderAPI } from "@/lib/api"
 
 const mainItems = [
   {
@@ -58,9 +62,102 @@ const settingsItems = [
 ]
 
 export function AppSidebar() {
-  const { user, logout } = useAuth()
+  const { user, logout, isAuthenticated } = useAuth()
+  const { currency: userCurrency } = useCurrency()
   const pathname = usePathname()
+  const router = useRouter()
+  const queryClient = useQueryClient()
   const { setIsOpen } = useMobileSidebar()
+  const currentYear = new Date().getFullYear()
+  const currentMonth = new Date().getMonth() + 1
+
+  const defaultAnalyticsFilters = useMemo(() => ({
+    mode: "all",
+    categories: [],
+    paymentMethods: [],
+    currencies: [],
+    status: ["active", "settled"],
+    createdBy: [],
+    paidBy: [],
+    baseCurrency: userCurrency,
+  }), [userCurrency])
+
+  const prefetchRoute = useCallback((href: string) => {
+    try {
+      router.prefetch(href)
+    } catch {}
+  }, [router])
+
+  const warmRouteInDev = useCallback((href: string) => {
+    if (process.env.NODE_ENV !== "development") return
+    // In Next dev, router/link prefetch is limited; direct fetch warms route compilation.
+    void fetch(href, { credentials: "include" }).catch(() => {})
+  }, [])
+
+  const prefetchDataForRoute = useCallback((href: string) => {
+    if (!isAuthenticated) return
+
+    if (href === "/" || href === "/expenses") {
+      queryClient.prefetchQuery({
+        queryKey: ["expenses", "all"],
+        queryFn: async () => {
+          const response = await expenseAPI.getExpenses()
+          return response.data
+        },
+        staleTime: 5 * 60 * 1000,
+      })
+    }
+
+    if (href === "/analytics") {
+      queryClient.prefetchQuery({
+        queryKey: ["analytics-kpis", defaultAnalyticsFilters],
+        queryFn: () => analyticsAPI.getKPIs(defaultAnalyticsFilters),
+        staleTime: 5 * 60 * 1000,
+      })
+    }
+
+    if (href === "/calendar") {
+      const calendarFilters = { mode: "all" as const, groupIds: [] as string[] }
+      queryClient.prefetchQuery({
+        queryKey: ["calendar-month", currentYear, currentMonth, calendarFilters, userCurrency],
+        queryFn: () =>
+          calendarAPI.getMonth({
+            year: currentYear,
+            month: currentMonth,
+            mode: "all",
+            groupIds: [],
+            baseCurrency: userCurrency,
+          }),
+        staleTime: 5 * 60 * 1000,
+      })
+      queryClient.prefetchQuery({
+        queryKey: ["calendar-reminders", currentYear, currentMonth],
+        queryFn: () => reminderAPI.getMonth({ year: currentYear, month: currentMonth }),
+        staleTime: 5 * 60 * 1000,
+      })
+    }
+  }, [isAuthenticated, queryClient, currentYear, currentMonth, userCurrency, defaultAnalyticsFilters])
+
+  useEffect(() => {
+    const routes = ["/", "/friends", "/groups", "/expenses", "/analytics", "/calendar", "/chat", "/settings"]
+    routes.forEach(prefetchRoute)
+
+    const timer = window.setTimeout(() => {
+      // Warm heavy route chunks for instant-feeling navigation.
+      void import("@/components/calendar/expense-calendar")
+      void import("@/components/analytics/analytics-dashboard")
+      void import("@/components/dashboard/dashboard")
+      prefetchDataForRoute("/")
+      prefetchDataForRoute("/analytics")
+      prefetchDataForRoute("/calendar")
+      warmRouteInDev("/analytics")
+      warmRouteInDev("/chat")
+      warmRouteInDev("/calendar")
+      warmRouteInDev("/groups")
+    }, 150)
+
+    return () => window.clearTimeout(timer)
+  }, [prefetchRoute, prefetchDataForRoute, warmRouteInDev])
 
   return (
     <div className="font-sans bg-[#12151c] text-slate-200 border-r border-white/10 h-screen w-[280px] flex flex-col">
@@ -111,6 +208,11 @@ export function AppSidebar() {
                   )}
                   aria-current={isActive ? "page" : undefined}
                   onClick={() => setIsOpen(false)}
+                  onMouseEnter={() => {
+                    prefetchRoute(item.url)
+                    prefetchDataForRoute(item.url)
+                    warmRouteInDev(item.url)
+                  }}
                 >
                   <item.icon className="h-4 w-4 flex-shrink-0" />
                   <span>{item.title}</span>
@@ -140,6 +242,7 @@ export function AppSidebar() {
                   )}
                   aria-current={isActive ? "page" : undefined}
                   onClick={() => setIsOpen(false)}
+                  onMouseEnter={() => prefetchRoute(item.url)}
                 >
                   <item.icon className="h-4 w-4 flex-shrink-0" />
                   <span>{item.title}</span>

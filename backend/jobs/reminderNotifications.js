@@ -1,5 +1,6 @@
 const cron = require("node-cron")
 const Reminder = require("../models/Reminder")
+const { createNotification } = require("../services/notificationService")
 
 let io = null
 
@@ -18,10 +19,6 @@ function initReminderNotifications(socketIO) {
 }
 
 async function checkAndSendReminderNotifications() {
-  if (!io) {
-    return
-  }
-
   try {
     const now = new Date()
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -42,27 +39,36 @@ async function checkAndSendReminderNotifications() {
       const diffTime = reminder.dueDate.getTime() - today.getTime()
       const diffDays = Math.floor(diffTime / (24 * 60 * 60 * 1000))
 
-      // Only notify for 3, 2, 1 days before and on the day (0)
-      if (![3, 2, 1, 0].includes(diffDays)) continue
+      // Send pre-due reminder exactly 3 days before due date.
+      if (diffDays !== 3) continue
       
       // Skip if we already notified for this offset
       if (reminder.lastNotifiedOffsetDays === diffDays) continue
 
-      let message
       const dueDateStr = reminder.dueDate.toLocaleDateString()
-      
-      if (diffDays === 3) {
-        message = `"${reminder.title}" is due in 3 days (${dueDateStr})`
-      } else if (diffDays === 2) {
-        message = `"${reminder.title}" is due in 2 days (${dueDateStr})`
-      } else if (diffDays === 1) {
-        message = `"${reminder.title}" is due tomorrow (${dueDateStr})`
-      } else {
-        message = `"${reminder.title}" is due today`
-      }
+      const message = `"${reminder.title}" is due in 3 days (${dueDateStr})`
 
-      // Send notification via socket
-      io.to(`user_${reminder.user._id}`).emit("notification:reminder", {
+      const notification = await createNotification({
+        userId: reminder.user._id,
+        type: "payment_reminder",
+        title: "Payment Reminder",
+        message,
+        data: {
+          reminderId: reminder._id,
+          dueDate: reminder.dueDate,
+          category: reminder.category,
+          amount: reminder.amount,
+        },
+      })
+
+      // Send real-time notification if socket is available.
+      io?.to(`user_${reminder.user._id}`).emit("notification", {
+        id: notification?._id || reminder._id,
+        title: "Payment Reminder",
+        message,
+        type: "payment_reminder",
+      })
+      io?.to(`user_${reminder.user._id}`).emit("notification:reminder", {
         id: reminder._id,
         title: reminder.title,
         dueDate: reminder.dueDate,

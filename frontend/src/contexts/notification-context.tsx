@@ -19,11 +19,10 @@ const NotificationContext = createContext<NotificationContextType | undefined>(u
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([])
+  const [unreadCount, setUnreadCount] = useState(0)
   const auth = useAuth()
   const isAuthenticated = auth?.isAuthenticated || false
   const [disabled, setDisabled] = useState(false)
-
-  const unreadCount = notifications.filter((n) => !n.read).length
 
   useEffect(() => {
     if (!isAuthenticated || !auth || disabled) return
@@ -32,16 +31,21 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   const refreshNotifications = async () => {
     try {
-      const response = await notificationAPI.getNotifications()
-      const data = response?.data
+      const [listResponse, unreadResponse] = await Promise.all([
+        notificationAPI.getNotifications({ page: 1, limit: 20 }),
+        notificationAPI.getUnreadCount(),
+      ])
+      const data = listResponse?.data
       const list = data?.notifications || data?.data?.notifications || []
       const normalized = Array.isArray(list)
         ? list.map((n: any) => ({
             ...n,
             id: n?.id || n?._id || String(n?._id || n?.id || ''),
+            read: Boolean(n?.isRead ?? n?.read),
           }))
         : []
       setNotifications(normalized)
+      setUnreadCount(Number(unreadResponse?.data?.unreadCount || 0))
     } catch (error: any) {
       // Avoid spamming errors in console if the endpoint is not available
       if (process.env.NODE_ENV !== 'production') {
@@ -60,6 +64,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     try {
       await notificationAPI.markAsRead(id)
       setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)))
+      setUnreadCount((prev) => Math.max(0, prev - 1))
     } catch (error) {
       
     }
@@ -69,15 +74,28 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     try {
       await notificationAPI.markAllAsRead()
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
+      setUnreadCount(0)
     } catch (error) {
       
     }
   }
 
+  useEffect(() => {
+    const onSocketNotification = () => {
+      refreshNotifications()
+    }
+    window.addEventListener("socket:notification", onSocketNotification)
+    return () => window.removeEventListener("socket:notification", onSocketNotification)
+  }, [])
+
   const deleteNotification = async (id: string) => {
     try {
+      const deletingUnread = notifications.find((n) => n.id === id && !n.read)
       await notificationAPI.deleteNotification(id)
       setNotifications((prev) => prev.filter((n) => n.id !== id))
+      if (deletingUnread) {
+        setUnreadCount((prev) => Math.max(0, prev - 1))
+      }
     } catch (error) {
       
     }

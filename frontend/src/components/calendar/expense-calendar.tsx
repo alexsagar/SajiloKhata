@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -9,20 +9,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { ChevronLeft, ChevronRight, Plus, Receipt, DollarSign, Calendar, Filter, TrendingUp } from "lucide-react"
+import { ChevronLeft, ChevronRight, Calendar, BellRing, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { calendarAPI, expenseAPI, groupAPI, reminderAPI } from "@/lib/api"
-import { useAuth } from "@/contexts/auth-context"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { calendarAPI, groupAPI, reminderAPI } from "@/lib/api"
 import { useCurrency } from "@/contexts/currency-context"
 import { formatCurrency } from "@/lib/utils"
-import { CreateExpenseSchema } from "@/lib/validation"
-import { useForm } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
-import { z } from "zod"
-
-type CreateExpenseFormData = z.infer<typeof CreateExpenseSchema>
 
 const months = [
   "January", "February", "March", "April", "May", "June",
@@ -39,7 +32,6 @@ interface CalendarDay {
   totalBaseCents?: number
   count?: number
   reminders?: any[]
-  expenseTitles?: string[]
 }
 
 interface CalendarFilters {
@@ -50,9 +42,7 @@ interface CalendarFilters {
 export function ExpenseCalendar() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
-  const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false)
   const [isAddReminderOpen, setIsAddReminderOpen] = useState(false)
-  const [entryType, setEntryType] = useState<"expense" | "reminder">("expense")
   const [reminderTitle, setReminderTitle] = useState("")
   const [reminderDescription, setReminderDescription] = useState("")
   const [reminderAmount, setReminderAmount] = useState<number | undefined>(undefined)
@@ -64,7 +54,6 @@ export function ExpenseCalendar() {
   })
 
   const { toast } = useToast()
-  const { user } = useAuth()
   const { currency: userCurrency } = useCurrency()
   const queryClient = useQueryClient()
 
@@ -92,103 +81,7 @@ export function ExpenseCalendar() {
     staleTime: 5 * 60 * 1000,
   })
 
-  // Fetch expense events for the month (to get titles)
-  const monthStart = new Date(year, month - 1, 1).toISOString()
-  const monthEnd = new Date(year, month, 0, 23, 59, 59, 999).toISOString()
-  const { data: eventsData } = useQuery({
-    queryKey: ['calendar-events', year, month, filters],
-    queryFn: () =>
-      calendarAPI.getEvents({
-        start: monthStart,
-        end: monthEnd,
-        // only pass groupId when in group mode and a single group is selected
-        groupId: filters.mode === 'group' && filters.groupIds.length === 1 ? filters.groupIds[0] : undefined,
-      }),
-    staleTime: 5 * 60 * 1000,
-  })
-
-  // Create expense mutation
-  const createExpenseMutation = useMutation({
-    mutationFn: async (data: CreateExpenseFormData) => {
-      const formData = new FormData()
-      formData.append('description', data.description)
-      formData.append('amount', data.amount.toString())
-      formData.append('category', data.category || 'other')
-      formData.append('date', selectedDate || new Date().toISOString().split('T')[0])
-      if (data.notes) formData.append('notes', data.notes)
-      if (data.groupId) formData.append('groupId', data.groupId)
-      if (data.splitType) formData.append('splitType', data.splitType)
-      if (data.currencyCode) formData.append('currencyCode', data.currencyCode)
-
-      // Add required createdBy field
-      if (user?.id) {
-        formData.append('createdBy', user.id)
-      } else {
-        throw new Error('User not authenticated')
-      }
-
-      return expenseAPI.createExpense(formData)
-    },
-    onSuccess: () => {
-      toast({
-        title: "Expense Added",
-        description: "Expense has been added successfully",
-      })
-      setIsAddExpenseOpen(false)
-      form.reset()
-
-      // Invalidate all expense-related queries to ensure the list refreshes
-      queryClient.invalidateQueries({ queryKey: ["expenses"] })
-      queryClient.invalidateQueries({ queryKey: ["expenses", undefined] })
-      queryClient.invalidateQueries({ queryKey: ["expenses", null] })
-
-      // Invalidate calendar and analytics queries
-      queryClient.invalidateQueries({ queryKey: ['calendar-month'] })
-      queryClient.invalidateQueries({ queryKey: ['analytics-kpis'] })
-      queryClient.invalidateQueries({ queryKey: ['analytics-spend-over-time'] })
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to add expense",
-        variant: "destructive"
-      })
-    }
-  })
-
-  // Form setup
-  const form = useForm<CreateExpenseFormData>({
-    resolver: zodResolver(CreateExpenseSchema),
-    defaultValues: {
-      description: '',
-      amount: 0,
-      category: 'other',
-      notes: '',
-      groupId: undefined,
-      splitType: 'equal',
-      currencyCode: userCurrency,
-      date: selectedDate || new Date().toISOString().split('T')[0],
-    },
-  })
-
-  // Update form when selected date changes
-  useEffect(() => {
-    if (selectedDate) {
-      form.setValue('date', selectedDate)
-    }
-  }, [selectedDate, form])
-
-  // Update currency when group changes
-  const selectedGroupId = form.watch('groupId')
-  const selectedGroup = (groupsData as any)?.data?.data?.find((g: any) => g._id === selectedGroupId)
-
-  useEffect(() => {
-    if (filters.mode === 'personal') {
-      form.setValue('currencyCode', userCurrency)
-    } else if (selectedGroup && filters.mode === 'group') {
-      form.setValue('currencyCode', selectedGroup.currencyCode || userCurrency)
-    }
-  }, [filters.mode, selectedGroup, userCurrency, form])
+  const reminderList = (remindersData as any)?.data?.data || []
 
   const navigateMonth = (direction: 'prev' | 'next') => {
     setCurrentDate(prev => {
@@ -206,7 +99,6 @@ export function ExpenseCalendar() {
     setSelectedDate(date)
 
     // Check if this date has any reminders; if so, open reminder dialog prefilled
-    const reminderList = (remindersData as any)?.data?.data || []
     const remindersForDate = reminderList.filter((r: any) => {
       if (!r?.dueDate) return false
       const key = String(r.dueDate).split("T")[0]
@@ -220,29 +112,15 @@ export function ExpenseCalendar() {
       setReminderDescription(first.description || "")
       setReminderAmount(typeof first.amount === "number" ? first.amount : undefined)
       setReminderCategory(first.category || "utilities")
-      setEntryType("reminder")
-      setIsAddExpenseOpen(false)
       setIsAddReminderOpen(true)
     } else {
       setSelectedReminderId(null)
-      setEntryType("expense")
-      setIsAddReminderOpen(false)
-      setIsAddExpenseOpen(true)
+      setReminderTitle("")
+      setReminderDescription("")
+      setReminderAmount(undefined)
+      setReminderCategory("utilities")
+      setIsAddReminderOpen(true)
     }
-  }
-
-  const handleAddExpense = (data: CreateExpenseFormData) => {
-    // Validate that group is selected when mode is group
-    if (filters.mode === 'group' && !data.groupId) {
-      toast({
-        title: "Validation Error",
-        description: "Please select a group for group expenses",
-        variant: "destructive"
-      })
-      return
-    }
-
-    createExpenseMutation.mutate(data)
   }
 
   const handleFilterChange = (key: keyof CalendarFilters, value: any) => {
@@ -258,22 +136,11 @@ export function ExpenseCalendar() {
 
     // Map reminders by date (YYYY-MM-DD)
     const remindersByDate = new Map<string, any[]>()
-    const reminderList = (remindersData as any)?.data?.data || []
     reminderList.forEach((r: any) => {
       if (!r?.dueDate) return
       const dateKey = String(r.dueDate).split('T')[0]
       if (!remindersByDate.has(dateKey)) remindersByDate.set(dateKey, [])
       remindersByDate.get(dateKey)!.push(r)
-    })
-
-    // Map expense events by date (YYYY-MM-DD) to capture titles
-    const expensesByDate = new Map<string, any[]>()
-    const eventsList = (eventsData as any)?.data?.events || []
-    eventsList.forEach((ev: any) => {
-      if (!ev?.start) return
-      const dateKey = new Date(ev.start).toISOString().split('T')[0]
-      if (!expensesByDate.has(dateKey)) expensesByDate.set(dateKey, [])
-      expensesByDate.get(dateKey)!.push(ev)
     })
 
     const days: CalendarDay[] = []
@@ -283,13 +150,11 @@ export function ExpenseCalendar() {
       const day = daysInPrevMonth - i
       const jsDate = new Date(year, currentMonthIndex - 1, day)
       const date = jsDate.toISOString().split('T')[0]
-      const expenseTitles = (expensesByDate.get(date) || []).map((e: any) => e.title).slice(0, 2)
       days.push({
         day,
         isCurrentMonth: false,
         date,
         reminders: remindersByDate.get(date) || [],
-        expenseTitles,
       })
     }
 
@@ -298,8 +163,6 @@ export function ExpenseCalendar() {
       const jsDate = new Date(year, currentMonthIndex, day)
       const date = jsDate.toISOString().split('T')[0]
       const dayData = monthData?.data?.days?.find((d: any) => d.date === date)
-      const expenseTitles = (expensesByDate.get(date) || []).map((e: any) => e.title).slice(0, 2)
-
       days.push({
         day,
         isCurrentMonth: true,
@@ -307,7 +170,6 @@ export function ExpenseCalendar() {
         totalBaseCents: dayData?.totalBaseCents || 0,
         count: dayData?.count || 0,
         reminders: remindersByDate.get(date) || [],
-        expenseTitles,
       })
     }
 
@@ -316,37 +178,34 @@ export function ExpenseCalendar() {
     for (let day = 1; day <= remainingDays; day++) {
       const jsDate = new Date(year, currentMonthIndex + 1, day)
       const date = jsDate.toISOString().split('T')[0]
-      const expenseTitles = (expensesByDate.get(date) || []).map((e: any) => e.title).slice(0, 2)
       days.push({
         day,
         isCurrentMonth: false,
         date,
         reminders: remindersByDate.get(date) || [],
-        expenseTitles,
       })
     }
 
     return days
-  }, [year, month, monthData, remindersData, eventsData])
-  const monthTotals = monthData?.data?.monthTotals || { totalBaseCents: 0, count: 0 }
+  }, [year, month, monthData, remindersData])
   const isToday = new Date().toISOString().split('T')[0]
-
-  if (monthLoading) {
-    return (
-      <div className="loading-responsive flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-          <h3 className="text-responsive-lg font-semibold mb-2">Loading Calendar</h3>
-          <p className="text-responsive-sm text-muted-foreground">Please wait while we load your calendar data...</p>
-        </div>
-      </div>
-    )
-  }
+  const reminderStats = useMemo(() => {
+    const total = reminderList.length
+    const todayDate = new Date(isToday)
+    const upcoming7d = reminderList.filter((r: any) => {
+      if (!r?.dueDate) return false
+      const due = new Date(String(r.dueDate))
+      if (Number.isNaN(due.getTime())) return false
+      const deltaDays = Math.floor((due.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24))
+      return deltaDays >= 0 && deltaDays <= 7
+    }).length
+    return { total, upcoming7d }
+  }, [reminderList, isToday])
 
   return (
     <div className="space-y-responsive-lg">
       {/* Top Bar with Filters */}
-      <Card className="mb-6">
+      <Card className="mb-6 border-white/10 bg-gradient-to-br from-white/[0.06] via-white/[0.03] to-transparent">
         <CardHeader className="p-responsive-4">
           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
             {/* Left side - Navigation and Month */}
@@ -381,8 +240,23 @@ export function ExpenseCalendar() {
               </div>
 
               {/* Month/Year Display */}
-              <div className="text-responsive-2xl font-semibold text-center sm:text-left">
-                {months[month - 1]} {year}
+              <div className="space-y-1">
+                <div className="text-responsive-2xl font-semibold text-center sm:text-left tracking-tight">
+                  {months[month - 1]} {year}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary" className="text-[11px]">
+                    <BellRing className="h-3 w-3 mr-1" />
+                    {reminderStats.total} reminders
+                  </Badge>
+                  <Badge variant="outline" className="text-[11px] border-amber-500/40 text-amber-500">
+                    <Sparkles className="h-3 w-3 mr-1" />
+                    {reminderStats.upcoming7d} due in 7 days
+                  </Badge>
+                  {monthLoading && (
+                    <span className="text-xs text-muted-foreground">Refreshing...</span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -435,27 +309,6 @@ export function ExpenseCalendar() {
                 </div>
               )}
 
-              {/* View Analytics CTA */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const params = new URLSearchParams({
-                    range: 'THIS_MONTH',
-                    mode: filters.mode,
-                    baseCurrency: userCurrency
-                  })
-                  if (filters.groupIds.length > 0 && filters.groupIds[0] !== 'all') {
-                    params.append('groupIds', filters.groupIds.join(','))
-                  }
-                  window.open(`/analytics?${params.toString()}`, '_blank')
-                }}
-                className="touch-friendly"
-              >
-                <TrendingUp className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">View Analytics</span>
-                <span className="sm:hidden">Analytics</span>
-              </Button>
             </div>
           </div>
         </CardHeader>
@@ -464,11 +317,11 @@ export function ExpenseCalendar() {
       <div className="grid gap-responsive-lg lg:grid-cols-3">
         {/* Calendar */}
         <div className="lg:col-span-2">
-          <Card>
+          <Card className="border-white/10 bg-white/[0.02] backdrop-blur-sm">
             <CardContent className="p-responsive-4">
-              <div className="grid grid-cols-7 gap-1 mb-4">
+              <div className="grid grid-cols-7 gap-1 mb-4 rounded-xl bg-white/[0.03] p-1">
                 {weekdays.map(day => (
-                  <div key={day} className="p-2 text-center text-responsive-sm font-medium text-muted-foreground">
+                  <div key={day} className="p-2 text-center text-responsive-sm font-semibold text-muted-foreground">
                     {day}
                   </div>
                 ))}
@@ -486,20 +339,24 @@ export function ExpenseCalendar() {
                     <button
                       key={index}
                       className={cn(
-                        "calendar-day min-h-[50px] sm:min-h-[80px] lg:min-h-[100px] p-1 sm:p-2 border rounded-md text-left hover:ring-1 hover:ring-white/10 transition-all cursor-pointer touch-friendly",
-                        !calendarDay.isCurrentMonth && "text-muted-foreground bg-muted/20",
-                        isTodayDate && "bg-primary/10 border-primary ring-2 ring-primary/20",
-                        isSelected && "bg-primary/20 border-primary",
-                        hasExpenses && "bg-muted/30"
+                        "calendar-day min-h-[56px] sm:min-h-[92px] lg:min-h-[110px] p-1.5 sm:p-2 border rounded-xl text-left transition-all cursor-pointer touch-friendly",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                        !calendarDay.isCurrentMonth && "text-muted-foreground bg-muted/20 border-white/5",
+                        calendarDay.isCurrentMonth && "bg-card/40 border-white/10 hover:bg-card/70",
+                        isTodayDate && "bg-primary/10 border-primary ring-2 ring-primary/25",
+                        isSelected && "bg-primary/15 border-primary/70",
+                        hasExpenses && "shadow-[inset_0_0_0_1px_rgba(34,197,94,0.25)]"
                       )}
                       onClick={() => handleDateClick(calendarDay.date)}
-                      aria-label={`Add expense on ${calendarDay.date}`}
+                      aria-label={`Add reminder on ${calendarDay.date}`}
                       role="button"
                     >
-                      <div className="text-responsive-xs sm:text-responsive-sm font-medium mb-1 sm:mb-2">
-                        {calendarDay.day}
+                      <div className="flex items-start justify-between mb-1 sm:mb-2">
+                        <div className="text-responsive-xs sm:text-responsive-sm font-semibold">
+                          {calendarDay.day}
+                        </div>
                         {isTodayDate && (
-                          <Badge variant="secondary" className="ml-1 text-xs hidden sm:inline">
+                          <Badge variant="secondary" className="text-[10px] h-5 px-1.5 hidden sm:inline-flex">
                             Today
                           </Badge>
                         )}
@@ -516,17 +373,18 @@ export function ExpenseCalendar() {
                         </div>
                       ) : null}
 
-                      {firstReminder && (firstReminder.title || firstReminder.description) && (
-                        <div className="mt-1 text-[10px] text-amber-600 line-clamp-1">
-                          {/* Prefer title, but fall back to description if title is empty */}
-                          {firstReminder.title || firstReminder.description}
-                          {reminderCount > 1 && (
-                            <span className="ml-1 text-[9px] text-amber-500">
-                              (+{reminderCount - 1})
-                            </span>
-                          )}
+                      {firstReminder && (firstReminder.title || firstReminder.description) ? (
+                        <div className="mt-1 rounded-md bg-amber-500/10 border border-amber-500/20 px-1.5 py-1">
+                          <div className="text-[10px] text-amber-700 dark:text-amber-300 line-clamp-1 font-medium">
+                            {firstReminder.title || firstReminder.description}
+                            {reminderCount > 1 && (
+                              <span className="ml-1 text-[9px] text-amber-500">
+                                (+{reminderCount - 1})
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      )}
+                      ) : null}
                     </button>
                   )
                 })}
@@ -538,275 +396,37 @@ export function ExpenseCalendar() {
         {/* Sidebar */}
         <div className="space-y-responsive">
           {/* Quick Actions */}
-          <Card>
+          <Card className="border-white/10 bg-white/[0.02] backdrop-blur-sm">
             <CardHeader className="p-responsive-3">
               <CardTitle className="text-responsive-lg">Quick Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 p-responsive-3">
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-xs text-muted-foreground">
+                Selected date:{" "}
+                <span className="font-medium text-foreground">
+                  {selectedDate ? new Date(selectedDate).toLocaleDateString() : "Today"}
+                </span>
+              </div>
               <Button
-                className="w-full touch-friendly"
+                className="w-full touch-friendly font-semibold"
                 size="sm"
-                onClick={() => {
-                  setEntryType("expense")
-                  setIsAddReminderOpen(false)
-                  setIsAddExpenseOpen(true)
-                }}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Expense
-              </Button>
-              <Button
-                className="w-full touch-friendly"
-                size="sm"
-                variant="outline"
+                variant="default"
                 onClick={() => {
                   if (!selectedDate) {
                     const today = new Date().toISOString().split("T")[0]
                     setSelectedDate(today)
                   }
-                  setEntryType("reminder")
-                  setIsAddExpenseOpen(false)
                   setIsAddReminderOpen(true)
                 }}
               >
                 <Calendar className="h-4 w-4 mr-2" />
-                Add Reminder
+                Create Reminder
               </Button>
             </CardContent>
           </Card>
 
-          {/* Monthly Summary */}
-          <Card>
-            <CardHeader className="p-responsive-3">
-              <CardTitle className="text-responsive-lg">Monthly Summary</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 p-responsive-3">
-              <div className="flex justify-between items-center">
-                <span className="text-responsive-sm text-muted-foreground">Total Expenses:</span>
-                <span className="text-responsive-lg font-semibold text-green-600">
-                  {formatCurrency(monthTotals.totalBaseCents / 100, userCurrency)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-responsive-sm text-muted-foreground">Count:</span>
-                <span className="text-responsive-sm font-medium">
-                  {monthTotals.count} expense{monthTotals.count !== 1 ? 's' : ''}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-responsive-sm text-muted-foreground">Currency:</span>
-                <span className="text-responsive-sm font-medium">{userCurrency}</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Empty State */}
-          {monthTotals.count === 0 && (
-            <Card>
-              <CardContent className="p-responsive-3 text-center">
-                <Calendar className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
-                <h3 className="text-responsive-lg font-semibold mb-2">No Expenses Yet</h3>
-                <p className="text-responsive-sm text-muted-foreground">
-                  Click any date to add your first expense and start tracking your spending
-                </p>
-              </CardContent>
-            </Card>
-          )}
         </div>
       </div>
-
-      {/* Add Expense Dialog */}
-      <Dialog open={isAddExpenseOpen} onOpenChange={(open) => {
-        setIsAddExpenseOpen(open)
-        if (!open) {
-          form.reset()
-        }
-      }}>
-        <DialogContent className="w-full max-w-md sm:max-w-lg max-h-[85vh] mx-auto bg-white dark:bg-[#12151c] ring-1 ring-black/10 dark:ring-white/10 shadow-xl">
-          <DialogHeader className="p-responsive-3">
-            <DialogTitle className="text-responsive-lg">
-              {entryType === "expense" ? "Add Personal Expense" : "Add Reminder"}
-            </DialogTitle>
-            <DialogDescription className="text-responsive-sm">
-              {selectedDate
-                ? `Selected date: ${new Date(selectedDate).toLocaleDateString()}`
-                : "Select a date from the calendar to prefill."}
-            </DialogDescription>
-          </DialogHeader>
-
-          {/* Entry type toggle */}
-          <div className="px-responsive-3 flex gap-2 mb-2">
-            <Button
-              type="button"
-              size="sm"
-              variant={entryType === "expense" ? "default" : "outline"}
-              className="touch-friendly flex-1"
-              onClick={() => {
-                setEntryType("expense")
-                setIsAddReminderOpen(false)
-                if (!isAddExpenseOpen) setIsAddExpenseOpen(true)
-              }}
-            >
-              Personal Expense
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={entryType === "reminder" ? "default" : "outline"}
-              className="touch-friendly flex-1"
-              onClick={() => {
-                setEntryType("reminder")
-                setIsAddExpenseOpen(false)
-                if (!selectedDate) {
-                  const today = new Date().toISOString().split("T")[0]
-                  setSelectedDate(today)
-                }
-                setIsAddReminderOpen(true)
-              }}
-            >
-              Reminder
-            </Button>
-          </div>
-
-          {/* Expense form */}
-          <form onSubmit={form.handleSubmit(handleAddExpense)} className="form-responsive space-y-4 p-responsive-3">
-            <div className="form-group">
-              <Label htmlFor="description" className="form-responsive">Description *</Label>
-              <Input
-                id="description"
-                placeholder="e.g., Lunch at restaurant"
-                {...form.register('description')}
-                className="form-responsive touch-friendly"
-              />
-              {form.formState.errors.description && (
-                <p className="text-responsive-xs text-red-600 mt-1">{form.formState.errors.description.message}</p>
-              )}
-            </div>
-
-            <div className="form-group">
-              <Label htmlFor="amount" className="form-responsive">Amount *</Label>
-              <Input
-                id="amount"
-                type="number"
-                step="0.01"
-                placeholder="0.00"
-                {...form.register('amount', { valueAsNumber: true })}
-                className="form-responsive touch-friendly"
-              />
-              {form.formState.errors.amount && (
-                <p className="text-responsive-xs text-red-600 mt-1">{form.formState.errors.amount.message}</p>
-              )}
-            </div>
-
-            <div className="form-group">
-              <Label htmlFor="mode" className="form-responsive">Mode *</Label>
-              <Select
-                value={filters.mode}
-                onValueChange={(value: 'personal' | 'group' | 'all') =>
-                  handleFilterChange('mode', value)
-                }
-              >
-                <SelectTrigger className="form-responsive touch-friendly">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="personal">Personal</SelectItem>
-                  <SelectItem value="group">Group</SelectItem>
-                  <SelectItem value="all">All</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {filters.mode !== 'personal' && (
-              <div className="form-group">
-                <Label htmlFor="groupId" className="form-responsive">Group *</Label>
-                <Select
-                  value={form.watch('groupId') || undefined}
-                  onValueChange={(value) => form.setValue('groupId', value)}
-                >
-                  <SelectTrigger className="form-responsive touch-friendly">
-                    <SelectValue placeholder="Select a group" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {groupsData?.data?.data?.map((group: any) => (
-                      <SelectItem key={group._id} value={group._id}>
-                        {group.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {form.formState.errors.groupId && (
-                  <p className="text-responsive-xs text-red-600 mt-1">{form.formState.errors.groupId.message}</p>
-                )}
-              </div>
-            )}
-
-            <div className="form-group">
-              <Label htmlFor="category" className="form-responsive">Category</Label>
-              <Select
-                value={form.watch('category')}
-                onValueChange={(value) => form.setValue('category', value as any)}
-              >
-                <SelectTrigger className="form-responsive touch-friendly">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="food">Food & Dining</SelectItem>
-                  <SelectItem value="transportation">Transportation</SelectItem>
-                  <SelectItem value="accommodation">Accommodation</SelectItem>
-                  <SelectItem value="entertainment">Entertainment</SelectItem>
-                  <SelectItem value="utilities">Bills & Utilities</SelectItem>
-                  <SelectItem value="shopping">Shopping</SelectItem>
-                  <SelectItem value="healthcare">Healthcare</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="form-group">
-              <Label htmlFor="currencyCode" className="form-responsive">Currency</Label>
-              <Input
-                id="currencyCode"
-                value={form.watch('currencyCode')}
-                onChange={(e) => form.setValue('currencyCode', e.target.value)}
-                placeholder="USD"
-                className="form-responsive touch-friendly"
-              />
-            </div>
-
-            <div className="form-group">
-              <Label htmlFor="notes" className="form-responsive">Notes</Label>
-              <Textarea
-                id="notes"
-                placeholder="Optional notes..."
-                {...form.register('notes')}
-                className="form-responsive touch-friendly"
-              />
-            </div>
-
-            <DialogFooter className="p-responsive-3">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setIsAddExpenseOpen(false)
-                  form.reset()
-                }}
-                className="touch-friendly"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={createExpenseMutation.isPending}
-                className="touch-friendly"
-              >
-                {createExpenseMutation.isPending ? 'Adding...' : 'Add Expense'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
 
       {/* Add Reminder Dialog */}
       <Dialog open={isAddReminderOpen} onOpenChange={setIsAddReminderOpen}>
@@ -902,7 +522,6 @@ export function ExpenseCalendar() {
                       setIsAddReminderOpen(false)
                       queryClient.invalidateQueries({ queryKey: ['calendar-reminders'] })
                       queryClient.invalidateQueries({ queryKey: ['calendar-month'] })
-                      queryClient.invalidateQueries({ queryKey: ['calendar-events'] })
                       toast({
                         title: 'Reminder deleted',
                         description: 'This reminder has been removed from your calendar.',
@@ -940,7 +559,6 @@ export function ExpenseCalendar() {
                     setIsAddReminderOpen(false)
                     queryClient.invalidateQueries({ queryKey: ['calendar-reminders'] })
                     queryClient.invalidateQueries({ queryKey: ['calendar-month'] })
-                    queryClient.invalidateQueries({ queryKey: ['calendar-events'] })
                     toast({
                       title: 'Reminder created',
                       description: 'We will notify you before this reminder is due.',

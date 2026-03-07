@@ -4,8 +4,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
-import { useState } from "react"
-import { useMutation } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { notificationAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 import { Loader2 } from "lucide-react"
@@ -32,9 +32,37 @@ export function NotificationSettings() {
       groupInvite: true,
     }
   })
+  const { data: preferencesResponse, isLoading } = useQuery({
+    queryKey: ["notification-preferences"],
+    queryFn: () => notificationAPI.getPreferences(),
+  })
+
+  const applyChannelValue = <T extends Record<string, boolean>>(target: T, value: unknown): T => {
+    if (typeof value === "boolean") {
+      const updated: Partial<T> = {}
+      for (const key of Object.keys(target) as Array<keyof T>) {
+        updated[key] = value as T[keyof T]
+      }
+      return { ...target, ...updated } as T
+    }
+    if (value && typeof value === "object") {
+      return { ...target, ...(value as Partial<T>) } as T
+    }
+    return target
+  }
+
+  useEffect(() => {
+    const pref = (preferencesResponse as any)?.data?.preferences
+    if (!pref) return
+    setSettings((prev) => ({
+      email: applyChannelValue(prev.email, pref.email),
+      push: applyChannelValue(prev.push, pref.push),
+      inApp: applyChannelValue(prev.inApp, pref.inApp),
+    }))
+  }, [preferencesResponse])
 
   const updateSettingsMutation = useMutation({
-    mutationFn: notificationAPI.updatePreferences,
+    mutationFn: (nextSettings: typeof settings) => notificationAPI.updatePreferences({ preferences: nextSettings }),
     onSuccess: () => {
       toast({
         title: "Settings updated",

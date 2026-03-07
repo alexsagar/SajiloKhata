@@ -1,19 +1,19 @@
 const express = require("express")
 const router = express.Router()
+const mongoose = require("mongoose")
 const Expense = require("../models/Expense")
 const Group = require("../models/Group")
-const User = require("../models/User")
 const { ok, fail } = require("../utils/http")
+const { getPagination, clampInt } = require("../utils/query")
 const {
   toBaseCurrency,
-  calculateMemberBalance,
   calculateBalanceMatrix,
   calculateSettlementSuggestions,
   calculateAgingBuckets,
-  calculateSettlementVelocity,
-  calculateFairnessMetrics,
-  calculateParticipationMetrics
 } = require("../utils/analytics-calcs")
+const { cacheUserResponse } = require("../middleware/cache")
+
+const MAX_EXPORT_ROWS = Number(process.env.ANALYTICS_EXPORT_MAX_ROWS || 10000)
 
 // --- Validation constants ---
 const VALID_MODES = ['personal', 'group', 'all']
@@ -29,6 +29,13 @@ function toStringArray(raw) {
   if (!raw) return []
   if (Array.isArray(raw)) return raw.map(String)
   return String(raw).split(',').map(s => s.trim()).filter(Boolean)
+}
+
+function toObjectId(value) {
+  if (!value) return null
+  if (value instanceof mongoose.Types.ObjectId) return value
+  const raw = String(value)
+  return mongoose.Types.ObjectId.isValid(raw) ? new mongoose.Types.ObjectId(raw) : null
 }
 
 /**
@@ -148,8 +155,14 @@ function buildDateFilter(timeConfig) {
  * Build base match query with ACL enforcement
  */
 async function buildBaseQuery(req, filters) {
-  const userId = req.user._id || req.user.id
+  const userIdRaw = req.user._id || req.user.id
+  const userId = toObjectId(userIdRaw) || userIdRaw
   const baseCurrency = req.user.preferences?.baseCurrency || 'USD'
+  const userGroups = await Group.find({
+    "members.user": userId,
+    isActive: true
+  }).select('_id')
+  const userGroupIds = userGroups.map(g => g._id)
 
   let matchQuery = {
     status: { $in: filters.status || ['active', 'settled'] },
@@ -165,38 +178,30 @@ async function buildBaseQuery(req, filters) {
   // Handle mode filtering
   if (filters.mode === 'personal') {
     matchQuery.groupId = null
-    matchQuery.$or = [
-      { paidBy: userId },
-      { "splits.user": userId }
-    ]
+    // Keep parity with dashboard list: personal expenses created by current user.
+    matchQuery.paidBy = userId
   } else if (filters.mode === 'group') {
     matchQuery.groupId = { $exists: true, $ne: null }
-
-    // Get user's groups for ACL
-    const userGroups = await Group.find({
-      "members.user": userId,
-      isActive: true
-    }).select('_id')
 
     if (filters.groupIds && filters.groupIds.length > 0) {
       // Filter by specific groups and verify membership
       const allowedGroupIds = filters.groupIds.filter(groupId =>
         userGroups.some(g => g._id.toString() === groupId)
       )
-      matchQuery.groupId = { $in: allowedGroupIds }
+      matchQuery.groupId = {
+        $in: allowedGroupIds
+          .map(id => toObjectId(id))
+          .filter(Boolean)
+      }
     } else {
       matchQuery.groupId = { $in: userGroups.map(g => g._id) }
     }
-
-    matchQuery.$or = [
-      { paidBy: userId },
-      { "splits.user": userId }
-    ]
   } else {
-    // 'all' mode - include both personal and group expenses
+    // 'all' mode parity with dashboard:
+    // all active expenses in user's groups + user's personal expenses.
     matchQuery.$or = [
-      { paidBy: userId },
-      { "splits.user": userId }
+      { groupId: { $in: userGroupIds } },
+      { groupId: null, paidBy: userId }
     ]
   }
 
@@ -214,11 +219,17 @@ async function buildBaseQuery(req, filters) {
   }
 
   if (filters.createdBy && filters.createdBy.length > 0) {
-    matchQuery.createdBy = { $in: filters.createdBy }
+    const createdByIds = filters.createdBy.map(id => toObjectId(id)).filter(Boolean)
+    if (createdByIds.length > 0) {
+      matchQuery.createdBy = { $in: createdByIds }
+    }
   }
 
   if (filters.paidBy && filters.paidBy.length > 0) {
-    matchQuery.paidBy = { $in: filters.paidBy }
+    const paidByIds = filters.paidBy.map(id => toObjectId(id)).filter(Boolean)
+    if (paidByIds.length > 0) {
+      matchQuery.paidBy = { $in: paidByIds }
+    }
   }
 
   return { matchQuery, baseCurrency }
@@ -227,84 +238,132 @@ async function buildBaseQuery(req, filters) {
 /**
  * 1. KPIs endpoint
  */
-router.get("/kpis", validateAnalyticsFilters, async (req, res) => {
+router.get("/kpis", cacheUserResponse({ namespace: "analytics", ttlSeconds: 120 }), validateAnalyticsFilters, async (req, res) => {
   try {
     const filters = req.analyticsFilters
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
-    const userId = (req.user._id || req.user.id).toString()
+    const userId = toObjectId(req.user._id || req.user.id) || (req.user._id || req.user.id)
 
-    // Get expenses for calculations
-    const expenses = await Expense.find(matchQuery)
-      .select('amountCents currencyCode fxRate category status date groupId paidBy splits')
-      .lean()
+    const [totalsAgg, activeGroups, participantsAgg, userNetAgg, settlementAgg] = await Promise.all([
+      Expense.aggregate([
+        { $match: matchQuery },
+        {
+          $group: {
+            _id: null,
+            totalSpendBaseCents: {
+              $sum: { $multiply: ["$amountCents", { $ifNull: ["$fxRate", 1] }] },
+            },
+            personalSpendBaseCents: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$groupId", null] },
+                  { $multiply: ["$amountCents", { $ifNull: ["$fxRate", 1] }] },
+                  0,
+                ],
+              },
+            },
+            groupSpendBaseCents: {
+              $sum: {
+                $cond: [
+                  { $ne: ["$groupId", null] },
+                  { $multiply: ["$amountCents", { $ifNull: ["$fxRate", 1] }] },
+                  0,
+                ],
+              },
+            },
+            personalCount: { $sum: { $cond: [{ $eq: ["$groupId", null] }, 1, 0] } },
+            groupCount: { $sum: { $cond: [{ $ne: ["$groupId", null] }, 1, 0] } },
+            totalCount: { $sum: 1 },
+          },
+        },
+      ]),
+      Expense.distinct("groupId", { ...matchQuery, groupId: { $exists: true, $ne: null } }),
+      Expense.aggregate([
+        { $match: matchQuery },
+        {
+          $project: {
+            participants: { $concatArrays: [["$paidBy"], "$splits.user"] },
+          },
+        },
+        { $unwind: "$participants" },
+        { $group: { _id: null, ids: { $addToSet: "$participants" } } },
+      ]),
+      Expense.aggregate([
+        { $match: matchQuery },
+        {
+          $project: {
+            amountBaseCents: { $multiply: ["$amountCents", { $ifNull: ["$fxRate", 1] }] },
+            paidBy: 1,
+            userSplit: {
+              $first: {
+                $filter: {
+                  input: "$splits",
+                  as: "split",
+                  cond: { $eq: ["$$split.user", userId] },
+                },
+              },
+            },
+            fxRate: { $ifNull: ["$fxRate", 1] },
+          },
+        },
+        {
+          $project: {
+            netContribution: {
+              $cond: [
+                { $eq: ["$paidBy", userId] },
+                {
+                  $subtract: [
+                    "$amountBaseCents",
+                    { $multiply: [{ $ifNull: ["$userSplit.amountCents", 0] }, "$fxRate"] },
+                  ],
+                },
+                { $multiply: [{ $ifNull: ["$userSplit.amountCents", 0] }, "$fxRate", -1] },
+              ],
+            },
+          },
+        },
+        { $group: { _id: null, netBalanceBaseCents: { $sum: "$netContribution" } } },
+      ]),
+      Expense.aggregate([
+        {
+          $match: {
+            ...matchQuery,
+            status: "settled",
+            settledAt: { $exists: true, $ne: null },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            avgSettlementDays: {
+              $avg: {
+                $divide: [{ $subtract: ["$settledAt", "$date"] }, 1000 * 60 * 60 * 24],
+              },
+            },
+          },
+        },
+      ]),
+    ])
 
-    // Calculate KPIs
-    let totalSpendBaseCents = 0
-    let expensesCount = { personal: 0, group: 0 }
-    let activeGroups = new Set()
-    let activeMembers = new Set()
-
-    expenses.forEach(expense => {
-      const baseAmount = toBaseCurrency(expense.amountCents, expense.fxRate || 1.0)
-      totalSpendBaseCents += baseAmount
-
-      if (expense.groupId) {
-        expensesCount.group++
-        activeGroups.add(expense.groupId.toString())
-        activeMembers.add(expense.paidBy.toString())
-        expense.splits.forEach(split => activeMembers.add(split.user.toString()))
-      } else {
-        expensesCount.personal++
-        activeMembers.add(expense.paidBy.toString())
-      }
-    })
-
-    // Calculate net balance for current user
-    const userExpenses = expenses.filter(e =>
-      e.paidBy.toString() === userId ||
-      e.splits.some(s => s.user.toString() === userId)
-    )
-
-    let netBalanceBaseCents = 0
-    userExpenses.forEach(expense => {
-      const isPayer = expense.paidBy.toString() === userId
-      const userSplit = expense.splits.find(s => s.user.toString() === userId)
-
-      if (userSplit) {
-        const baseAmount = toBaseCurrency(expense.amountCents, expense.fxRate || 1.0)
-        const splitBaseAmount = toBaseCurrency(userSplit.amountCents, expense.fxRate || 1.0)
-
-        if (isPayer) {
-          netBalanceBaseCents += baseAmount - splitBaseAmount
-        } else {
-          netBalanceBaseCents -= splitBaseAmount
-        }
-      }
-    })
-
-    // Calculate average expense size
-    const avgExpenseSizeBaseCents = expenses.length > 0 ?
-      Math.round(totalSpendBaseCents / expenses.length) : 0
-
-    // Calculate average settlement days
-    const settledExpenses = expenses.filter(e => e.status === 'settled' && e.settledAt)
-    let avgSettlementDays = 0
-
-    if (settledExpenses.length > 0) {
-      const totalDays = settledExpenses.reduce((sum, expense) => {
-        const days = Math.floor((new Date(expense.settledAt) - new Date(expense.date)) / (1000 * 60 * 60 * 24))
-        return sum + days
-      }, 0)
-      avgSettlementDays = Math.round(totalDays / settledExpenses.length)
+    const totals = totalsAgg[0] || {}
+    const avgExpenseSizeBaseCents =
+      totals.totalCount > 0 ? Math.round((totals.totalSpendBaseCents || 0) / totals.totalCount) : 0
+    const netBalanceBaseCents = Math.round(userNetAgg[0]?.netBalanceBaseCents || 0)
+    const avgSettlementDays = Math.round(settlementAgg[0]?.avgSettlementDays || 0)
+    const expensesCount = {
+      personal: totals.personalCount || 0,
+      group: totals.groupCount || 0,
     }
 
     return ok(res, {
-      totalSpendBaseCents,
+      totalSpendBaseCents: Math.round(totals.totalSpendBaseCents || 0),
+      personalSpendBaseCents: Math.round(totals.personalSpendBaseCents || 0),
+      groupSpendBaseCents: Math.round(totals.groupSpendBaseCents || 0),
       netBalanceBaseCents,
       expensesCount,
       avgExpenseSizeBaseCents,
-      activeGroups: activeGroups.size,
-      activeMembers: activeMembers.size,
+      activeGroups: activeGroups.length,
+      activeMembers: participantsAgg[0]?.ids?.length || 0,
       avgSettlementDays,
       baseCurrency
     })
@@ -317,7 +376,7 @@ router.get("/kpis", validateAnalyticsFilters, async (req, res) => {
 /**
  * 2. Spend over time chart
  */
-router.get("/spend-over-time", validateAnalyticsFilters, async (req, res) => {
+router.get("/spend-over-time", cacheUserResponse({ namespace: "analytics", ttlSeconds: 120 }), validateAnalyticsFilters, async (req, res) => {
   try {
     const filters = req.analyticsFilters
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
@@ -378,7 +437,7 @@ router.get("/spend-over-time", validateAnalyticsFilters, async (req, res) => {
 /**
  * 3. Category breakdown
  */
-router.get("/category-breakdown", validateAnalyticsFilters, async (req, res) => {
+router.get("/category-breakdown", cacheUserResponse({ namespace: "analytics", ttlSeconds: 120 }), validateAnalyticsFilters, async (req, res) => {
   try {
     const filters = req.analyticsFilters
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
@@ -417,7 +476,7 @@ router.get("/category-breakdown", validateAnalyticsFilters, async (req, res) => 
 /**
  * 4. Top partners (users/groups)
  */
-router.get("/top-partners", validateAnalyticsFilters, async (req, res) => {
+router.get("/top-partners", cacheUserResponse({ namespace: "analytics", ttlSeconds: 120 }), validateAnalyticsFilters, async (req, res) => {
   try {
     const filters = req.analyticsFilters
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
@@ -504,7 +563,7 @@ router.get("/top-partners", validateAnalyticsFilters, async (req, res) => {
 /**
  * 5. Balance matrix for group expenses
  */
-router.get("/balance-matrix", async (req, res) => {
+router.get("/balance-matrix", cacheUserResponse({ namespace: "analytics", ttlSeconds: 90 }), async (req, res) => {
   try {
     const userId = req.user._id || req.user.id
     const { groupId } = req.query
@@ -540,7 +599,7 @@ router.get("/balance-matrix", async (req, res) => {
 /**
  * 6. Settlement suggestions
  */
-router.get("/simplify", async (req, res) => {
+router.get("/simplify", cacheUserResponse({ namespace: "analytics", ttlSeconds: 90 }), async (req, res) => {
   try {
     const userId = req.user._id || req.user.id
     const { groupId } = req.query
@@ -576,7 +635,7 @@ router.get("/simplify", async (req, res) => {
 /**
  * 7. Aging buckets for unsettled balances
  */
-router.get("/aging", validateAnalyticsFilters, async (req, res) => {
+router.get("/aging", cacheUserResponse({ namespace: "analytics", ttlSeconds: 120 }), validateAnalyticsFilters, async (req, res) => {
   try {
     const filters = req.analyticsFilters
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
@@ -588,7 +647,13 @@ router.get("/aging", validateAnalyticsFilters, async (req, res) => {
       .select('amountCents fxRate date status')
       .lean()
 
-    const agingBuckets = calculateAgingBuckets(expenses)
+    // Normalize to base currency before bucketing so aging totals are comparable.
+    const baseCurrencyExpenses = expenses.map(expense => ({
+      ...expense,
+      amountCents: toBaseCurrency(expense.amountCents || 0, expense.fxRate || 1.0),
+    }))
+
+    const agingBuckets = calculateAgingBuckets(baseCurrencyExpenses)
 
     return ok(res, {
       data: agingBuckets,
@@ -603,20 +668,19 @@ router.get("/aging", validateAnalyticsFilters, async (req, res) => {
 /**
  * 8. Ledger export
  */
-router.get("/ledger", validateAnalyticsFilters, async (req, res) => {
+router.get("/ledger", cacheUserResponse({ namespace: "analytics", ttlSeconds: 90 }), validateAnalyticsFilters, async (req, res) => {
   try {
     const filters = req.analyticsFilters
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
-
-    const { page = 1, limit = 50 } = req.query
+    const { page, limit, skip } = getPagination(req.query, { defaultLimit: 50, maxLimit: 200 })
 
     const expenses = await Expense.find(matchQuery)
       .populate('paidBy', 'firstName lastName')
       .populate('groupId', 'name')
       .select('description amountCents currencyCode fxRate category date status groupId paidBy splits')
       .sort({ date: -1 })
-      .limit(Number(limit))
-      .skip((Number(page) - 1) * Number(limit))
+      .limit(limit)
+      .skip(skip)
       .lean()
 
     const total = await Expense.countDocuments(matchQuery)
@@ -641,7 +705,7 @@ router.get("/ledger", validateAnalyticsFilters, async (req, res) => {
       data: ledger,
       pagination: {
         page: Number(page),
-        limit: Number(limit),
+        limit,
         total,
         totalPages: Math.ceil(total / limit)
       },
@@ -659,39 +723,80 @@ router.get("/ledger", validateAnalyticsFilters, async (req, res) => {
 router.get("/export/csv", validateAnalyticsFilters, async (req, res) => {
   try {
     const filters = req.analyticsFilters
-    const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
+    const { matchQuery } = await buildBaseQuery(req, filters)
+    const exportLimit = clampInt(req.query.limit, { min: 1, max: MAX_EXPORT_ROWS, fallback: MAX_EXPORT_ROWS })
 
-    const expenses = await Expense.find(matchQuery)
-      .populate('paidBy', 'firstName lastName')
-      .populate('groupId', 'name')
-      .select('description amountCents currencyCode fxRate category date status groupId paidBy splits')
-      .sort({ date: -1 })
-      .lean()
+    const pipeline = [
+      { $match: matchQuery },
+      { $sort: { date: -1 } },
+      { $limit: exportLimit },
+      {
+        $lookup: {
+          from: "users",
+          localField: "paidBy",
+          foreignField: "_id",
+          as: "paidByUser",
+        },
+      },
+      {
+        $lookup: {
+          from: "groups",
+          localField: "groupId",
+          foreignField: "_id",
+          as: "group",
+        },
+      },
+      {
+        $project: {
+          description: 1,
+          amountCents: 1,
+          currencyCode: 1,
+          category: 1,
+          date: 1,
+          status: 1,
+          splitsCount: { $size: "$splits" },
+          type: { $cond: [{ $eq: ["$groupId", null] }, "personal", "group"] },
+          groupName: { $ifNull: [{ $first: "$group.name" }, "N/A"] },
+          paidByName: {
+            $trim: {
+              input: {
+                $concat: [
+                  { $ifNull: [{ $first: "$paidByUser.firstName" }, ""] },
+                  " ",
+                  { $ifNull: [{ $first: "$paidByUser.lastName" }, ""] },
+                ],
+              },
+            },
+          },
+          amountBaseCents: { $multiply: ["$amountCents", { $ifNull: ["$fxRate", 1] }] },
+        },
+      },
+    ]
 
-    // Generate CSV
-    const csvHeader = 'Date,Description,Amount,Currency,Base Amount,Category,Type,Group,Paid By,Status,Participants\n'
-    const csvRows = expenses.map(expense => {
-      const amountBaseCents = toBaseCurrency(expense.amountCents, expense.fxRate || 1.0)
-      return [
-        new Date(expense.date).toISOString().split('T')[0],
-        `"${expense.description}"`,
-        (expense.amountCents / 100).toFixed(2),
-        expense.currencyCode,
-        (amountBaseCents / 100).toFixed(2),
-        expense.category,
-        expense.groupId ? 'group' : 'personal',
-        expense.groupId?.name || 'N/A',
-        `"${expense.paidBy.firstName} ${expense.paidBy.lastName}"`,
-        expense.status,
-        expense.splits.length
-      ].join(',')
-    }).join('\n')
-
-    const csv = csvHeader + csvRows
-
+    const cursor = Expense.aggregate(pipeline).cursor({ batchSize: 250 }).exec()
     res.setHeader('Content-Type', 'text/csv')
     res.setHeader('Content-Disposition', `attachment; filename="expenses-${new Date().toISOString().split('T')[0]}.csv"`)
-    res.send(csv)
+    res.write('Date,Description,Amount,Currency,Base Amount,Category,Type,Group,Paid By,Status,Participants\n')
+
+    for await (const expense of cursor) {
+      const description = String(expense.description || "").replace(/"/g, '""')
+      const paidByName = String(expense.paidByName || "").replace(/"/g, '""')
+      const row = [
+        new Date(expense.date).toISOString().split('T')[0],
+        `"${description}"`,
+        (Number(expense.amountCents || 0) / 100).toFixed(2),
+        expense.currencyCode || "USD",
+        (Number(expense.amountBaseCents || 0) / 100).toFixed(2),
+        expense.category || "other",
+        expense.type,
+        expense.groupName || "N/A",
+        `"${paidByName}"`,
+        expense.status || "active",
+        expense.splitsCount || 0,
+      ].join(",")
+      res.write(`${row}\n`)
+    }
+    return res.end()
   } catch (error) {
     console.error('[Analytics] CSV export error:', error.message)
     return fail(res, 'Failed to export CSV', 500)
@@ -701,7 +806,7 @@ router.get("/export/csv", validateAnalyticsFilters, async (req, res) => {
 /**
  * 10. Group health metrics (admin)
  */
-router.get("/group-health", async (req, res) => {
+router.get("/group-health", cacheUserResponse({ namespace: "analytics", ttlSeconds: 90 }), async (req, res) => {
   try {
     const userId = req.user._id || req.user.id
     const { groupId } = req.query

@@ -29,7 +29,7 @@ export function NotificationsCenter({ children }: NotificationsCenterProps) {
 
   const { data: notifications } = useQuery({
     queryKey: ["notifications"],
-    queryFn: notificationAPI.getNotifications,
+    queryFn: () => notificationAPI.getNotifications({ page: 1, limit: 20 }),
     refetchInterval: 30000, // Refetch every 30 seconds
   })
 
@@ -137,7 +137,7 @@ export function NotificationsCenter({ children }: NotificationsCenterProps) {
               </Button>
             )}
             <Button variant="ghost" size="sm" asChild>
-              <Link href="/settings/notifications">
+              <Link href="/notifications">
                 <Settings className="h-4 w-4" />
               </Link>
             </Button>

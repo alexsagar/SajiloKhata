@@ -11,6 +11,17 @@ const notificationSchema = new mongoose.Schema(
       type: String,
       required: true,
       enum: [
+        "EXPENSE_CREATED",
+        "EXPENSE_UPDATED",
+        "EXPENSE_DELETED",
+        "SPLIT_CHANGED_FOR_YOU",
+        "SETTLEMENT_REQUESTED",
+        "SETTLEMENT_RECORDED",
+        "SETTLEMENT_REMINDER",
+        "RECEIPT_OCR_COMPLETED",
+        "RECEIPT_OCR_FAILED",
+        "RECEIPT_AMOUNT_MISMATCH",
+        "EXPENSE_COMMENT_MENTION",
         "expense_added",
         "expense_updated",
         "expense_deleted",
@@ -39,9 +50,25 @@ const notificationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: {},
     },
+    entityType: {
+      type: String,
+      enum: ["expense", "group", "receipt", "settlement", "user", "system"],
+      default: "system",
+    },
+    entityId: {
+      type: String,
+      default: null,
+    },
+    groupId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Group",
+      default: null,
+      index: true,
+    },
     read: {
       type: Boolean,
       default: false,
+      alias: "isRead",
     },
     readAt: {
       type: Date,
@@ -60,13 +87,17 @@ const notificationSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   },
 )
 
 // Indexes for efficient queries
 notificationSchema.index({ userId: 1, createdAt: -1 })
 notificationSchema.index({ userId: 1, read: 1 })
+notificationSchema.index({ userId: 1, read: 1, createdAt: -1 })
 notificationSchema.index({ type: 1 })
+notificationSchema.index({ userId: 1, type: 1, groupId: 1, createdAt: -1 })
 notificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
 
 // Virtual for checking if notification is expired

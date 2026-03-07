@@ -242,7 +242,7 @@ export function GroupChat() {
 
     return () => {
       window.removeEventListener('socket:message:new', onMessage)
-      window.removeEventListener('group_created', handleGroupCreated)
+      socket.off('group_created', handleGroupCreated)
     }
   }, [socket, user, selectedGroup, selectedGroup?.id, joinGroups])
 

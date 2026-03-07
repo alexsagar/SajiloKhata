@@ -40,6 +40,9 @@ class OCRService {
         merchantName: null,
         total: null,
         subtotal: null,
+        discount: null,
+        serviceCharge: null,
+        vat: null,
         tax: null,
         date: null,
         items: [],
@@ -52,9 +55,18 @@ class OCRService {
       merchantName: null,
       total: null,
       subtotal: null,
+      discount: null,
+      serviceCharge: null,
+      vat: null,
       tax: null,
       date: null,
       items: [],
+    }
+    const fieldSourceLines = {
+      discount: null,
+      serviceCharge: null,
+      vat: null,
+      tax: null,
     }
 
     // Try to find merchant name (usually first few lines)
@@ -66,45 +78,69 @@ class OCRService {
       }
     }
 
-    // Look for total, subtotal, tax with improved patterns
-    for (const line of lines) {
+    // Look for financial fields and support value on the next line.
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i]
       const lowerLine = line.toLowerCase()
+      const amount = this.extractAmountFromNearbyLines(lines, i)
 
-      // Total patterns - more comprehensive
-      if ((lowerLine.includes("total") && !lowerLine.includes("subtotal")) ||
-        lowerLine.includes("amount due") ||
-        lowerLine.includes("balance") ||
-        lowerLine.includes("total payable") ||
-        lowerLine.includes("payable") ||
-        lowerLine.match(/\btotal\s*amount\b/) ||
-        lowerLine.match(/\bgrand\s*total\b/)) {
-        const amount = this.extractAmount(line)
-        if (amount && (!result.total || amount > result.total)) {
-          result.total = amount
-        }
-      }
-
-      // Subtotal patterns
-      if (lowerLine.includes("subtotal") ||
+      // Subtotal
+      if (
+        lowerLine.includes("subtotal") ||
         lowerLine.includes("sub total") ||
         lowerLine.includes("sub-total") ||
-        lowerLine.match(/\bsubtotal\b/)) {
-        const amount = this.extractAmount(line)
-        if (amount) {
-          result.subtotal = amount
-        }
+        lowerLine.match(/\bsubtotal\b/)
+      ) {
+        if (amount) result.subtotal = amount
       }
 
-      // Tax patterns - more comprehensive
-      if ((lowerLine.includes("tax") && !lowerLine.includes("total")) ||
+      // Discount
+      if (lowerLine.includes("discount") || lowerLine.includes("disc")) {
+        const discountAmount = this.extractAmountFromNearbyLines(lines, i, { preferNextIfPercent: true })
+        if (discountAmount) result.discount = discountAmount
+        fieldSourceLines.discount = line
+      }
+
+      // Service charge
+      if (
+        lowerLine.includes("service charge") ||
+        lowerLine.includes("service") ||
+        lowerLine.includes("svc")
+      ) {
+        const serviceAmount = this.extractAmountFromNearbyLines(lines, i, { preferNextIfPercent: true })
+        if (serviceAmount) result.serviceCharge = serviceAmount
+        fieldSourceLines.serviceCharge = line
+      }
+
+      // VAT / Tax
+      if (lowerLine.includes("vat")) {
+        const vatAmount = this.extractAmountFromNearbyLines(lines, i, { preferNextIfPercent: true })
+        if (vatAmount) result.vat = vatAmount
+        fieldSourceLines.vat = line
+      }
+      if (
+        (lowerLine.includes("tax") && !lowerLine.includes("total")) ||
         lowerLine.includes("vat") ||
         lowerLine.includes("gst") ||
         lowerLine.includes("hst") ||
         lowerLine.match(/\btax\s*amount\b/) ||
-        lowerLine.match(/\bsales\s*tax\b/)) {
-        const amount = this.extractAmount(line)
-        if (amount) {
-          result.tax = amount
+        lowerLine.match(/\bsales\s*tax\b/)
+      ) {
+        const taxAmount = this.extractAmountFromNearbyLines(lines, i, { preferNextIfPercent: true })
+        if (taxAmount) result.tax = taxAmount
+        fieldSourceLines.tax = line
+      }
+
+      // Total patterns (excluding subtotal)
+      if (
+        (lowerLine.includes("total") && !lowerLine.includes("subtotal")) ||
+        lowerLine.includes("amount due") ||
+        lowerLine.includes("balance") ||
+        lowerLine.includes("total payable") ||
+        lowerLine.match(/\bgrand\s*total\b/)
+      ) {
+        if (amount && (!result.total || amount > result.total)) {
+          result.total = amount
         }
       }
 
@@ -112,6 +148,27 @@ class OCRService {
       const date = this.extractDate(line)
       if (date && !result.date) {
         result.date = date
+      }
+    }
+
+    if (!result.tax && result.vat) {
+      result.tax = result.vat
+    }
+
+    this.applyPercentageBasedAdjustments(result, fieldSourceLines)
+    this.applyFinancialSanityChecks(result, lines)
+
+    // Reconcile total if breakdown is available and extracted total is missing/wrong.
+    if (result.subtotal && (result.tax || result.vat || result.serviceCharge || result.discount)) {
+      const computed =
+        (result.subtotal || 0) -
+        (result.discount || 0) +
+        (result.serviceCharge || 0) +
+        (result.vat || result.tax || 0)
+      if (computed > 0) {
+        if (!result.total || Math.abs(result.total - computed) > 1) {
+          result.total = Number(computed.toFixed(2))
+        }
       }
     }
 
@@ -133,6 +190,90 @@ class OCRService {
     }
 
     return result
+  }
+
+  applyPercentageBasedAdjustments(result, fieldSourceLines) {
+    const subtotal = Number(result.subtotal || 0)
+    if (!subtotal) return
+
+    const discountPct = this.extractPercentage(fieldSourceLines.discount)
+    if (discountPct !== null) {
+      const computedDiscount = this.round2((subtotal * discountPct) / 100)
+      const currentDiscount = Number(result.discount || 0)
+      if (!currentDiscount || this.relativeDiff(currentDiscount, computedDiscount) > 0.35) {
+        result.discount = computedDiscount
+      }
+    }
+
+    const servicePct = this.extractPercentage(fieldSourceLines.serviceCharge)
+    if (servicePct !== null) {
+      const base = subtotal - Number(result.discount || 0)
+      const computedService = this.round2((base * servicePct) / 100)
+      const currentService = Number(result.serviceCharge || 0)
+      // If percentage looks suspiciously tiny (common OCR issue like 10% -> 1%), prefer extracted amount.
+      if (!(servicePct <= 2 && currentService > computedService * 5)) {
+        if (!currentService || this.relativeDiff(currentService, computedService) > 0.35) {
+          result.serviceCharge = computedService
+        }
+      }
+    }
+
+    const vatPct = this.extractPercentage(fieldSourceLines.vat) ?? this.extractPercentage(fieldSourceLines.tax)
+    if (vatPct !== null) {
+      // Most local receipts apply VAT on discounted subtotal (before service charge).
+      const base = subtotal - Number(result.discount || 0)
+      const computedVat = this.round2((base * vatPct) / 100)
+      const currentVat = Number(result.vat || result.tax || 0)
+      if (!currentVat || this.relativeDiff(currentVat, computedVat) > 0.35) {
+        result.vat = computedVat
+        result.tax = computedVat
+      }
+    }
+  }
+
+  applyFinancialSanityChecks(result, lines) {
+    const subtotal = Number(result.subtotal || 0)
+    if (!subtotal) return
+
+    const maxTypicalTax = subtotal * 0.35
+    const amounts = lines.map((line) => this.extractAmount(line)).filter((v) => Number.isFinite(v) && v > 0)
+    const plausibleLowAmounts = amounts.filter((v) => v <= maxTypicalTax).sort((a, b) => b - a)
+
+    if (result.vat && result.vat > maxTypicalTax && plausibleLowAmounts.length > 0) {
+      result.vat = plausibleLowAmounts[0]
+    }
+    if (result.tax && result.tax > maxTypicalTax && plausibleLowAmounts.length > 0) {
+      result.tax = result.vat && result.vat <= maxTypicalTax ? result.vat : plausibleLowAmounts[0]
+    }
+
+    const maxPlausibleTotal = subtotal * 1.6
+    if (result.total && result.total > maxPlausibleTotal) {
+      const plausibleTotals = amounts.filter((v) => v >= subtotal * 0.5 && v <= maxPlausibleTotal).sort((a, b) => b - a)
+      if (plausibleTotals.length > 0) {
+        result.total = plausibleTotals[0]
+      }
+    }
+  }
+
+  extractPercentage(text) {
+    if (!text || typeof text !== "string") return null
+    const match = text.match(/(\d{1,2}(?:\.\d+)?)\s*%/)
+    if (!match?.[1]) return null
+    const value = Number.parseFloat(match[1])
+    if (!Number.isFinite(value) || value < 0 || value > 100) return null
+    return value
+  }
+
+  relativeDiff(a, b) {
+    const x = Number(a || 0)
+    const y = Number(b || 0)
+    if (!x && !y) return 0
+    const denom = Math.max(Math.abs(x), Math.abs(y), 1)
+    return Math.abs(x - y) / denom
+  }
+
+  round2(value) {
+    return Math.round(Number(value || 0) * 100) / 100
   }
 
   extractAmount(text) {
@@ -210,6 +351,27 @@ class OCRService {
         }
       }
     }
+
+    return null
+  }
+
+  extractAmountFromNearbyLines(lines, index, options = {}) {
+    const currentLine = lines[index] || ""
+    const nextLine = lines[index + 1] || ""
+    const prevLine = lines[index - 1] || ""
+    const current = this.extractAmount(currentLine)
+    const next = this.extractAmount(nextLine)
+    const prev = this.extractAmount(prevLine)
+
+    if (options.preferNextIfPercent && currentLine.includes("%") && next) {
+      return next
+    }
+
+    if (current) return current
+
+    if (next) return next
+
+    if (prev) return prev
 
     return null
   }

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { DirectMessages } from "./direct-messages"
-import { GroupChatSimpleDelete } from "./group-chat-simple-delete"
+import { GroupChat } from "./group-chat"
 import { MessageSquare, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -57,7 +57,7 @@ export function ChatInterface() {
       {/* Content panels */}
       <div className="h-[calc(100%-6rem)]">
         {activeTab === "groups" ? (
-          <GroupChatSimpleDelete />
+          <GroupChat />
         ) : (
           <DirectMessages />
         )}

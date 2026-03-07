@@ -31,9 +31,31 @@ class ExpenseCalculator {
     })
   }
 
+  /**
+   * Account for a confirmed settlement.
+   * fromUserId paid toUserId, so:
+   *   - fromUser's net goes up (they paid, reducing their debt)
+   *   - toUser's net goes down (they received, reducing what's owed to them)
+   * @param {string} fromUserId
+   * @param {string} toUserId
+   * @param {number} amountCents – positive integer
+   */
+  addSettlement(fromUserId, toUserId, amountCents) {
+    const cents = Math.round(Number(amountCents))
+    if (cents <= 0) return
+
+    if (!this.balances.has(fromUserId)) this.balances.set(fromUserId, 0)
+    if (!this.balances.has(toUserId)) this.balances.set(toUserId, 0)
+
+    // fromUser paid → their balance improves (increases)
+    this.balances.set(fromUserId, this.balances.get(fromUserId) + cents)
+    // toUser received → their balance decreases
+    this.balances.set(toUserId, this.balances.get(toUserId) - cents)
+  }
+
   getGroupSummary() {
     const totalExpenses = this.expenses.reduce((sum, exp) => sum + exp.amount, 0)
-    
+
     const summary = {
       totalExpenses: totalExpenses / 100, // Convert cents to dollars
       balances: {},

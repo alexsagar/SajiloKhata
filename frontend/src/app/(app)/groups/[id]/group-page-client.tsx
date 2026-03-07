@@ -5,6 +5,7 @@ import { Header } from "@/components/common/header"
 import { GroupBalance } from "@/components/groups/group-balance"
 import { ExpensesList } from "@/components/expenses/expenses-list"
 import { CreateExpenseDialog } from "@/components/expenses/create-expense-dialog"
+import { GroupActivityFeed } from "@/components/groups/group-activity-feed"
 import { Button } from "@/components/ui/button"
 import { Plus, Settings, Users } from "lucide-react"
 import Link from "next/link"
@@ -43,6 +44,7 @@ export function GroupPageClient({ groupId }: GroupPageClientProps) {
       />
       <div className="flex flex-1 flex-col gap-4 p-4">
         <GroupBalance groupId={groupId} />
+        <GroupActivityFeed groupId={groupId} />
         <ExpensesList groupId={groupId} />
       </div>
 

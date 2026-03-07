@@ -1,252 +1,240 @@
-# SajiloKhata - Smart Expense Sharing
+# SajiloKhata
 
-A modern expense sharing application built with MERN stack and Next.js, featuring AI-powered features, real-time collaboration, and comprehensive analytics.
+SajiloKhata is a full-stack expense sharing application built with:
 
-##  Features
+- Next.js App Router frontend (`frontend`)
+- Express + MongoDB backend (`backend`)
+- Socket.IO realtime updates
+- OCR receipt scanning with async queue processing
+- Splitwise-style debt tracking (no wallet flow)
 
-### Core Functionality
-- **Expense Management**: Create, track, and split expenses with friends, family, and groups
-- **Real-time Collaboration**: Live updates and notifications for expense changes
-- **AI-Powered Features**: Smart expense categorization and receipt processing
-- **Multi-Currency Support**: Handle expenses in different currencies with automatic conversion
-- **Comprehensive Analytics**: Detailed insights into spending patterns and group dynamics
+This document is the primary project guide for setup, architecture, features, and operations.
 
-### Advanced Features
-- **Calendar Integration**: View and create expenses directly from a calendar interface
-- **Receipt Processing**: OCR-powered receipt scanning and expense extraction
-- **Offline Support**: Work without internet connection with automatic sync
-- **Team Management**: Create teams with billing and subscription management
-- **Admin Dashboard**: Comprehensive system administration and monitoring
+## 1. Monorepo Layout
 
-##  Centralized Currency System
+```text
+.
+|- backend/                Express API, jobs, queue workers, Mongo models
+|- frontend/               Next.js app (App Router, React Query, TypeScript)
+|- docs/                   Additional project docs
+|- scripts/                Utility and migration scripts
+|- README.md               This file
+```
 
-The application now features a **centralized currency system** that automatically applies the user's preferred currency across all pages and features:
+## 2. Core Product Capabilities
 
-### How It Works
-1. **User Preference**: Users set their preferred currency in Settings → Preferences
-2. **Automatic Application**: The chosen currency is automatically used across:
-   - Calendar view and expense creation
-   - Analytics dashboard and charts
-   - Expense lists and summaries
-   - All monetary displays and calculations
-3. **Consistent Experience**: No need to select currency on individual pages
+- Authentication
+  - Email/password auth with OTP-assisted signup verification
+  - OAuth sync path
+  - Refresh-token cookie flow
+- Expenses
+  - Personal and group expenses
+  - Split types: equal, exact, percentage
+  - Comment threads on expenses with `@mention` notifications
+- Groups and balances
+  - Member management and roles
+  - Group-level balances and settle-up plan
+  - User-level balance summary across all groups
+- Settlements
+  - Request, reminder, confirm payment records
+  - Recorded debt reduction (no in-app wallet requirement)
+- Receipts and OCR
+  - Async OCR upload and polling
+  - Parsed/normalized receipt data for prefill
+  - Review flags and duplicate detection metadata
+- Notifications
+  - In-app notifications with unread count and read state
+  - Event-driven notifications for expense/settlement/receipt flows
+- Analytics
+  - KPI, spend over time, category breakdown, partners, aging, ledger export
+- Calendar and reminders
+  - Reminder-oriented calendar workflow
+  - Scheduled reminder notifications
+- Chat
+  - Group and direct conversations
+  - Presence and typing indicators via Socket.IO
+- Platform features
+  - Redis caching layer
+  - Structured logging and request context
+  - Audit/ledger/reconciliation infrastructure
 
-### Benefits
-- **Consistency**: Same currency displayed everywhere based on user preference
-- **User Experience**: No confusion about which currency is being shown
-- **Maintenance**: Single source of truth for currency preferences
-- **Accessibility**: Users always see amounts in their familiar currency
+## 3. Architecture Overview
 
-### Technical Implementation
-- **Currency Context**: React context that provides currency throughout the app
-- **Automatic API Calls**: All analytics and calendar API calls include the user's preferred currency
-- **Real-time Updates**: Currency changes in settings immediately reflect across the app
-- **Fallback Handling**: Graceful fallback to USD if no preference is set
+### Backend
 
-##  Calendar Extension
+- Runtime: Node.js + Express
+- Database: MongoDB + Mongoose
+- Realtime: Socket.IO
+- Queue: Bull + Redis
+- OCR services: queue workers and parsing services
+- Security:
+  - JWT cookies (`accessToken`, `refreshToken`)
+  - CSRF protection with `XSRF-TOKEN` cookie + `X-CSRF-Token` header
+  - Rate limiting (`auth`, `write`, `upload`, `message`)
+  - Helmet + CORS controls
 
-### New Features
-- **Date Click → Expense Creation**: Click any date to open expense creation modal
-- **Monthly Expense Summary**: View daily totals and monthly summaries
-- **Real-time Data**: Calendar shows actual expense data from the backend
-- **Filter System**: Toggle between Personal/Group/All modes with group selection
-- **Analytics Integration**: Direct link to analytics with matching filters
+Main entrypoint: `backend/app.js`
 
-### Implementation Details
-- **Backend API**: New `/api/calendar/month` endpoint with base currency support
-- **Frontend Integration**: Enhanced calendar component with expense creation
-- **Data Flow**: Calendar data automatically flows into analytics system
-- **ACL Enforcement**: Users only see groups they belong to
+### Frontend
 
-##  Architecture
+- Next.js (App Router) + React + TypeScript
+- React Query for server state
+- Central API client in `frontend/src/lib/api.ts`
+- Contexts for auth/currency/notifications/socket
+- UI primitives under `frontend/src/components/ui`
 
-### Backend (Node.js + Express)
-- **MongoDB**: Document-based database with Mongoose ODM
-- **Authentication**: JWT-based auth with CSRF protection
-- **API Design**: RESTful endpoints with consistent response formats
-- **Validation**: Input validation using express-validator
-- **Error Handling**: Centralized error handling with proper HTTP status codes
+## 4. Quick Start (Local)
 
-### Frontend (Next.js 14 + React)
-- **App Router**: Modern Next.js routing with server components
-- **State Management**: React Query for server state, Context for client state
-- **UI Components**: Shadcn/UI components with Tailwind CSS
-- **Type Safety**: Full TypeScript implementation
-- **Responsive Design**: Mobile-first approach with responsive layouts
+## Prerequisites
 
-### Key Technologies
-- **Database**: MongoDB with Mongoose
-- **Backend**: Node.js, Express.js
-- **Frontend**: Next.js 14, React 18, TypeScript
-- **Styling**: Tailwind CSS, Shadcn/UI
-- **State Management**: React Query, React Context
-- **Authentication**: JWT, CSRF tokens
-- **Real-time**: Socket.io for live updates
-
-##  Getting Started
-
-### Prerequisites
-- Node.js 18+ 
+- Node.js 18+
 - MongoDB 6+
-- npm or yarn
+- Redis 6+ (recommended for queue + caching)
 
-### Installation
+## Install
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/khutrukey.git
-   cd khutrukey
-   ```
-
-2. **Install dependencies**
-   ```bash
-   # Backend
-   cd backend
-   npm install
-   
-   # Frontend
-   cd ../frontend
-   npm install
-   ```
-
-3. **Environment Setup**
-   ```bash
-   # Backend (.env)
-   MONGODB_URI=mongodb://localhost:27017/khutrukey
-   JWT_SECRET=your_jwt_secret
-   PORT=5000
-   
-   # Frontend (.env.local)
-   NEXT_PUBLIC_API_URL=http://localhost:5000/api
-   ```
-
-4. **Start the application**
-   ```bash
-   # Backend
-   cd backend
-   npm run dev
-   
-   # Frontend (new terminal)
-   cd frontend
-   npm run dev
-   ```
-
-5. **Access the application**
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:5000/api
-
-##  Analytics System
-
-### Available Endpoints
-- **KPIs**: `/api/analytics/kpis` - Key performance indicators
-- **Spend Over Time**: `/api/analytics/spend-over-time` - Time-based spending analysis
-- **Category Breakdown**: `/api/analytics/category-breakdown` - Spending by category
-- **Top Partners**: `/api/analytics/top-partners` - Most frequent expense partners
-- **Balance Matrix**: `/api/analytics/balance-matrix` - Group debt relationships
-- **Aging Analysis**: `/api/analytics/aging` - Outstanding debt aging
-- **Data Export**: `/api/analytics/export/csv` - CSV export functionality
-
-### Features
-- **Multi-Currency Support**: All amounts converted to user's base currency
-- **Real-time Updates**: Live data refresh with React Query
-- **Advanced Filtering**: Filter by mode, time range, groups, categories, etc.
-- **Interactive Charts**: Recharts-based visualizations
-- **Responsive Design**: Works on all device sizes
-
-##  Security Features
-
-- **JWT Authentication**: Secure token-based authentication
-- **CSRF Protection**: Cross-site request forgery prevention
-- **Input Validation**: Server-side validation for all inputs
-- **ACL Enforcement**: Access control for group and expense data
-- **Rate Limiting**: API rate limiting for abuse prevention
-- **Secure Headers**: Security headers for XSS and other attacks
-
-##  Testing
-
-### Backend Tests
 ```bash
+# Backend
 cd backend
-npm test
+npm install
+
+# Frontend
+cd ../frontend
+npm install
 ```
 
-### Frontend Tests
+## Environment setup
+
+Use `backend/.env.example` as baseline.
+
+Minimum backend variables:
+
 ```bash
-cd frontend
-npm test
+NODE_ENV=development
+PORT=5000
+CLIENT_URL=http://localhost:3000
+MONGODB_URI=mongodb://localhost:27017/splitwise
+JWT_SECRET=your-jwt-secret
+JWT_REFRESH_SECRET=your-refresh-secret
+REDIS_URL=redis://localhost:6379
 ```
 
-### Test Coverage
-- Unit tests for utility functions
-- API endpoint testing
-- Component testing with React Testing Library
-- Integration tests for critical user flows
+Frontend:
 
-##  Performance Optimizations
+```bash
+NEXT_PUBLIC_API_URL=http://localhost:5000/api
+```
 
-- **Database Indexing**: Optimized MongoDB queries with proper indexes
-- **API Caching**: React Query for intelligent caching and background updates
-- **Code Splitting**: Dynamic imports for heavy components
-- **Image Optimization**: Next.js Image component with automatic optimization
-- **Bundle Analysis**: Regular bundle size monitoring and optimization
+## Run
 
-##  Deployment
+```bash
+# Terminal 1
+cd backend
+npm run dev
 
-### Backend Deployment
-- **Environment Variables**: Configure production environment variables
-- **Database**: Use MongoDB Atlas or self-hosted MongoDB
-- **Process Manager**: Use PM2 or similar for production process management
-- **SSL**: Enable HTTPS with proper SSL certificates
+# Terminal 2
+cd frontend
+npm run dev
+```
 
-### Frontend Deployment
-- **Build Optimization**: Production build with Next.js
-- **CDN**: Use CDN for static assets
-- **Environment**: Configure production API endpoints
-- **Monitoring**: Implement error tracking and performance monitoring
+URLs:
 
-##  Contributing
+- Frontend: `http://localhost:3000`
+- API: `http://localhost:5000/api`
+- Health check: `http://localhost:5000/api/health`
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+## 5. API Surface (High Level)
 
-### Development Guidelines
-- Follow TypeScript best practices
-- Maintain consistent code formatting
-- Write comprehensive tests for new features
-- Update documentation for API changes
-- Follow the existing code structure and patterns
+All routes are mounted under `/api`.
 
-##  License
+- Auth: `/auth/*`
+- Users: `/users/*`
+- Friends: `/friends/*`
+- Groups: `/groups/*`
+- Expenses: `/expenses/*`
+- Settlements: `/settlements/*`
+- Receipts: `/receipts/*`
+- Notifications: `/notifications/*`
+- Conversations: `/conversations/*`
+- Calendar: `/calendar/*`
+- Reminders: `/reminders/*`
+- Analytics: `/analytics/*`
+- Admin: `/admin/*`
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+For detailed route reference, see `docs/API.md`.
 
-##  Support
+## 6. Notable Operational Jobs and Workers
 
-For support and questions:
-- Create an issue in the GitHub repository
-- Check the documentation in the `/docs` folder
-- Review the API documentation for endpoint details
+- Reminder job: `backend/jobs/reminderNotifications.js`
+- Reconciliation job: `backend/jobs/reconciliationJob.js`
+- Expense queue worker: `backend/queues/expenseQueue.js`
+- Receipt queue worker: `backend/queues/receiptQueue.js`
 
-##  Roadmap
+## 7. Important Product Rules
 
-### Upcoming Features
-- **Mobile App**: React Native mobile application
-- **Advanced AI**: Machine learning for expense predictions
-- **Internationalization**: Multi-language support
-- **Advanced Reporting**: Custom report builder
-- **Integration APIs**: Third-party service integrations
+- Money math is handled in cents in persistence (`amountCents`), with display conversion in UI/API responses.
+- Group debt is computed from expenses and settlements.
+- Settlement records update balances; no in-app wallet load is required for debt tracking.
 
-### Performance Improvements
-- **GraphQL**: Implement GraphQL for more efficient data fetching
-- **Real-time Analytics**: Live dashboard updates
-- **Advanced Caching**: Redis-based caching layer
-- **Microservices**: Break down into microservices architecture
+## 8. Development Scripts
 
----
+### Backend (`backend/package.json`)
 
-**SajiloKhata** - Making expense sharing simple, smart, and secure.
+- `npm run dev` - run API server
+- `npm run start` - run API server
+- `npm run test` - run backend tests
+- `npm run test:watch` - watch mode tests
+- `npm run seed:notifications` - seed notification data
 
+### Frontend (`frontend/package.json`)
+
+- `npm run dev` - run Next.js dev server
+- `npm run build` - production build
+- `npm run start` - run production server
+- `npm run lint` - lint
+- `npm run typecheck` - TypeScript check
+
+### Utility scripts (`scripts/`)
+
+See `scripts/README.md` for script usage and safety notes.
+
+## 9. Documentation Map
+
+- `docs/API.md` - endpoint and auth/CSRF reference
+- `docs/analytics-system.md` - analytics architecture and endpoints
+- `docs/currency-feature.md` - currency handling and formatting behavior
+- `docs/DEPLOYMENT.md` - production deployment runbook
+
+## 10. Troubleshooting
+
+Common checks:
+
+- API unreachable
+  - verify backend is running on expected port
+  - verify `NEXT_PUBLIC_API_URL`
+- Auth issues
+  - confirm cookies are set
+  - ensure CSRF header is sent for mutating calls
+- OCR delays/failures
+  - verify Redis and queue worker availability
+  - inspect backend logs for OCR and receipt worker errors
+- Realtime issues
+  - verify `CLIENT_URL` CORS setting
+  - inspect browser console for socket auth errors
+
+## 11. Repository Audit Notes
+
+Recent cleanup included:
+
+- Removed stray accidental root files with invalid names.
+- Removed stale `scripts/package-lock.json` that was not part of runtime or tooling.
+- Updated docs to reflect current app behavior and route surface.
+
+## 12. Contributing
+
+- Keep backend route changes synchronized with `frontend/src/lib/api.ts`.
+- Prefer cents-safe money operations and avoid floating-point persistence.
+- Run at least:
+  - backend syntax check for changed JS files
+  - `frontend` typecheck before merging
 

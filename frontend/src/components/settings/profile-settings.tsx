@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -29,6 +29,9 @@ type ProfileFormData = z.infer<typeof profileSchema>
 export function ProfileSettings() {
   const { user, updateUser } = useAuth()
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
+  const [newEmail, setNewEmail] = useState("")
+  const [emailOtp, setEmailOtp] = useState("")
+  const [otpCooldown, setOtpCooldown] = useState(0)
   const queryClient = useQueryClient()
 
   const {
@@ -82,9 +85,79 @@ export function ProfileSettings() {
     },
   })
 
+  const requestEmailOtpMutation = useMutation({
+    mutationFn: (payload: { newEmail: string; password?: string }) => userAPI.requestEmailChangeOtp(payload),
+    onSuccess: (response) => {
+      const devOtp = response?.data?.devOtp
+      toast({
+        title: "Verification code sent",
+        description: devOtp ? `OTP (dev): ${devOtp}` : "Check your new email inbox for the OTP.",
+      })
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to send OTP",
+        description: error?.message || "Could not send verification code.",
+        variant: "destructive",
+      })
+    },
+  })
+
+  const verifyEmailOtpMutation = useMutation({
+    mutationFn: (payload: { otp: string }) => userAPI.verifyEmailChangeOtp(payload),
+    onSuccess: (response) => {
+      updateUser(response?.data?.user || {})
+      setNewEmail("")
+      setEmailOtp("")
+      toast({
+        title: "Email updated",
+        description: "Your email has been changed successfully.",
+      })
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to verify OTP",
+        description: error?.message || "Invalid or expired code.",
+        variant: "destructive",
+      })
+    },
+  })
+
+  const resendEmailOtpMutation = useMutation({
+    mutationFn: () => userAPI.resendEmailChangeOtp(),
+    onSuccess: (response) => {
+      const devOtp = response?.data?.devOtp
+      setOtpCooldown(60)
+      toast({
+        title: "OTP resent",
+        description: devOtp ? `OTP (dev): ${devOtp}` : "A new OTP was sent to your pending email.",
+      })
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to resend OTP",
+        description: error?.message || "Please try again shortly.",
+        variant: "destructive",
+      })
+    },
+  })
+
   const onSubmit = (data: ProfileFormData) => {
     updateProfileMutation.mutate(data)
   }
+
+  const canRequestOtp = useMemo(() => {
+    const next = newEmail.trim().toLowerCase()
+    return !!next && next !== String(user?.email || "").toLowerCase()
+  }, [newEmail, user?.email])
+
+  useEffect(() => {
+    if (otpCooldown <= 0) return
+    const timer = setInterval(() => {
+      setOtpCooldown((prev) => (prev > 0 ? prev - 1 : 0))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [otpCooldown])
 
   const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -162,11 +235,72 @@ export function ProfileSettings() {
           id="email"
           type="email"
           {...register("email")}
-          disabled={updateProfileMutation.isPending}
+          disabled
         />
+        <p className="text-xs text-muted-foreground">Current email is read-only. Use the Change Email section below.</p>
         {errors.email && (
           <p className="text-sm text-destructive">{errors.email.message}</p>
         )}
+      </div>
+
+      <div className="space-y-3 rounded-lg border p-3">
+        <div className="space-y-1">
+          <Label htmlFor="newEmail">Change Email</Label>
+          <Input
+            id="newEmail"
+            type="email"
+            placeholder="Enter new email"
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            disabled={requestEmailOtpMutation.isPending || verifyEmailOtpMutation.isPending}
+          />
+        </div>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!canRequestOtp || requestEmailOtpMutation.isPending || verifyEmailOtpMutation.isPending}
+            onClick={() => {
+              requestEmailOtpMutation.mutate({ newEmail: newEmail.trim() })
+              setOtpCooldown(60)
+            }}
+          >
+            {requestEmailOtpMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Send OTP
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={
+              otpCooldown > 0 ||
+              resendEmailOtpMutation.isPending ||
+              requestEmailOtpMutation.isPending ||
+              verifyEmailOtpMutation.isPending
+            }
+            onClick={() => resendEmailOtpMutation.mutate()}
+          >
+            {resendEmailOtpMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {otpCooldown > 0 ? `Resend in ${otpCooldown}s` : "Resend OTP"}
+          </Button>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="emailOtp">Verify OTP</Label>
+          <Input
+            id="emailOtp"
+            placeholder="6-digit OTP"
+            value={emailOtp}
+            onChange={(e) => setEmailOtp(e.target.value)}
+            disabled={verifyEmailOtpMutation.isPending}
+          />
+        </div>
+        <Button
+          type="button"
+          disabled={emailOtp.trim().length !== 6 || verifyEmailOtpMutation.isPending}
+          onClick={() => verifyEmailOtpMutation.mutate({ otp: emailOtp.trim() })}
+        >
+          {verifyEmailOtpMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Verify & Update Email
+        </Button>
       </div>
 
       {/* Phone */}

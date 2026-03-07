@@ -1,17 +1,26 @@
 "use client"
 
-import { useMemo } from "react"
 import { KanbanCard, KanbanCardContent, KanbanCardHeader, KanbanCardTitle } from "@/components/ui/kanban-card"
 import { DollarSign, TrendingUp, TrendingDown, Users, CreditCard, PiggyBank } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import { formatCurrencyWithSymbol } from "@/lib/currency"
 import { useExpensesQuery } from "@/hooks/use-expenses-query"
+import { useQuery } from "@tanstack/react-query"
+import { userAPI } from "@/lib/api"
 
 export function BalanceOverview() {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || 'USD'
 
   const { data: expenseSummary, isLoading, error } = useExpensesQuery()
+
+  // Fetch splitwise-style debt summary from backend
+  const { data: balanceResp } = useQuery({
+    queryKey: ["user-balance-summary"],
+    queryFn: () => userAPI.getBalanceSummary(),
+    enabled: !!user,
+    staleTime: 60 * 1000,
+  })
 
   // Show loading state
   if (isLoading) {
@@ -52,7 +61,7 @@ export function BalanceOverview() {
     )
   }
 
-  // Calculate personal vs group expense breakdown (memoized for render stability)
+  // Calculate personal vs group expense breakdown
   const payload = expenseSummary?.data?.data ? expenseSummary.data.data : expenseSummary?.data
   const expensesData = payload?.expenses || expenseSummary?.expenses || []
   const personalExpenses = expensesData.filter((exp: any) => !exp.groupId)
@@ -61,27 +70,11 @@ export function BalanceOverview() {
   const personalTotal = personalExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
   const groupTotal = groupExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
 
-  // Calculate balances from splits
-  const currentUserId = user?.id || (user as any)?._id
-  let youOwe = 0
-  let youreOwed = 0
-  for (const exp of groupExpenses) {
-    const payerId = exp?.paidBy?._id || exp?.paidBy?.id || exp?.paidBy
-    const splits = Array.isArray(exp?.splits) ? exp.splits : []
-    for (const s of splits) {
-      const sid = s?.user?._id || s?.user?.id || s?.user
-      const shareCents = (s?.amountCents != null)
-        ? s.amountCents
-        : Math.round(((s?.amount ?? 0) as number) * 100)
-      if (!Number.isFinite(shareCents)) continue
-      if (payerId === currentUserId && sid !== currentUserId) {
-        youreOwed += shareCents
-      } else if (sid === currentUserId && payerId !== currentUserId) {
-        youOwe += shareCents
-      }
-    }
-  }
-  const totalBalance = youreOwed - youOwe
+  // Use backend-computed summary (all in cents for precision)
+  const balanceData = balanceResp?.data?.data || balanceResp?.data || {}
+  const youOwe = Number(balanceData.youOweCents ?? 0)
+  const youreOwed = Number(balanceData.youAreOwedCents ?? 0)
+  const totalBalance = Number(balanceData.totalBalanceCents ?? (youreOwed - youOwe))
 
   return (
     <>
@@ -168,6 +161,7 @@ export function BalanceOverview() {
           </p>
         </KanbanCardContent>
       </KanbanCard>
+
     </>
   )
 }

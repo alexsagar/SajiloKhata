@@ -6,7 +6,8 @@
     "dev": "node app.js",
     "start": "node app.js",
     "test": "jest --runInBand",
-    "test:watch": "jest --watchAll"
+    "test:watch": "jest --watchAll",
+    "seed:notifications": "node scripts/seed-notifications.js"
   },
   "devDependencies": {
     "jest": "^29.7.0",

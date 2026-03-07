@@ -1,8 +1,7 @@
 import { useState, useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { expenseAPI } from '@/lib/api'
-import { groupAPI } from '@/lib/api'
 import { userAPI } from '@/lib/api'
+import { useDebounce } from "@/hooks/use-debounce"
 
 export interface SearchResult {
   id: string
@@ -19,65 +18,29 @@ export interface SearchResult {
 
 export function useGlobalSearch() {
   const [searchQuery, setSearchQuery] = useState('')
-  const [isSearching, setIsSearching] = useState(false)
+  const debouncedQuery = useDebounce(searchQuery, 300)
 
-  // Search expenses
-  const { data: expenseResults } = useQuery({
-    queryKey: ['search-expenses', searchQuery],
+  const { data: searchPayload, isFetching } = useQuery({
+    queryKey: ['search-global', debouncedQuery],
     queryFn: async () => {
-      if (!searchQuery.trim()) return []
+      if (!debouncedQuery.trim()) {
+        return { users: [], groups: [], expenses: [] }
+      }
       try {
-        const response = await expenseAPI.getExpenses({ 
-          search: searchQuery,
+        const response = await userAPI.searchGlobal({
+          query: debouncedQuery,
           limit: 10 
         })
-        return response.data.expenses || []
+        return {
+          users: response.data?.users || [],
+          groups: response.data?.groups || [],
+          expenses: response.data?.expenses || [],
+        }
       } catch (error) {
-        
-        return []
+        return { users: [], groups: [], expenses: [] }
       }
     },
-    enabled: searchQuery.length > 2,
-    staleTime: 5 * 60 * 1000,
-  })
-
-  // Search groups
-  const { data: groupResults } = useQuery({
-    queryKey: ['search-groups', searchQuery],
-    queryFn: async () => {
-      if (!searchQuery.trim()) return []
-      try {
-        const response = await groupAPI.getGroups({ 
-          search: searchQuery,
-          limit: 10 
-        })
-        return response.data.groups || []
-      } catch (error) {
-        
-        return []
-      }
-    },
-    enabled: searchQuery.length > 2,
-    staleTime: 5 * 60 * 1000,
-  })
-
-  // Search users
-  const { data: userResults } = useQuery({
-    queryKey: ['search-users', searchQuery],
-    queryFn: async () => {
-      if (!searchQuery.trim()) return []
-      try {
-        const response = await userAPI.searchUsers({ 
-          query: searchQuery,
-          limit: 10 
-        })
-        return response.data.users || []
-      } catch (error) {
-        
-        return []
-      }
-    },
-    enabled: searchQuery.length > 2,
+    enabled: debouncedQuery.length > 2,
     staleTime: 5 * 60 * 1000,
   })
 
@@ -86,8 +49,8 @@ export function useGlobalSearch() {
     const results: SearchResult[] = []
 
     // Add expense results
-    if (expenseResults) {
-      expenseResults.forEach((expense: any) => {
+    if (searchPayload?.expenses) {
+      searchPayload.expenses.forEach((expense: any) => {
         results.push({
           id: expense._id,
           type: 'expense',
@@ -103,8 +66,8 @@ export function useGlobalSearch() {
     }
 
     // Add group results
-    if (groupResults) {
-      groupResults.forEach((group: any) => {
+    if (searchPayload?.groups) {
+      searchPayload.groups.forEach((group: any) => {
         results.push({
           id: group._id,
           type: 'group',
@@ -117,8 +80,8 @@ export function useGlobalSearch() {
     }
 
     // Add user results
-    if (userResults) {
-      userResults.forEach((user: any) => {
+    if (searchPayload?.users) {
+      searchPayload.users.forEach((user: any) => {
         results.push({
           id: user._id,
           type: 'user',
@@ -131,27 +94,20 @@ export function useGlobalSearch() {
     }
 
     return results
-  }, [expenseResults, groupResults, userResults])
+  }, [searchPayload])
 
   const performSearch = useCallback((query: string) => {
     setSearchQuery(query)
-    setIsSearching(true)
-    
-    // Simulate search delay for better UX
-    setTimeout(() => {
-      setIsSearching(false)
-    }, 300)
   }, [])
 
   const clearSearch = useCallback(() => {
     setSearchQuery('')
-    setIsSearching(false)
   }, [])
 
   return {
     searchQuery,
     searchResults,
-    isSearching,
+    isSearching: isFetching && debouncedQuery.length > 2,
     performSearch,
     clearSearch,
     hasResults: searchResults.length > 0,

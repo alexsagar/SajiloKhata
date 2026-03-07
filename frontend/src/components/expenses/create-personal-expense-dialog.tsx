@@ -12,7 +12,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -21,11 +20,16 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Loader2, X, Scan } from "lucide-react"
 import { useCreateExpenseMutation } from "@/hooks/use-create-expense-mutation"
-import { toast } from "@/hooks/use-toast"
 import { CurrencySelector } from "@/components/currency/currency-selector"
 import { useAuth } from "@/contexts/auth-context"
 import { CreateExpenseSchema } from "@/lib/validation"
 import { SmartReceiptScanner } from "@/components/ocr/smart-receipt-scanner"
+import { authAPI } from "@/lib/api"
+import { toast } from "@/hooks/use-toast"
+import {
+  formatReceiptItemsToNotes,
+  type NormalizedReceiptData,
+} from "@/lib/receipt-normalizer"
 
 
 type CreatePersonalExpenseFormData = z.infer<typeof CreateExpenseSchema>
@@ -33,52 +37,32 @@ type CreatePersonalExpenseFormData = z.infer<typeof CreateExpenseSchema>
 interface CreatePersonalExpenseDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  initialReceiptData?: (NormalizedReceiptData & { receipt?: File | null }) | null
 }
 
-export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePersonalExpenseDialogProps) {
+export function CreatePersonalExpenseDialog({ open, onOpenChange, initialReceiptData = null }: CreatePersonalExpenseDialogProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [showCurrencySelection, setShowCurrencySelection] = useState(false)
   const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'offline'>('checking')
   const [showReceiptScanner, setShowReceiptScanner] = useState(false)
+  const [lastAppliedReceiptKey, setLastAppliedReceiptKey] = useState<string | null>(null)
 
   const { user, loading: authLoading, refreshAuth } = useAuth()
+  const isDev = process.env.NODE_ENV !== "production"
 
   // Check backend status
   useEffect(() => {
     const checkBackend = async () => {
       try {
         setBackendStatus('checking')
-
-        // Try to access the auth endpoint directly
-        const authResponse = await fetch('http://localhost:5000/api/auth/me', {
-          method: 'GET',
-          credentials: 'include'
-        })
-
-        if (authResponse.ok) {
+        await authAPI.me()
+        if (isDev) {
+          console.debug("CreatePersonalExpenseDialog: backend auth check passed")
+        }
           setBackendStatus('online')
-          console.log('Auth endpoint accessible, status:', authResponse.status)
-
-          // Get the actual response data to see the structure
-          try {
-            const responseData = await authResponse.json()
-            console.log('CreatePersonalExpenseDialog - Direct API response:', responseData)
-            console.log('CreatePersonalExpenseDialog - Response data keys:', Object.keys(responseData || {}))
-          } catch (parseError) {
-            console.log('CreatePersonalExpenseDialog - Could not parse response as JSON:', parseError)
-          }
-
-          // If backend is online but we don't have user, try to refresh auth
-          if (!user && !authLoading) {
-            console.log('Backend online but no user, refreshing auth...')
-            await refreshAuth()
-          }
-        } else {
-          setBackendStatus('offline')
-          console.log('Auth endpoint returned error status:', authResponse.status)
+        if (!user && !authLoading) {
+          await refreshAuth()
         }
       } catch (error) {
-        console.log('Backend health check failed:', error)
         setBackendStatus('offline')
       }
     }
@@ -87,29 +71,6 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
       checkBackend()
     }
   }, [open, user, authLoading, refreshAuth])
-
-  // Debug logging and monitoring
-  useEffect(() => {
-    console.log('CreatePersonalExpenseDialog - User changed:', user)
-    console.log('CreatePersonalExpenseDialog - Auth loading:', authLoading)
-    if (user) {
-      console.log('CreatePersonalExpenseDialog - User ID:', user.id)
-      console.log('CreatePersonalExpenseDialog - User object keys:', Object.keys(user))
-      console.log('CreatePersonalExpenseDialog - User preferences:', user.preferences)
-
-      // Validate user object structure
-      if (!user.id) {
-        console.error('CreatePersonalExpenseDialog - User object missing ID!')
-        console.error('CreatePersonalExpenseDialog - Full user object:', user)
-      }
-
-      if (!user.preferences) {
-        console.error('CreatePersonalExpenseDialog - User object missing preferences!')
-      }
-    } else {
-      console.log('CreatePersonalExpenseDialog - No user object available')
-    }
-  }, [user, authLoading])
 
   // Don't render if still loading auth
   if (authLoading) {
@@ -200,6 +161,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
     reset,
     watch,
     setValue,
+    getValues,
     trigger,
     formState: { errors },
   } = useForm<CreatePersonalExpenseFormData>({
@@ -218,19 +180,18 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
 
   const { mutate: createExpense, isPending } = useCreateExpenseMutation({
     onSuccess: (data) => {
-      console.log("✅ Expense created successfully, server response:", data)
+      if (isDev) console.debug("CreatePersonalExpenseDialog: expense created", data)
 
       // Close dialog and reset form immediately
       onOpenChange(false)
       setTimeout(() => {
         reset()
         setSelectedFile(null)
-        setShowCurrencySelection(false)
         setShowReceiptScanner(false)
       }, 100)
     },
     onError: (error) => {
-      console.error("❌ Expense creation failed:", error)
+      if (isDev) console.debug("CreatePersonalExpenseDialog: expense creation failed", error)
     }
   })
 
@@ -241,75 +202,99 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
         return
       }
 
-      // Show immediate feedback that expense is being created
-      console.log("Creating personal expense with optimistic update using shared hook...")
       // Pass the receipt file to the mutation
       createExpense({ ...data, receiptFile: selectedFile })
     } catch (error) {
-      console.error("Form submission error:", error)
+      if (isDev) console.debug("CreatePersonalExpenseDialog: form submit error", error)
     }
   }
 
-  const handleCurrencySelect = (currency: string) => {
+  const handleReceiptProcessed = (receiptData: NormalizedReceiptData & { receipt?: File | null }) => {
     try {
-      if (!currency) {
-        console.warn("No currency selected")
-        return
-      }
-      setValue("currencyCode", currency)
-      setShowCurrencySelection(false)
-    } catch (error) {
-      console.error("Currency selection error:", error)
-    }
-  }
+      const currentDescription = String(getValues("description") || "").trim()
+      const currentAmountRaw = Number(getValues("amount") || 0)
+      const currentNotes = String(getValues("notes") || "").trim()
 
-  const handleReceiptProcessed = (receiptData: any) => {
-    console.log("=== RECEIPT PROCESSING START ===")
-    console.log("Personal Expense Dialog - Received receipt data:", receiptData)
-    console.log("Dialog open state:", open)
-    console.log("User currency:", user?.preferences?.currency)
+      const merchantFallback = receiptData.merchant?.trim() || "Receipt"
+      const nextNotes =
+        receiptData.items.length > 0
+          ? formatReceiptItemsToNotes(receiptData.items, receiptData.currency || selectedCurrency || "USD")
+          : ""
 
-    try {
-      // Prepare the new form values
-      const newFormValues = {
-        category: receiptData.category || "other",
-        date: receiptData.date || new Date().toISOString().split('T')[0],
-        currencyCode: user?.preferences?.currency || "NPR",
-        description: receiptData.description || "",
-        amount: receiptData.amount || 0,
+      const skipped: string[] = []
+      const applied: string[] = []
+
+      if (!currentDescription) {
+        setValue("description", merchantFallback, { shouldValidate: true, shouldDirty: true })
+        applied.push("Description")
+      } else {
+        skipped.push("Description")
       }
 
-      console.log("Form values to set:", newFormValues)
+      if (!currentAmountRaw && typeof receiptData.total === "number" && receiptData.total > 0) {
+        setValue("amount", receiptData.total, { shouldValidate: true, shouldDirty: true })
+        applied.push("Amount")
+      } else if (currentAmountRaw) {
+        skipped.push("Amount")
+      }
 
-      // Reset form with new values to ensure UI updates
-      reset(newFormValues)
-      console.log("Form reset completed")
+      if (!currentNotes && nextNotes) {
+        setValue("notes", nextNotes, { shouldValidate: true, shouldDirty: true })
+        applied.push("Notes")
+      } else if (currentNotes) {
+        skipped.push("Notes")
+      }
 
-      // Set the file separately
+      if (receiptData.currency) {
+        setValue("currencyCode", receiptData.currency, { shouldValidate: true, shouldDirty: true })
+        applied.push("Currency")
+      }
+
+      if (receiptData.date) {
+        setValue("date", receiptData.date, { shouldValidate: true, shouldDirty: true })
+        applied.push("Date")
+      }
+
       if (receiptData.receipt) {
-        console.log("Setting file:", receiptData.receipt.name)
         setSelectedFile(receiptData.receipt)
       }
 
-      // Force a re-render and ensure dialog stays open
-      setTimeout(() => {
-        console.log("Triggering form validation")
-        trigger()
+      trigger()
+      if (!open) onOpenChange(true)
 
-        // Ensure dialog stays open
-        if (!open) {
-          console.log("Dialog was closed, forcing it to stay open")
-          onOpenChange(true)
-        }
-      }, 100)
-
-
-      console.log("=== RECEIPT PROCESSING END ===")
+      toast({
+        title: "Receipt data applied",
+        description:
+          applied.length > 0
+            ? `${applied.join(", ")} filled.${skipped.length ? ` Skipped: ${skipped.join(", ")}.` : ""}`
+            : "No empty fields were available to auto-fill.",
+      })
     } catch (error) {
-      console.error("Error processing receipt data:", error)
-      console.error("Receipt data that caused error:", receiptData)
+      if (isDev) {
+        console.debug("CreatePersonalExpenseDialog: receipt processing error", error)
+      }
+      toast({
+        title: "Could not apply receipt data",
+        description: "Please fill the expense fields manually.",
+        variant: "destructive",
+      })
     }
   }
+
+  useEffect(() => {
+    if (!open || !initialReceiptData) return
+    const key = JSON.stringify({
+      merchant: initialReceiptData.merchant,
+      total: initialReceiptData.total,
+      currency: initialReceiptData.currency,
+      date: initialReceiptData.date,
+      itemCount: initialReceiptData.items?.length || 0,
+      receiptName: initialReceiptData.receipt?.name || null,
+    })
+    if (key === lastAppliedReceiptKey) return
+    handleReceiptProcessed(initialReceiptData)
+    setLastAppliedReceiptKey(key)
+  }, [open, initialReceiptData, lastAppliedReceiptKey])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -396,7 +381,7 @@ export function CreatePersonalExpenseDialog({ open, onOpenChange }: CreatePerson
               <Label htmlFor="category" className="text-xs">Category</Label>
               <Select
                 value={watch("category")}
-                onValueChange={(value) => setValue("category", value as any)}
+                onValueChange={(value) => setValue("category", value as CreatePersonalExpenseFormData["category"])}
                 disabled={isPending}
               >
                 <SelectTrigger className="h-8 text-sm">

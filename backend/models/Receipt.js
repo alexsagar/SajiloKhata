@@ -40,7 +40,12 @@ const receiptSchema = new mongoose.Schema(
       },
       parsedData: {
         merchant: String,
+        merchantCanonical: String,
         total: Number,
+        subtotal: Number,
+        discount: Number,
+        serviceCharge: Number,
+        vat: Number,
         date: Date,
         currency: String,
         items: [
@@ -62,6 +67,26 @@ const receiptSchema = new mongoose.Schema(
       },
       processingError: String,
       lastProcessedAt: Date,
+      requiresReview: {
+        type: Boolean,
+        default: false,
+      },
+      reviewReasons: {
+        type: [String],
+        default: [],
+      },
+      reviewedAt: Date,
+      reviewedByUser: {
+        type: Boolean,
+        default: false,
+      },
+      duplicateDetection: {
+        isDuplicate: { type: Boolean, default: false },
+        duplicateOf: { type: mongoose.Schema.Types.ObjectId, ref: "Receipt", default: null },
+        fingerprint: { type: String, default: null },
+        matchScore: { type: Number, default: 0 },
+        checkedAt: { type: Date, default: null },
+      },
     },
     metadata: {
       imageWidth: Number,
@@ -86,6 +111,7 @@ receiptSchema.index({ expenseId: 1 })
 receiptSchema.index({ createdAt: -1 })
 receiptSchema.index({ "ocrData.processingStatus": 1 })
 receiptSchema.index({ isLinkedToExpense: 1 })
+receiptSchema.index({ userId: 1, "ocrData.duplicateDetection.fingerprint": 1 })
 
 // Virtual for file URL
 receiptSchema.virtual("fileUrl").get(function () {

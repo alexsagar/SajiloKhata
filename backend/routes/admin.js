@@ -5,6 +5,9 @@ const User = require("../models/User")
 const Group = require("../models/Group")
 const Expense = require("../models/Expense")
 const Notification = require("../models/Notification")
+const ReconciliationReport = require("../models/ReconciliationReport")
+const { getPagination } = require("../utils/query")
+const { runReconciliation } = require("../services/reconciliationService")
 
 // Admin dashboard stats
 router.get("/dashboard", requireRole(["admin"]), async (req, res) => {
@@ -14,7 +17,7 @@ router.get("/dashboard", requireRole(["admin"]), async (req, res) => {
       Group.countDocuments(),
       Expense.countDocuments(),
       User.countDocuments({ createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } }),
-      Expense.aggregate([{ $group: { _id: null, total: { $sum: "$amount" } } }]),
+      Expense.aggregate([{ $group: { _id: null, totalCents: { $sum: "$amountCents" } } }]),
     ])
 
     const [totalUsers, totalGroups, totalExpenses, newUsersThisMonth, totalAmount] = stats
@@ -24,7 +27,7 @@ router.get("/dashboard", requireRole(["admin"]), async (req, res) => {
       totalGroups,
       totalExpenses,
       newUsersThisMonth,
-      totalAmount: totalAmount[0]?.total || 0,
+      totalAmount: (totalAmount[0]?.totalCents || 0) / 100,
       timestamp: new Date(),
     })
   } catch (error) {
@@ -35,9 +38,7 @@ router.get("/dashboard", requireRole(["admin"]), async (req, res) => {
 // Get all users with pagination
 router.get("/users", requireRole(["admin"]), async (req, res) => {
   try {
-    const page = Number.parseInt(req.query.page) || 1
-    const limit = Number.parseInt(req.query.limit) || 20
-    const skip = (page - 1) * limit
+    const { page, limit, skip } = getPagination(req.query, { defaultLimit: 20, maxLimit: 200 })
 
     const users = await User.find().select("-password").sort({ createdAt: -1 }).skip(skip).limit(limit)
 
@@ -92,6 +93,27 @@ router.get("/health", requireRole(["admin"]), async (req, res) => {
     })
   } catch (error) {
     res.status(500).json({ message: "Health check failed", error: error.message })
+  }
+})
+
+router.post("/reconciliation/run", requireRole(["admin"]), async (req, res) => {
+  try {
+    const report = await runReconciliation()
+    res.json({ message: "Reconciliation completed", data: report })
+  } catch (error) {
+    res.status(500).json({ message: "Failed to run reconciliation", error: error.message })
+  }
+})
+
+router.get("/reconciliation/latest", requireRole(["admin"]), async (req, res) => {
+  try {
+    const report = await ReconciliationReport.findOne().sort({ runAt: -1 }).lean()
+    if (!report) {
+      return res.status(404).json({ message: "No reconciliation report found" })
+    }
+    res.json({ data: report })
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load reconciliation report", error: error.message })
   }
 })
 

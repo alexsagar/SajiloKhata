@@ -2,7 +2,7 @@
 
 import React from "react"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Upload, X } from "lucide-react"
+import { Check, Loader2, Upload, X } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { expenseAPI, groupAPI, receiptAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
@@ -30,6 +30,10 @@ import { CurrencySelector } from "@/components/currency/currency-selector"
 import { useAuth } from "@/contexts/auth-context"
 import { CreateExpenseSchema } from "@/lib/validation"
 import { useCreateExpenseMutation } from "@/hooks/use-create-expense-mutation"
+import {
+  formatReceiptItemsToNotes,
+  type NormalizedReceiptData,
+} from "@/lib/receipt-normalizer"
 
 type CreateExpenseFormData = z.infer<typeof CreateExpenseSchema>
 
@@ -38,14 +42,22 @@ interface CreateExpenseDialogProps {
   onOpenChange?: (open: boolean) => void
   defaultGroupId?: string
   children?: React.ReactNode
+  initialReceiptData?: (NormalizedReceiptData & { receipt?: File | null }) | null
 }
 
-export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, children }: CreateExpenseDialogProps) {
+export function CreateExpenseDialog({
+  open,
+  onOpenChange,
+  defaultGroupId,
+  children,
+  initialReceiptData = null,
+}: CreateExpenseDialogProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadedReceiptId, setUploadedReceiptId] = useState<string | null>(null)
   const [receiptParsed, setReceiptParsed] = useState<any>(null)
   const [selectedMembers, setSelectedMembers] = useState<string[]>([])
   const [showCurrencySelection, setShowCurrencySelection] = useState(false)
+  const [lastAppliedReceiptKey, setLastAppliedReceiptKey] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const { user } = useAuth()
 
@@ -60,6 +72,8 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
     reset,
     watch,
     setValue,
+    getValues,
+    trigger,
     formState: { errors },
   } = useForm<CreateExpenseFormData>({
     resolver: zodResolver(CreateExpenseSchema),
@@ -138,11 +152,17 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
   }
 
   const toggleMember = (userId: string) => {
+    if (!userId) return
     setSelectedMembers(prev =>
       prev.includes(userId)
         ? prev.filter(id => id !== userId)
         : [...prev, userId]
     )
+  }
+
+  const resolveMemberId = (member: any): string => {
+    const raw = member?.user?._id || member?.user?.id || member?.user
+    return raw ? String(raw) : ""
   }
 
   const handleCurrencySelect = (currency: string) => {
@@ -162,6 +182,53 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
       })
     }
   }
+
+  const handleReceiptProcessed = (receiptData: NormalizedReceiptData & { receipt?: File | null }) => {
+    const currentDescription = String(getValues("description") || "").trim()
+    const currentAmountRaw = Number(getValues("amount") || 0)
+    const currentNotes = String(getValues("notes") || "").trim()
+
+    const merchantFallback = receiptData.merchant?.trim() || "Receipt"
+    const nextNotes =
+      receiptData.items.length > 0
+        ? formatReceiptItemsToNotes(receiptData.items, receiptData.currency || selectedCurrency || "USD")
+        : ""
+
+    if (!currentDescription) {
+      setValue("description", merchantFallback, { shouldValidate: true, shouldDirty: true })
+    }
+    if (!currentAmountRaw && typeof receiptData.total === "number" && receiptData.total > 0) {
+      setValue("amount", receiptData.total, { shouldValidate: true, shouldDirty: true })
+    }
+    if (!currentNotes && nextNotes) {
+      setValue("notes", nextNotes, { shouldValidate: true, shouldDirty: true })
+    }
+    if (receiptData.currency) {
+      setValue("currencyCode", receiptData.currency, { shouldValidate: true, shouldDirty: true })
+    }
+    if (receiptData.date) {
+      setValue("date", receiptData.date, { shouldValidate: true, shouldDirty: true })
+    }
+    if (receiptData.receipt) {
+      setSelectedFile(receiptData.receipt)
+    }
+    trigger()
+  }
+
+  useEffect(() => {
+    if (!open || !initialReceiptData) return
+    const key = JSON.stringify({
+      merchant: initialReceiptData.merchant,
+      total: initialReceiptData.total,
+      currency: initialReceiptData.currency,
+      date: initialReceiptData.date,
+      itemCount: initialReceiptData.items?.length || 0,
+      receiptName: initialReceiptData.receipt?.name || null,
+    })
+    if (key === lastAppliedReceiptKey) return
+    handleReceiptProcessed(initialReceiptData)
+    setLastAppliedReceiptKey(key)
+  }, [open, initialReceiptData, lastAppliedReceiptKey])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -336,24 +403,37 @@ export function CreateExpenseDialog({ open, onOpenChange, defaultGroupId, childr
               <Label>Select Members to Split With</Label>
               <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto">
                 {selectedGroup.members?.map((member: any) => (
-                  <div
-                    key={member.user._id}
-                    className={`flex items-center gap-2 p-2 rounded-md border cursor-pointer transition-colors ${selectedMembers.includes(member.user._id)
-                      ? "border-primary bg-primary/10"
-                      : "border-muted-foreground/25 hover:border-muted-foreground/50"
-                      }`}
-                    onClick={() => toggleMember(member.user._id)}
-                  >
-                    <Avatar className="h-6 w-6">
-                      <AvatarImage src={member.user.avatar} />
-                      <AvatarFallback className="text-xs">
-                        {getInitials(member.user.firstName, member.user.lastName)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="text-sm truncate">
-                      {member.user.firstName} {member.user.lastName}
-                    </span>
-                  </div>
+                  (() => {
+                    const memberId = resolveMemberId(member)
+                    const isSelected = selectedMembers.includes(memberId)
+                    const firstName = member?.user?.firstName || ""
+                    const lastName = member?.user?.lastName || ""
+                    const avatar = member?.user?.avatar
+
+                    return (
+                      <button
+                        type="button"
+                        key={memberId || `${firstName}-${lastName}`}
+                        className={`flex items-center gap-2 p-2 rounded-md border cursor-pointer transition-all ${isSelected
+                          ? "border-primary bg-primary/20 ring-1 ring-primary/50"
+                          : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                          }`}
+                        onClick={() => toggleMember(memberId)}
+                        disabled={!memberId}
+                      >
+                        <Avatar className="h-6 w-6">
+                          <AvatarImage src={avatar} />
+                          <AvatarFallback className="text-xs">
+                            {getInitials(firstName, lastName)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="text-sm truncate flex-1 text-left">
+                          {firstName} {lastName}
+                        </span>
+                        {isSelected && <Check className="h-4 w-4 text-primary flex-shrink-0" />}
+                      </button>
+                    )
+                  })()
                 ))}
               </div>
               {selectedMembers.length === 0 && (

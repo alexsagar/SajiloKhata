@@ -122,6 +122,30 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    pendingEmail: {
+      type: String,
+      default: null,
+      lowercase: true,
+      trim: true,
+    },
+    emailChangeOtpHash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    emailChangeOtpExpiresAt: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+    emailChangeOtpSentAt: {
+      type: Date,
+      default: null,
+    },
+    emailChangeResendCount: {
+      type: Number,
+      default: 0,
+    },
     emailVerificationToken: String,
     passwordResetToken: String,
     passwordResetExpires: Date,

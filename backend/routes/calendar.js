@@ -5,7 +5,12 @@ const User = require("../models/User")
 const Expense = require("../models/Expense")
 const Group = require("../models/Group")
 const { ok, fail } = require("../utils/http")
-const { toBaseCurrency } = require("../utils/analytics-calcs")
+
+function toStringArray(raw) {
+  if (!raw) return []
+  if (Array.isArray(raw)) return raw.map(String).map(s => s.trim()).filter(Boolean)
+  return String(raw).split(",").map(s => s.trim()).filter(Boolean)
+}
 
 // Get calendar month data with expense totals and base currency conversion
 router.get("/month", async (req, res) => {
@@ -54,9 +59,10 @@ router.get("/month", async (req, res) => {
         isActive: true
       }).select('_id')
       
-      if (groupIds && groupIds.length > 0) {
+      const requestedGroupIds = toStringArray(groupIds)
+      if (requestedGroupIds.length > 0) {
         // Filter by specific groups and verify membership
-        const allowedGroupIds = groupIds.filter(groupId => 
+        const allowedGroupIds = requestedGroupIds.filter(groupId => 
           userGroups.some(g => g._id.toString() === groupId)
         )
         matchQuery.groupId = { $in: allowedGroupIds }
@@ -76,20 +82,35 @@ router.get("/month", async (req, res) => {
       ]
     }
 
-    // Get expenses for the month
-    const expenses = await Expense.find(matchQuery)
-      .select('amountCents currencyCode fxRate date groupId paidBy splits')
-      .lean()
+    // Aggregate monthly totals by date + currency to avoid loading all matching documents.
+    const aggregatedRows = await Expense.aggregate([
+      { $match: matchQuery },
+      {
+        $group: {
+          _id: {
+            date: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+            currencyCode: { $ifNull: ["$currencyCode", "USD"] }
+          },
+          totalBaseCents: { $sum: { $multiply: ["$amountCents", { $ifNull: ["$fxRate", 1] }] } },
+          totalCents: { $sum: "$amountCents" },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { "_id.date": 1 } }
+    ])
 
-    // Group expenses by date and calculate totals
+    // Group aggregated rows by date and calculate totals
     const dailyTotals = {}
     let monthTotalBaseCents = 0
     let monthTotalCount = 0
 
-    expenses.forEach(expense => {
-      const dateKey = expense.date.toISOString().split('T')[0]
-      const baseAmount = toBaseCurrency(expense.amountCents, expense.fxRate || 1.0)
-      
+    aggregatedRows.forEach(row => {
+      const dateKey = row._id.date
+      const currencyCode = row._id.currencyCode || "USD"
+      const totalBaseCents = Math.round(row.totalBaseCents || 0)
+      const totalCents = row.totalCents || 0
+      const count = row.count || 0
+
       if (!dailyTotals[dateKey]) {
         dailyTotals[dateKey] = {
           totalBaseCents: 0,
@@ -98,18 +119,17 @@ router.get("/month", async (req, res) => {
         }
       }
       
-      dailyTotals[dateKey].totalBaseCents += baseAmount
-      dailyTotals[dateKey].count += 1
+      dailyTotals[dateKey].totalBaseCents += totalBaseCents
+      dailyTotals[dateKey].count += count
       
       // Track currency-specific totals
-      const currencyCode = expense.currencyCode || 'USD'
       if (!dailyTotals[dateKey].totalsByCurrency[currencyCode]) {
         dailyTotals[dateKey].totalsByCurrency[currencyCode] = 0
       }
-      dailyTotals[dateKey].totalsByCurrency[currencyCode] += expense.amountCents
+      dailyTotals[dateKey].totalsByCurrency[currencyCode] += totalCents
       
-      monthTotalBaseCents += baseAmount
-      monthTotalCount += 1
+      monthTotalBaseCents += totalBaseCents
+      monthTotalCount += count
     })
 
     // Convert daily totals to array format
@@ -148,10 +168,14 @@ router.get("/events", async (req, res) => {
 
     const startDate = new Date(start)
     const endDate = new Date(end)
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      return fail(res, "Invalid start or end date", 400)
+    }
 
     const query = {
       $or: [{ paidBy: req.user._id }, { "splits.user": req.user._id }],
-      createdAt: {
+      status: { $in: ["active", "settled"] },
+      date: {
         $gte: startDate,
         $lte: endDate,
       },
@@ -162,18 +186,17 @@ router.get("/events", async (req, res) => {
     }
 
     const expenses = await Expense.find(query)
-      .populate("paidBy", "firstName lastName avatar")
-      .populate("groupId", "name")
-      .sort({ createdAt: -1 })
+      .select("description date amountCents currencyCode category groupId")
+      .sort({ date: -1 })
+      .lean()
 
     const events = expenses.map((expense) => ({
       id: expense._id,
       title: expense.description,
-      start: expense.createdAt,
-      amount: expense.amount,
-      currency: expense.currency,
-      paidBy: expense.paidBy,
-      group: expense.groupId,
+      start: expense.date,
+      amountCents: expense.amountCents,
+      currencyCode: expense.currencyCode,
+      groupId: expense.groupId,
       category: expense.category,
       type: "expense",
     }))

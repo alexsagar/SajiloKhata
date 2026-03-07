@@ -350,7 +350,7 @@ export function Header({
                     variant="ghost"
                     size="sm"
                     className="w-full text-xs"
-                    onClick={() => router.push('/settings/notifications')}
+                    onClick={() => router.push('/notifications')}
                   >
                     View all notifications
                   </Button>

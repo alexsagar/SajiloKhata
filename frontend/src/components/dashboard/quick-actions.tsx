@@ -7,12 +7,41 @@ import { CreatePersonalExpenseDialog } from "@/components/expenses/create-person
 import { CreateExpenseDialog } from "@/components/expenses/create-expense-dialog"
 import { SmartReceiptScanner } from "@/components/ocr/smart-receipt-scanner"
 import { CreateGroupDialog } from "@/components/groups/create-group-dialog"
+import { useQuery } from "@tanstack/react-query"
+import { groupAPI } from "@/lib/api"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import type { NormalizedReceiptData } from "@/lib/receipt-normalizer"
 
 export function QuickActions() {
   const [showPersonalExpense, setShowPersonalExpense] = useState(false)
   const [showGroupExpense, setShowGroupExpense] = useState(false)
   const [showScanReceipt, setShowScanReceipt] = useState(false)
   const [showCreateGroup, setShowCreateGroup] = useState(false)
+  const [showReceiptTarget, setShowReceiptTarget] = useState(false)
+  const [receiptTargetType, setReceiptTargetType] = useState<"personal" | "group">("personal")
+  const [targetGroupId, setTargetGroupId] = useState("")
+  const [prefillReceiptData, setPrefillReceiptData] = useState<(NormalizedReceiptData & { receipt?: File | null }) | null>(null)
+  const { data: groupsResp } = useQuery({
+    queryKey: ["user-groups"],
+    queryFn: () => groupAPI.getGroups(),
+  })
+  const groups = ((groupsResp as any)?.data?.data || (groupsResp as any)?.data || []) as Array<{ _id: string; name: string }>
+
+  const resetReceiptPrefillFlow = () => {
+    setShowReceiptTarget(false)
+    setReceiptTargetType("personal")
+    setTargetGroupId("")
+    setPrefillReceiptData(null)
+  }
 
   return (
     <>
@@ -76,14 +105,27 @@ export function QuickActions() {
       {showPersonalExpense && (
         <CreatePersonalExpenseDialog 
           open={showPersonalExpense} 
-          onOpenChange={setShowPersonalExpense} 
+          onOpenChange={(open) => {
+            setShowPersonalExpense(open)
+            if (!open) {
+              resetReceiptPrefillFlow()
+            }
+          }}
+          initialReceiptData={prefillReceiptData}
         />
       )}
 
       {showGroupExpense && (
         <CreateExpenseDialog 
           open={showGroupExpense} 
-          onOpenChange={setShowGroupExpense}
+          onOpenChange={(open) => {
+            setShowGroupExpense(open)
+            if (!open) {
+              resetReceiptPrefillFlow()
+            }
+          }}
+          defaultGroupId={targetGroupId || undefined}
+          initialReceiptData={prefillReceiptData}
         />
       )}
 
@@ -91,8 +133,91 @@ export function QuickActions() {
         <SmartReceiptScanner 
           open={showScanReceipt} 
           onOpenChange={setShowScanReceipt}
+          onReceiptProcessed={(receiptData) => {
+            setPrefillReceiptData(receiptData)
+            setShowScanReceipt(false)
+            setShowReceiptTarget(true)
+          }}
         />
       )}
+
+      <Dialog
+        open={showReceiptTarget}
+        onOpenChange={(open) => {
+          setShowReceiptTarget(open)
+          if (!open) {
+            resetReceiptPrefillFlow()
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Use Scanned Receipt</DialogTitle>
+            <DialogDescription>
+              Choose where to apply this scanned expense data.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                className={`rounded-lg border p-3 text-left transition ${receiptTargetType === "personal" ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40"}`}
+                onClick={() => setReceiptTargetType("personal")}
+              >
+                <p className="text-sm font-medium">Personal Expense</p>
+                <p className="text-xs text-muted-foreground mt-1">Apply to your own expense</p>
+              </button>
+              <button
+                type="button"
+                className={`rounded-lg border p-3 text-left transition ${receiptTargetType === "group" ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40"}`}
+                onClick={() => setReceiptTargetType("group")}
+              >
+                <p className="text-sm font-medium">Group Expense</p>
+                <p className="text-xs text-muted-foreground mt-1">Split with a group</p>
+              </button>
+            </div>
+
+            {receiptTargetType === "group" && (
+              <div className="space-y-2">
+                <Label>Select Group</Label>
+                <Select value={targetGroupId} onValueChange={setTargetGroupId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={groups.length ? "Choose a group" : "No groups available"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {groups.map((group) => (
+                      <SelectItem key={group._id} value={group._id}>
+                        {group.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => resetReceiptPrefillFlow()}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowReceiptTarget(false)
+                  if (receiptTargetType === "group") {
+                    if (!targetGroupId) return
+                    setShowGroupExpense(true)
+                    return
+                  }
+                  setShowPersonalExpense(true)
+                }}
+                disabled={receiptTargetType === "group" && !targetGroupId}
+              >
+                Continue
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {showCreateGroup && (
         <CreateGroupDialog 

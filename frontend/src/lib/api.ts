@@ -5,6 +5,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/a
 export const api = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
+  timeout: 10_000,
   headers: {
     "Content-Type": "application/json",
   },
@@ -89,6 +90,9 @@ export const authAPI = {
 export const userAPI = {
   getProfile: () => api.get("/users/profile"),
   updateProfile: (data: any) => api.put("/users/profile", data),
+  requestEmailChangeOtp: (data: { newEmail: string; password?: string }) => api.post("/users/email-change/request", data),
+  resendEmailChangeOtp: () => api.post("/users/email-change/resend"),
+  verifyEmailChangeOtp: (data: { otp: string }) => api.post("/users/email-change/verify", data),
   updatePreferences: (data: any) => api.put("/users/preferences", data),
   changePassword: (data: any) => api.put("/users/password", data),
   uploadAvatar: (formData: FormData) =>
@@ -103,7 +107,13 @@ export const userAPI = {
     const lim = params.limit != null ? `&limit=${params.limit}` : ''
     return api.get(`/users/search?q=${q}${lim}`)
   },
+  searchGlobal: (params: { query: string; limit?: number }) => {
+    const q = encodeURIComponent(params.query)
+    const lim = params.limit != null ? `&limit=${params.limit}` : ""
+    return api.get(`/users/search/global?q=${q}${lim}`)
+  },
   getBalance: () => api.get("/users/balance"),
+  getBalanceSummary: () => api.get("/users/balance-summary"),
 
   // Account deletion
   deleteAccount: (data: { password?: string; confirmation: string }) =>
@@ -175,12 +185,19 @@ export const groupAPI = {
   declineGroupInvite: (inviteId: string) => api.post(`/invites/${inviteId}/decline`),
   // Added helpers used by components
   getBalances: (groupId: string) => api.get(`/groups/${groupId}/balances`),
+  getMyBalance: () => api.get('/groups/my-balance'),
   getEligibleFriends: (groupId: string) => api.get(`/groups/${groupId}/friends-eligible`),
+  getActivity: (groupId: string, params?: { page?: number; limit?: number }) =>
+    api.get(`/groups/${groupId}/activity`, { params }),
   get: (url: string) => api.get(url),
 }
 
 export const settlementAPI = {
   confirm: (id: string) => api.patch(`/settlements/${id}/confirm`),
+  setPaymentLink: (id: string, data: { paymentLink: string; paymentProvider?: string }) =>
+    api.patch(`/settlements/${id}/payment-link`, data),
+  remind: (id: string) => api.post(`/settlements/${id}/remind`),
+  remindLater: (id: string, days = 3) => api.post(`/settlements/${id}/remind-later`, { days }),
 }
 
 export const expenseAPI = {
@@ -199,6 +216,11 @@ export const expenseAPI = {
   updateExpense: (id: string, data: any) => api.put(`/expenses/${id}`, data),
   deleteExpense: (id: string) => api.delete(`/expenses/${id}`),
   settleExpense: (id: string, userId: string) => api.patch(`/expenses/${id}/settle`, { userId }),
+  getComments: (id: string) => api.get(`/expenses/${id}/comments`),
+  addComment: (id: string, data: { text: string }) => api.post(`/expenses/${id}/comments`, data),
+  updateComment: (id: string, commentId: string, data: { text: string }) =>
+    api.patch(`/expenses/${id}/comments/${commentId}`, data),
+  deleteComment: (id: string, commentId: string) => api.delete(`/expenses/${id}/comments/${commentId}`),
   getRecurringExpenses: () => api.get("/expenses/recurring"),
   createRecurringExpense: (data: any) => api.post("/expenses/recurring", data),
   updateRecurringExpense: (id: string, data: any) => api.put(`/expenses/recurring/${id}`, data),
@@ -210,9 +232,11 @@ export const expenseAPI = {
 }
 
 export const notificationAPI = {
-  getNotifications: () => api.get("/notifications"),
-  markAsRead: (id: string) => api.put(`/notifications/${id}/read`),
-  markAllAsRead: () => api.put("/notifications/read-all"),
+  getNotifications: (params?: { page?: number; limit?: number; unreadOnly?: boolean }) =>
+    api.get("/notifications", { params }),
+  getUnreadCount: () => api.get("/notifications/unread-count"),
+  markAsRead: (id: string) => api.patch(`/notifications/${id}/read`),
+  markAllAsRead: () => api.patch("/notifications/read-all"),
   deleteNotification: (id: string) => api.delete(`/notifications/${id}`),
   getPreferences: () => api.get("/notifications/preferences"),
   updatePreferences: (data: any) => api.put("/notifications/preferences", data),
@@ -223,9 +247,17 @@ export const receiptAPI = {
     api.post("/receipts/upload", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     }),
-  getReceipts: () => api.get("/receipts"),
+  getReceipts: (params?: {
+    expenseId?: string
+    requiresReview?: boolean
+    duplicateOnly?: boolean
+    processingStatus?: "pending" | "processing" | "completed" | "failed"
+    page?: number
+    limit?: number
+  }) => api.get("/receipts", { params }),
   getReceipt: (id: string) => api.get(`/receipts/${id}`),
   updateReceipt: (id: string, data: any) => api.put(`/receipts/${id}`, data),
+  markReviewed: (id: string) => api.post(`/receipts/${id}/review`),
   linkToExpense: (id: string, expenseId: string) => api.put(`/receipts/${id}/link-expense`, { expenseId }),
   reprocessReceipt: (id: string) => api.post(`/receipts/${id}/reprocess`),
 }

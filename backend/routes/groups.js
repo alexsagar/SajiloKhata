@@ -3,13 +3,263 @@ const Group = require("../models/Group")
 const User = require("../models/User")
 const Expense = require("../models/Expense")
 const Settlement = require("../models/Settlement")
+const LedgerEvent = require("../models/LedgerEvent")
 const { body, validationResult } = require("express-validator")
-const { ExpenseCalculator } = require("../utils/expenseCalculator")
 const { ok, fail } = require("../utils/http")
+const { getPagination } = require("../utils/query")
+const { cacheUserResponse } = require("../middleware/cache")
+const { bumpUsersCacheVersion } = require("../services/cacheService")
+const notificationService = require("../services/notificationService")
+const { logAuditEvent } = require("../services/auditService")
+const { appendLedgerEvent } = require("../services/ledgerService")
 
 const router = express.Router()
+
+async function invalidateGroupCaches({ req, group = null, groupId = null, extraUserIds = [] }) {
+  const userIds = new Set([String(req.user._id), ...extraUserIds.map(String)])
+  const resolvedGroupId = group?._id || groupId
+  if (resolvedGroupId) {
+    let targetGroup = group
+    if (!targetGroup) {
+      targetGroup = await Group.findById(resolvedGroupId).select("members.user").lean()
+    }
+    for (const member of targetGroup?.members || []) {
+      if (member?.user) userIds.add(String(member.user))
+    }
+  }
+  await bumpUsersCacheVersion(Array.from(userIds))
+}
+
+async function buildGroupNetBalances(groupId) {
+  const [expenseEdges, settlementEdges, expenseSummary] = await Promise.all([
+    Expense.aggregate([
+      { $match: { groupId, status: "active" } },
+      { $unwind: "$splits" },
+      {
+        $project: {
+          fromUserId: "$splits.user",
+          toUserId: "$paidBy",
+          amountCents: {
+            $cond: [
+              { $eq: ["$splits.settled", true] },
+              0,
+              { $ifNull: ["$splits.amountCents", 0] },
+            ],
+          },
+        },
+      },
+      {
+        $match: {
+          $expr: {
+            $and: [
+              { $gt: ["$amountCents", 0] },
+              { $ne: ["$fromUserId", "$toUserId"] },
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: { fromUserId: "$fromUserId", toUserId: "$toUserId" },
+          amountCents: { $sum: "$amountCents" },
+        },
+      },
+    ]),
+    Settlement.aggregate([
+      { $match: { groupId, status: "CONFIRMED" } },
+      {
+        $group: {
+          _id: { fromUserId: "$fromUserId", toUserId: "$toUserId" },
+          amountCents: { $sum: "$amountCents" },
+        },
+      },
+    ]),
+    Expense.aggregate([
+      { $match: { groupId, status: "active" } },
+      { $group: { _id: null, totalExpensesCents: { $sum: "$amountCents" }, expenseCount: { $sum: 1 } } },
+    ]),
+  ])
+
+  const netByUser = new Map()
+  const bump = (userId, delta) => {
+    const key = String(userId)
+    netByUser.set(key, (netByUser.get(key) || 0) + delta)
+  }
+
+  for (const edge of expenseEdges) {
+    bump(edge._id.toUserId, edge.amountCents)
+    bump(edge._id.fromUserId, -edge.amountCents)
+  }
+
+  for (const edge of settlementEdges) {
+    // Confirmed settlement: fromUser paid toUser, so reduce original debt relation.
+    bump(edge._id.fromUserId, edge.amountCents)
+    bump(edge._id.toUserId, -edge.amountCents)
+  }
+
+  return {
+    netByUser,
+    totalExpensesCents: expenseSummary[0]?.totalExpensesCents || 0,
+    expenseCount: expenseSummary[0]?.expenseCount || 0,
+  }
+}
+
+function computeGreedyTransactions(netByUser) {
+  const creditors = []
+  const debtors = []
+  for (const [userId, netCents] of netByUser.entries()) {
+    const rounded = Math.round(netCents)
+    if (rounded > 0) creditors.push({ userId, netCents: rounded })
+    if (rounded < 0) debtors.push({ userId, netCents: rounded })
+  }
+
+  creditors.sort((a, b) => b.netCents - a.netCents)
+  debtors.sort((a, b) => a.netCents - b.netCents)
+
+  const transactions = []
+  let i = 0
+  let j = 0
+  while (i < creditors.length && j < debtors.length) {
+    const creditor = creditors[i]
+    const debtor = debtors[j]
+    const amountCents = Math.min(creditor.netCents, Math.abs(debtor.netCents))
+    if (amountCents > 0) {
+      transactions.push({
+        from: debtor.userId,
+        to: creditor.userId,
+        amountCents,
+        amount: amountCents / 100,
+      })
+    }
+    creditor.netCents -= amountCents
+    debtor.netCents += amountCents
+    if (creditor.netCents === 0) i += 1
+    if (debtor.netCents === 0) j += 1
+  }
+  return transactions
+}
+
+function formatActivityMessage(event, actorName) {
+  const amount = Number(event?.payload?.amountCents || 0) / 100
+  const description = event?.payload?.description || ""
+  switch (event.eventType) {
+    case "EXPENSE_CREATED":
+      return `${actorName} added an expense${description ? `: ${description}` : ""}${amount > 0 ? ` (${amount.toFixed(2)})` : ""}.`
+    case "EXPENSE_UPDATED":
+      return `${actorName} updated an expense${amount > 0 ? ` to ${amount.toFixed(2)}` : ""}.`
+    case "EXPENSE_DELETED":
+      return `${actorName} deleted an expense.`
+    case "EXPENSE_COMMENT_ADDED":
+      return `${actorName} commented on an expense${event?.payload?.snippet ? `: "${event.payload.snippet}"` : ""}.`
+    case "SETTLEMENT_PLANNED":
+      return `${actorName} requested settlements${amount > 0 ? ` (${amount.toFixed(2)})` : ""}.`
+    case "SETTLEMENT_CONFIRMED":
+      return `${actorName} recorded a settlement${amount > 0 ? ` (${amount.toFixed(2)})` : ""}.`
+    default:
+      return `${actorName} updated group activity.`
+  }
+}
+
+// Aggregate balance for the current user across all groups (for dashboard)
+router.get("/my-balance", cacheUserResponse({ namespace: "groups", ttlSeconds: 60 }), async (req, res) => {
+  try {
+    const currentUserId = String(req.user._id)
+    const groups = await Group.find({
+      "members.user": req.user._id,
+      isActive: true,
+    }).select("_id").lean()
+
+    const groupIds = groups.map((g) => g._id)
+    if (groupIds.length === 0) {
+      return ok(res, { youOwe: 0, youreOwed: 0, totalBalance: 0 })
+    }
+
+    const [expenseEdges, settlementEdges] = await Promise.all([
+      Expense.aggregate([
+        { $match: { groupId: { $in: groupIds }, status: "active" } },
+        { $unwind: "$splits" },
+        {
+          $project: {
+            fromUserId: "$splits.user",
+            toUserId: "$paidBy",
+            amountCents: {
+              $cond: [
+                { $eq: ["$splits.settled", true] },
+                0,
+                { $ifNull: ["$splits.amountCents", 0] },
+              ],
+            },
+          },
+        },
+        {
+          $match: {
+            $expr: {
+              $and: [
+                { $gt: ["$amountCents", 0] },
+                { $ne: ["$fromUserId", "$toUserId"] },
+              ],
+            },
+          },
+        },
+        {
+          $group: {
+            _id: { fromUserId: "$fromUserId", toUserId: "$toUserId" },
+            amountCents: { $sum: "$amountCents" },
+          },
+        },
+      ]),
+      Settlement.aggregate([
+        { $match: { groupId: { $in: groupIds }, status: "CONFIRMED" } },
+        {
+          $group: {
+            _id: { fromUserId: "$fromUserId", toUserId: "$toUserId" },
+            amountCents: { $sum: "$amountCents" },
+          },
+        },
+      ]),
+    ])
+
+    const netByCounterparty = new Map()
+    const bumpPair = (counterpartyId, deltaCents) => {
+      const key = String(counterpartyId)
+      netByCounterparty.set(key, (netByCounterparty.get(key) || 0) + deltaCents)
+    }
+
+    for (const edge of expenseEdges) {
+      const fromId = String(edge?._id?.fromUserId || "")
+      const toId = String(edge?._id?.toUserId || "")
+      const cents = Math.round(Number(edge?.amountCents || 0))
+      if (cents <= 0) continue
+
+      if (toId === currentUserId && fromId !== currentUserId) bumpPair(fromId, cents)
+      if (fromId === currentUserId && toId !== currentUserId) bumpPair(toId, -cents)
+    }
+
+    for (const edge of settlementEdges) {
+      const fromId = String(edge?._id?.fromUserId || "")
+      const toId = String(edge?._id?.toUserId || "")
+      const cents = Math.round(Number(edge?.amountCents || 0))
+      if (cents <= 0) continue
+
+      if (fromId === currentUserId && toId !== currentUserId) bumpPair(toId, cents)
+      if (toId === currentUserId && fromId !== currentUserId) bumpPair(fromId, -cents)
+    }
+
+    let youreOwed = 0
+    let youOwe = 0
+    for (const v of netByCounterparty.values()) {
+      if (v > 0) youreOwed += v
+      if (v < 0) youOwe += Math.abs(v)
+    }
+
+    return ok(res, { youOwe, youreOwed, totalBalance: youreOwed - youOwe })
+  } catch (error) {
+    return fail(res, error.message || "Server error", 500)
+  }
+})
+
 // Return friends eligible to be added to this group (not already members)
-router.get("/:id/friends-eligible", async (req, res) => {
+router.get("/:id/friends-eligible", cacheUserResponse({ namespace: "groups", ttlSeconds: 60 }), async (req, res) => {
   try {
     const group = await Group.findOne({ _id: req.params.id, "members.user": req.user._id, isActive: true })
       .populate("members.user", "_id")
@@ -50,6 +300,7 @@ router.post("/:id/members", async (req, res) => {
 
     // emit socket event
     req.io.to(`group_${group._id}`).emit("group:membersAdded", { groupId: String(group._id), userIds: toAdd })
+    await invalidateGroupCaches({ req, group, extraUserIds: toAdd })
     res.json({ data: { added: toAdd.length } })
   } catch (e) {
     res.status(500).json({ message: "Server error" })
@@ -57,13 +308,13 @@ router.post("/:id/members", async (req, res) => {
 })
 
 // Get all user's groups
-router.get("/", async (req, res) => {
+router.get("/", cacheUserResponse({ namespace: "groups", ttlSeconds: 60 }), async (req, res) => {
   try {
     const groups = await Group.find({
       "members.user": req.user._id,
       isActive: true,
     })
-      .select('name description members createdBy category updatedAt isActive')
+      .select('name description members createdBy category createdAt updatedAt isActive')
       .populate({ path: 'members.user', select: 'firstName lastName username avatar' })
       .populate({ path: 'createdBy', select: 'firstName lastName username' })
       .sort({ updatedAt: -1 })
@@ -76,7 +327,7 @@ router.get("/", async (req, res) => {
 })
 
 // Get single group
-router.get("/:id", async (req, res) => {
+router.get("/:id", cacheUserResponse({ namespace: "groups", ttlSeconds: 60 }), async (req, res) => {
   try {
     const group = await Group.findOne({
       _id: req.params.id,
@@ -95,6 +346,57 @@ router.get("/:id", async (req, res) => {
     res.json(group)
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message })
+  }
+})
+
+router.get("/:id/activity", cacheUserResponse({ namespace: "groups", ttlSeconds: 30 }), async (req, res) => {
+  try {
+    const group = await Group.findOne({
+      _id: req.params.id,
+      "members.user": req.user._id,
+      isActive: true,
+    }).select("_id")
+
+    if (!group) return fail(res, "Group not found", 404)
+
+    const { page, limit, skip } = getPagination(req.query, { defaultLimit: 20, maxLimit: 100 })
+    const [events, total] = await Promise.all([
+      LedgerEvent.find({ groupId: group._id })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate("actorUserId", "firstName lastName username avatar")
+        .lean(),
+      LedgerEvent.countDocuments({ groupId: group._id }),
+    ])
+
+    const activities = events.map((event) => {
+      const actor = event.actorUserId || null
+      const actorName = actor?.firstName ? `${actor.firstName} ${actor.lastName || ""}`.trim() : "Someone"
+      return {
+        id: event._id,
+        type: event.eventType,
+        entityType: event.entityType,
+        entityId: event.entityId,
+        groupId: event.groupId,
+        actor,
+        message: formatActivityMessage(event, actorName),
+        payload: event.payload || {},
+        createdAt: event.createdAt,
+      }
+    })
+
+    return ok(res, {
+      activities,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    })
+  } catch (error) {
+    return fail(res, "Failed to load activity", 500)
   }
 })
 
@@ -136,6 +438,17 @@ router.post(
       // Emit to user's socket
       req.io.to(`user_${req.user._id}`).emit("group_created", group)
 
+      await logAuditEvent({
+        req,
+        action: "GROUP_CREATED",
+        entityType: "group",
+        entityId: group._id,
+        groupId: group._id,
+        statusCode: 201,
+        metadata: { memberCount: group.members?.length || 0 },
+      })
+
+      await invalidateGroupCaches({ req, group })
       res.status(201).json(group)
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message })
@@ -183,6 +496,7 @@ router.put(
       // Emit to group members
       req.io.to(`group_${group._id}`).emit("group_updated", group)
 
+      await invalidateGroupCaches({ req, group })
       res.json(group)
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message })
@@ -238,6 +552,7 @@ router.post("/join", [body("inviteCode").notEmpty().trim()], async (req, res) =>
       newMember: req.user,
     })
 
+    await invalidateGroupCaches({ req, group })
     res.json(group)
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message })
@@ -245,7 +560,7 @@ router.post("/join", [body("inviteCode").notEmpty().trim()], async (req, res) =>
 })
 
 // Get group balance summary
-router.get("/:id/balances", async (req, res) => {
+router.get("/:id/balances", cacheUserResponse({ namespace: "groups", ttlSeconds: 45 }), async (req, res) => {
   try {
     const group = await Group.findOne({
       _id: req.params.id,
@@ -257,43 +572,24 @@ router.get("/:id/balances", async (req, res) => {
       return res.status(404).json({ message: "Group not found" })
     }
 
-    // Get all expenses for the group
-    const expenses = await Expense.find({
-      groupId: group._id,
-      status: "active",
-    }).populate("paidBy", "firstName lastName username avatar")
-      .populate("splits.user", "firstName lastName username avatar")
+    const { netByUser, totalExpensesCents, expenseCount } = await buildGroupNetBalances(group._id)
+    const minimumTransactions = computeGreedyTransactions(netByUser)
 
-    // Calculate balances
-    const calculator = new ExpenseCalculator()
-
-    expenses.forEach((expense) => {
-      calculator.addExpense({
-        paidBy: expense.paidBy._id.toString(),
-        splits: expense.splits.map((split) => ({
-          userId: split.user.toString(),
-          amount: Math.round(Number(split.amountCents || 0)) / 100,
-        })),
-        amount: Math.round(Number(expense.amountCents || 0)) / 100,
-      })
-    })
-
-    const summary = calculator.getGroupSummary()
-
-    // Add user information to balances
     const balancesWithUsers = {}
-    for (const [userId, balance] of Object.entries(summary.balances)) {
+    for (const [userId, netCents] of netByUser.entries()) {
       const member = group.members.find(m => m.user._id.toString() === userId)
       if (member) {
         balancesWithUsers[userId] = {
-          ...balance,
+          netCents,
+          net: netCents / 100,
+          youOwe: netCents < 0 ? Math.abs(netCents) / 100 : 0,
+          youAreOwed: netCents > 0 ? netCents / 100 : 0,
           user: member.user
         }
       }
     }
 
-    // Add user information to transactions
-    const transactionsWithUsers = summary.minimumTransactions.map(transaction => {
+    const transactionsWithUsers = minimumTransactions.map(transaction => {
       const fromMember = group.members.find(m => m.user._id.toString() === transaction.from)
       const toMember = group.members.find(m => m.user._id.toString() === transaction.to)
 
@@ -306,10 +602,10 @@ router.get("/:id/balances", async (req, res) => {
 
     res.json({
       data: {
-        totalExpenses: summary.totalExpenses,
+        totalExpenses: totalExpensesCents / 100,
         balances: balancesWithUsers,
         minimumTransactions: transactionsWithUsers,
-        expenseCount: expenses.length,
+        expenseCount,
         memberCount: group.members.length,
         currency: req.user.preferences?.currency || "USD",
       }
@@ -332,85 +628,25 @@ router.post("/:id/settle-up", async (req, res) => {
       return fail(res, "Group not found", 404)
     }
 
-    const expenses = await Expense.find({
-      groupId: group._id,
-      status: "active",
-    }).select("amountCents paidBy")
-
     const memberIds = group.members.map((m) => m.user._id.toString())
-    const memberCount = memberIds.length
-    if (memberCount === 0) {
+    if (memberIds.length === 0) {
       return ok(res, { settlements: [], totals: { pendingCents: 0, confirmedCents: 0 } })
     }
 
-    // Total paid per member (cents)
-    const paidByUserCents = new Map(memberIds.map((id) => [id, 0]))
-    let totalGroupExpenseCents = 0
+    const { netByUser } = await buildGroupNetBalances(group._id)
+    const minimumTransactions = computeGreedyTransactions(netByUser)
 
-    for (const exp of expenses) {
-      const cents = Math.round(Number(exp.amountCents || 0))
-      if (cents <= 0) continue
-      totalGroupExpenseCents += cents
-
-      const payerId = exp.paidBy?.toString?.()
-      if (payerId && paidByUserCents.has(payerId)) {
-        paidByUserCents.set(payerId, paidByUserCents.get(payerId) + cents)
-      }
-    }
-
-    // Equal share per member using integer cents; adjust remainder so nets sum to 0
-    const baseShare = Math.floor(totalGroupExpenseCents / memberCount)
-    const remainder = totalGroupExpenseCents - baseShare * memberCount
-
-    const sortedMemberIds = [...memberIds].sort() // deterministic remainder assignment
-    const shareByUserCents = new Map(sortedMemberIds.map((id) => [id, baseShare]))
-    if (remainder !== 0) {
-      const lastId = sortedMemberIds[sortedMemberIds.length - 1]
-      shareByUserCents.set(lastId, shareByUserCents.get(lastId) + remainder)
-    }
-
-    // Net balance = paid - share (cents). >0 creditor, <0 debtor.
-    const creditors = []
-    const debtors = []
-    for (const uid of sortedMemberIds) {
-      const paid = paidByUserCents.get(uid) || 0
-      const share = shareByUserCents.get(uid) || 0
-      const net = paid - share
-      if (net > 0) creditors.push({ userId: uid, netCents: net })
-      else if (net < 0) debtors.push({ userId: uid, netCents: net })
-    }
-
-    creditors.sort((a, b) => b.netCents - a.netCents)
-    debtors.sort((a, b) => a.netCents - b.netCents) // more negative first
-
-    // Avoid duplicates: remove previous pending settlements for this group
+    // Avoid duplicates: update the plan by removing previous PENDING settlements only
+    // We KEEP confirmed settlements as history
     await Settlement.deleteMany({ groupId: group._id, status: "PENDING" })
 
-    const settlementsToCreate = []
-    let i = 0
-    let j = 0
-    while (i < creditors.length && j < debtors.length) {
-      const creditor = creditors[i]
-      const debtor = debtors[j]
-
-      const debtorOwes = Math.abs(debtor.netCents)
-      const amountCents = Math.min(debtorOwes, creditor.netCents)
-      if (amountCents > 0) {
-        settlementsToCreate.push({
-          groupId: group._id,
-          fromUserId: debtor.userId,
-          toUserId: creditor.userId,
-          amountCents,
-          status: "PENDING",
-        })
-      }
-
-      creditor.netCents -= amountCents
-      debtor.netCents += amountCents
-
-      if (creditor.netCents === 0) i++
-      if (debtor.netCents === 0) j++
-    }
+    const settlementsToCreate = minimumTransactions.map((tx) => ({
+      groupId: group._id,
+      fromUserId: tx.from,
+      toUserId: tx.to,
+      amountCents: tx.amountCents,
+      status: "PENDING",
+    }))
 
     if (settlementsToCreate.length === 0) {
       return ok(res, { settlements: [], totals: { pendingCents: 0, confirmedCents: 0 } })
@@ -423,9 +659,62 @@ router.post("/:id/settle-up", async (req, res) => {
       .sort({ createdAt: 1 })
       .lean()
 
+    const requesterId = String(req.user._id)
+    const settlementRequests = populated
+      .filter((settlement) => String(settlement.fromUserId?._id || settlement.fromUserId) !== requesterId)
+      .map((settlement) => ({
+        userId: String(settlement.fromUserId?._id || settlement.fromUserId),
+        type: "SETTLEMENT_REQUESTED",
+        title: `Payment requested in ${group.name}`,
+        message: `${req.user.firstName} requested ${settlement.amountCents / 100} from you.`,
+        entityType: "settlement",
+        entityId: String(settlement._id),
+        groupId: group._id,
+        data: {
+          groupId: String(group._id),
+          settlementId: String(settlement._id),
+          fromUserId: String(settlement.fromUserId?._id || settlement.fromUserId),
+          toUserId: String(settlement.toUserId?._id || settlement.toUserId),
+          amountCents: settlement.amountCents,
+          paymentLink: settlement.paymentLink || null,
+          paymentProvider: settlement.paymentProvider || null,
+          actionUrl: settlement.paymentLink || `/groups/${group._id}`,
+        },
+        actionUrl: settlement.paymentLink || `/groups/${group._id}`,
+      }))
+
+    await Promise.all(
+      settlementRequests.map((payload) => notificationService.createNotification(payload, { io: req.io })),
+    )
+
+    await Promise.all(
+      populated.map((settlement) =>
+        appendLedgerEvent({
+          req,
+          eventType: "SETTLEMENT_PLANNED",
+          entityType: "settlement",
+          entityId: settlement._id,
+          groupId: group._id,
+          payload: {
+            fromUserId: settlement.fromUserId?._id || settlement.fromUserId,
+            toUserId: settlement.toUserId?._id || settlement.toUserId,
+            amountCents: settlement.amountCents,
+            status: settlement.status,
+          },
+        }),
+      ),
+    )
+
     const pendingCents = populated.reduce((sum, s) => sum + (s.status === "PENDING" ? s.amountCents : 0), 0)
     const confirmedCents = populated.reduce((sum, s) => sum + (s.status === "CONFIRMED" ? s.amountCents : 0), 0)
 
+    try {
+      req.io?.to(`group_${group._id}`).emit("settlement:plan-updated", {
+        groupId: String(group._id),
+      })
+    } catch {}
+
+    await invalidateGroupCaches({ req, group })
     return ok(res, { settlements: populated, totals: { pendingCents, confirmedCents } })
   } catch (error) {
     return fail(res, error.message || "Server error", 500)
@@ -433,7 +722,7 @@ router.post("/:id/settle-up", async (req, res) => {
 })
 
 // Get persisted settlements for a group
-router.get("/:id/settlements", async (req, res) => {
+router.get("/:id/settlements", cacheUserResponse({ namespace: "groups", ttlSeconds: 45 }), async (req, res) => {
   try {
     const group = await Group.findOne({
       _id: req.params.id,
@@ -445,16 +734,24 @@ router.get("/:id/settlements", async (req, res) => {
       return fail(res, "Group not found", 404)
     }
 
+    const { page, limit, skip } = getPagination(req.query, { defaultLimit: 50, maxLimit: 200 })
     const settlements = await Settlement.find({ groupId: group._id })
       .populate("fromUserId", "firstName lastName username avatar")
       .populate("toUserId", "firstName lastName username avatar")
       .sort({ createdAt: -1 })
+      .limit(limit)
+      .skip(skip)
       .lean()
 
     const pendingCents = settlements.reduce((sum, s) => sum + (s.status === "PENDING" ? s.amountCents : 0), 0)
     const confirmedCents = settlements.reduce((sum, s) => sum + (s.status === "CONFIRMED" ? s.amountCents : 0), 0)
 
-    return ok(res, { settlements, totals: { pendingCents, confirmedCents } })
+    const total = await Settlement.countDocuments({ groupId: group._id })
+    return ok(res, {
+      settlements,
+      totals: { pendingCents, confirmedCents },
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    })
   } catch (error) {
     return fail(res, error.message || "Server error", 500)
   }
@@ -491,6 +788,17 @@ router.delete("/:id", async (req, res) => {
       deletedBy: req.user._id,
     })
 
+    await logAuditEvent({
+      req,
+      action: "GROUP_DELETED",
+      entityType: "group",
+      entityId: group._id,
+      groupId: group._id,
+      statusCode: 200,
+      metadata: {},
+    })
+
+    await invalidateGroupCaches({ req, group })
     res.json({ message: "Group deleted permanently" })
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message })
@@ -531,6 +839,7 @@ router.delete("/:id/members/:userId", async (req, res) => {
       removedUserId: req.params.userId,
     })
 
+    await invalidateGroupCaches({ req, group, extraUserIds: [req.params.userId] })
     res.json({ message: "Member removed successfully" })
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message })
@@ -578,6 +887,7 @@ router.put("/:id/members/:userId", async (req, res) => {
       role,
     })
 
+    await invalidateGroupCaches({ req, group, extraUserIds: [req.params.userId] })
     res.json({ message: "Member role updated successfully", role })
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message })

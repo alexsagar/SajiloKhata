@@ -278,6 +278,8 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
             queryClient.invalidateQueries({ queryKey: ["expenses"] })
             queryClient.invalidateQueries({ queryKey: ["recent-expenses"] })
             queryClient.invalidateQueries({ queryKey: ["expense-summary"] })
+            queryClient.invalidateQueries({ queryKey: ["my-balance"] })
+            queryClient.invalidateQueries({ queryKey: ["user-balance-summary"] })
             queryClient.invalidateQueries({ queryKey: ["user-groups"] })
             if (variables.groupId) {
                 queryClient.invalidateQueries({ queryKey: ["group-expenses", variables.groupId] })
