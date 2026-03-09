@@ -22,6 +22,7 @@ import { Loader2 } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { expenseAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
+import { syncGroupState, syncDashboardState } from "@/lib/server-state"
 
 const editExpenseSchema = z.object({
   description: z.string().min(1, "Description is required"),
@@ -68,8 +69,15 @@ export function EditExpenseDialog({ expense, open, onOpenChange }: EditExpenseDi
   const updateExpenseMutation = useMutation({
     mutationFn: (data: EditExpenseFormData) => expenseAPI.updateExpense(expense._id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["expenses"] })
-      queryClient.invalidateQueries({ queryKey: ["user-balance"] })
+      if (expense?.groupId?._id || expense?.groupId) {
+        syncGroupState(queryClient, {
+          groupId: String(expense.groupId?._id || expense.groupId),
+          expenseId: String(expense._id),
+          includeNotifications: true,
+        })
+      } else {
+        syncDashboardState(queryClient, { includeNotifications: true })
+      }
       toast({
         title: "Expense updated",
         description: "Your expense has been updated successfully.",

@@ -10,6 +10,7 @@ import { MobileListSkeleton } from "@/components/mobile/mobile-skeleton"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/hooks/use-toast"
 import { Bell } from "lucide-react"
+import { syncDashboardState, syncGroupState } from "@/lib/server-state"
 
 const PAGE_SIZE = 20
 
@@ -61,18 +62,24 @@ export default function MobileNotificationsPage() {
 
     const markRead = useMutation({
         mutationFn: (id: string) => notificationAPI.markAsRead(id),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+        onSuccess: () => syncDashboardState(queryClient, { includeNotifications: true }),
     })
 
     const markAllRead = useMutation({
         mutationFn: () => notificationAPI.markAllAsRead(),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+        onSuccess: () => syncDashboardState(queryClient, { includeNotifications: true }),
     })
 
     const confirmSettlement = useMutation({
         mutationFn: (settlementId: string) => settlementAPI.confirm(settlementId),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ["notifications"] })
+        onSuccess: (response: any) => {
+            const settlement = response?.data?.data || response?.data || {}
+            const groupId = settlement?.groupId?._id || settlement?.groupId || null
+            if (groupId) {
+                syncGroupState(queryClient, { groupId: String(groupId), includeNotifications: true })
+            } else {
+                syncDashboardState(queryClient, { includeNotifications: true })
+            }
             toast({ title: "Settlement recorded" })
         },
         onError: (e: any) =>
@@ -82,7 +89,7 @@ export default function MobileNotificationsPage() {
     const remindLater = useMutation({
         mutationFn: (settlementId: string) => settlementAPI.remindLater(settlementId, 3),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ["notifications"] })
+            syncDashboardState(queryClient, { includeNotifications: true })
             toast({ title: "Reminder snoozed for 3 days" })
         },
         onError: (e: any) =>

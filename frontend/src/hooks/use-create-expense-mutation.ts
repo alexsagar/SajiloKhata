@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/auth-context"
 import { toast } from "@/hooks/use-toast"
 import { CreateExpenseSchema } from "@/lib/validation"
 import { z } from "zod"
+import { syncDashboardState, syncGroupState } from "@/lib/server-state"
 
 type CreateExpenseFormData = z.infer<typeof CreateExpenseSchema>
 
@@ -275,15 +276,10 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
         },
 
         onSettled: (_data, _error, variables) => {
-            queryClient.invalidateQueries({ queryKey: ["expenses"] })
-            queryClient.invalidateQueries({ queryKey: ["recent-expenses"] })
-            queryClient.invalidateQueries({ queryKey: ["expense-summary"] })
-            queryClient.invalidateQueries({ queryKey: ["my-balance"] })
-            queryClient.invalidateQueries({ queryKey: ["user-balance-summary"] })
-            queryClient.invalidateQueries({ queryKey: ["user-groups"] })
             if (variables.groupId) {
-                queryClient.invalidateQueries({ queryKey: ["group-expenses", variables.groupId] })
-                queryClient.invalidateQueries({ queryKey: ["group-balance", variables.groupId] })
+                syncGroupState(queryClient, { groupId: String(variables.groupId), includeNotifications: true })
+            } else {
+                syncDashboardState(queryClient, { includeNotifications: true })
             }
             queryClient.invalidateQueries({
                 predicate: (q) => {

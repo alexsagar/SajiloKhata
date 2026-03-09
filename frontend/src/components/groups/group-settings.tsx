@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { groupAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 import { CurrencySelector } from "@/components/currency/currency-selector"
+import { syncGroupState } from "@/lib/server-state"
 
 interface GroupSettingsProps {
   groupId: string
@@ -56,8 +57,7 @@ export function GroupSettings({ groupId }: GroupSettingsProps) {
       return groupAPI.updateGroup(groupId, data)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["user-groups"] })
-      queryClient.invalidateQueries({ queryKey: ["group", groupId] })
+      syncGroupState(queryClient, { groupId, includeNotifications: true })
       toast({
         title: "Settings updated",
         description: "Group settings have been updated successfully.",

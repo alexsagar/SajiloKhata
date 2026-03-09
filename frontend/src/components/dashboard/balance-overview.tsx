@@ -8,9 +8,23 @@ import { useExpensesQuery } from "@/hooks/use-expenses-query"
 import { useQuery } from "@tanstack/react-query"
 import { userAPI } from "@/lib/api"
 
+function getCurrentUserShareCents(expense: any, currentUserId: string) {
+  if (!expense?.groupId) {
+    return Number(expense?.amountCents || 0)
+  }
+
+  const mySplit = (expense?.splits || []).find(
+    (split: any) => String(split?.user?._id || split?.user) === currentUserId,
+  )
+
+  if (!mySplit) return 0
+  return Number(mySplit.amountCents ?? (mySplit.amount != null ? Math.round(mySplit.amount * 100) : 0))
+}
+
 export function BalanceOverview() {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || 'USD'
+  const currentUserId = String((user as any)?._id || (user as any)?.id || "")
 
   const { data: expenseSummary, isLoading, error } = useExpensesQuery()
 
@@ -69,6 +83,10 @@ export function BalanceOverview() {
 
   const personalTotal = personalExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
   const groupTotal = groupExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
+  const userTotal = expensesData.reduce(
+    (sum: number, exp: any) => sum + getCurrentUserShareCents(exp, currentUserId),
+    0,
+  )
 
   // Use backend-computed summary (all in cents for precision)
   const balanceData = balanceResp?.data?.data || balanceResp?.data || {}
@@ -149,15 +167,15 @@ export function BalanceOverview() {
 
       <KanbanCard className="shrink-0 snap-start w-[84vw] sm:w-[68vw] md:w-auto">
         <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <KanbanCardTitle className="text-xs sm:text-sm font-medium text-slate-400">Total Expenses</KanbanCardTitle>
+          <KanbanCardTitle className="text-xs sm:text-sm font-medium text-slate-400">Your Total Expenses</KanbanCardTitle>
           <PiggyBank className="hidden sm:block h-4 w-4 text-slate-400" />
         </KanbanCardHeader>
         <KanbanCardContent>
           <div className="text-lg sm:text-2xl font-bold text-slate-100 leading-tight">
-            {formatCurrencyWithSymbol((personalTotal + groupTotal) / 100, userCurrency)}
+            {formatCurrencyWithSymbol(userTotal / 100, userCurrency)}
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            {personalExpenses.length + groupExpenses.length} total expenses
+            Personal expenses plus your share of group expenses
           </p>
         </KanbanCardContent>
       </KanbanCard>

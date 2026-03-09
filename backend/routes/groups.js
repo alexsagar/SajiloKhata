@@ -12,6 +12,8 @@ const { bumpUsersCacheVersion } = require("../services/cacheService")
 const notificationService = require("../services/notificationService")
 const { logAuditEvent } = require("../services/auditService")
 const { appendLedgerEvent } = require("../services/ledgerService")
+const { reconcileConfirmedSettlementsForGroup } = require("../services/settlementApplicationService")
+const { emitServerStateSync } = require("../services/realtimeSyncService")
 
 const router = express.Router()
 
@@ -31,7 +33,7 @@ async function invalidateGroupCaches({ req, group = null, groupId = null, extraU
 }
 
 async function buildGroupNetBalances(groupId) {
-  const [expenseEdges, settlementEdges, expenseSummary] = await Promise.all([
+  const [expenseEdges, expenseSummary] = await Promise.all([
     Expense.aggregate([
       { $match: { groupId, status: "active" } },
       { $unwind: "$splits" },
@@ -65,15 +67,6 @@ async function buildGroupNetBalances(groupId) {
         },
       },
     ]),
-    Settlement.aggregate([
-      { $match: { groupId, status: "CONFIRMED" } },
-      {
-        $group: {
-          _id: { fromUserId: "$fromUserId", toUserId: "$toUserId" },
-          amountCents: { $sum: "$amountCents" },
-        },
-      },
-    ]),
     Expense.aggregate([
       { $match: { groupId, status: "active" } },
       { $group: { _id: null, totalExpensesCents: { $sum: "$amountCents" }, expenseCount: { $sum: 1 } } },
@@ -89,12 +82,6 @@ async function buildGroupNetBalances(groupId) {
   for (const edge of expenseEdges) {
     bump(edge._id.toUserId, edge.amountCents)
     bump(edge._id.fromUserId, -edge.amountCents)
-  }
-
-  for (const edge of settlementEdges) {
-    // Confirmed settlement: fromUser paid toUser, so reduce original debt relation.
-    bump(edge._id.fromUserId, edge.amountCents)
-    bump(edge._id.toUserId, -edge.amountCents)
   }
 
   return {
@@ -139,9 +126,19 @@ function computeGreedyTransactions(netByUser) {
   return transactions
 }
 
-function formatActivityMessage(event, actorName) {
+function formatUserDisplayName(user) {
+  if (!user) return "Someone"
+  const fullName = `${user.firstName || ""} ${user.lastName || ""}`.trim()
+  return fullName || user.username || "Someone"
+}
+
+function formatActivityMessage(event, actorName, relatedUsers = {}) {
   const amount = Number(event?.payload?.amountCents || 0) / 100
   const description = event?.payload?.description || ""
+  const fromUser = relatedUsers[String(event?.payload?.fromUserId || "")]
+  const toUser = relatedUsers[String(event?.payload?.toUserId || "")]
+  const fromName = formatUserDisplayName(fromUser)
+  const toName = formatUserDisplayName(toUser)
   switch (event.eventType) {
     case "EXPENSE_CREATED":
       return `${actorName} added an expense${description ? `: ${description}` : ""}${amount > 0 ? ` (${amount.toFixed(2)})` : ""}.`
@@ -152,12 +149,42 @@ function formatActivityMessage(event, actorName) {
     case "EXPENSE_COMMENT_ADDED":
       return `${actorName} commented on an expense${event?.payload?.snippet ? `: "${event.payload.snippet}"` : ""}.`
     case "SETTLEMENT_PLANNED":
-      return `${actorName} requested settlements${amount > 0 ? ` (${amount.toFixed(2)})` : ""}.`
+      return `${actorName} requested ${fromName} to pay ${toName}${amount > 0 ? ` ${amount.toFixed(2)}` : ""}.`
     case "SETTLEMENT_CONFIRMED":
-      return `${actorName} recorded a settlement${amount > 0 ? ` (${amount.toFixed(2)})` : ""}.`
+      return `${fromName} paid ${toName}${amount > 0 ? ` ${amount.toFixed(2)}` : ""}.`
     default:
       return `${actorName} updated group activity.`
   }
+}
+
+function buildSettlementActivityKey(event) {
+  if (!event || event.entityType !== "settlement") return null
+  const payload = event.payload || {}
+  const fromUserId = String(payload.fromUserId || "")
+  const toUserId = String(payload.toUserId || "")
+  const amountCents = Math.round(Number(payload.amountCents || 0))
+  if (!fromUserId || !toUserId || amountCents <= 0) return null
+  return `${fromUserId}:${toUserId}:${amountCents}`
+}
+
+function dedupeActivityEvents(events) {
+  const seenSettlementKeys = new Set()
+  const deduped = []
+
+  for (const event of events) {
+    if (event.entityType === "settlement") {
+      const settlementKey = buildSettlementActivityKey(event)
+      if (settlementKey) {
+        if (seenSettlementKeys.has(settlementKey)) {
+          continue
+        }
+        seenSettlementKeys.add(settlementKey)
+      }
+    }
+    deduped.push(event)
+  }
+
+  return deduped
 }
 
 // Aggregate balance for the current user across all groups (for dashboard)
@@ -174,7 +201,7 @@ router.get("/my-balance", cacheUserResponse({ namespace: "groups", ttlSeconds: 6
       return ok(res, { youOwe: 0, youreOwed: 0, totalBalance: 0 })
     }
 
-    const [expenseEdges, settlementEdges] = await Promise.all([
+    const [expenseEdges] = await Promise.all([
       Expense.aggregate([
         { $match: { groupId: { $in: groupIds }, status: "active" } },
         { $unwind: "$splits" },
@@ -208,15 +235,6 @@ router.get("/my-balance", cacheUserResponse({ namespace: "groups", ttlSeconds: 6
           },
         },
       ]),
-      Settlement.aggregate([
-        { $match: { groupId: { $in: groupIds }, status: "CONFIRMED" } },
-        {
-          $group: {
-            _id: { fromUserId: "$fromUserId", toUserId: "$toUserId" },
-            amountCents: { $sum: "$amountCents" },
-          },
-        },
-      ]),
     ])
 
     const netByCounterparty = new Map()
@@ -233,16 +251,6 @@ router.get("/my-balance", cacheUserResponse({ namespace: "groups", ttlSeconds: 6
 
       if (toId === currentUserId && fromId !== currentUserId) bumpPair(fromId, cents)
       if (fromId === currentUserId && toId !== currentUserId) bumpPair(toId, -cents)
-    }
-
-    for (const edge of settlementEdges) {
-      const fromId = String(edge?._id?.fromUserId || "")
-      const toId = String(edge?._id?.toUserId || "")
-      const cents = Math.round(Number(edge?.amountCents || 0))
-      if (cents <= 0) continue
-
-      if (fromId === currentUserId && toId !== currentUserId) bumpPair(toId, cents)
-      if (toId === currentUserId && fromId !== currentUserId) bumpPair(fromId, -cents)
     }
 
     let youreOwed = 0
@@ -300,6 +308,17 @@ router.post("/:id/members", async (req, res) => {
 
     // emit socket event
     req.io.to(`group_${group._id}`).emit("group:membersAdded", { groupId: String(group._id), userIds: toAdd })
+
+    // Auto-join newly added users by emitting to their personal socket rooms
+    for (const newUserId of toAdd) {
+      req.io.to(`user_${newUserId}`).emit("group_added", { groupId: group._id })
+    }
+
+    emitServerStateSync({
+      io: req.io,
+      groupId: group._id,
+      userIds: [...toAdd, ...group.members.map((member) => String(member.user))],
+    })
     await invalidateGroupCaches({ req, group, extraUserIds: toAdd })
     res.json({ data: { added: toAdd.length } })
   } catch (e) {
@@ -320,7 +339,34 @@ router.get("/", cacheUserResponse({ namespace: "groups", ttlSeconds: 60 }), asyn
       .sort({ updatedAt: -1 })
       .lean()
 
-    res.json({ data: groups })
+    const groupIds = groups.map((group) => group._id)
+    const expenseTotals = groupIds.length > 0
+      ? await Expense.aggregate([
+        {
+          $match: {
+            groupId: { $in: groupIds },
+            status: { $in: ["active", "settled"] },
+          },
+        },
+        {
+          $group: {
+            _id: "$groupId",
+            totalExpensesCents: { $sum: "$amountCents" },
+          },
+        },
+      ])
+      : []
+
+    const totalsByGroupId = Object.fromEntries(
+      expenseTotals.map((entry) => [String(entry._id), Number(entry.totalExpensesCents || 0) / 100]),
+    )
+
+    const groupsWithTotals = groups.map((group) => ({
+      ...group,
+      totalExpenses: totalsByGroupId[String(group._id)] || 0,
+    }))
+
+    res.json({ data: groupsWithTotals })
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message })
   }
@@ -370,9 +416,26 @@ router.get("/:id/activity", cacheUserResponse({ namespace: "groups", ttlSeconds:
       LedgerEvent.countDocuments({ groupId: group._id }),
     ])
 
-    const activities = events.map((event) => {
+    const dedupedEvents = dedupeActivityEvents(events)
+    const relatedSettlementUserIds = [
+      ...new Set(
+        dedupedEvents.flatMap((event) => {
+          if (event.entityType !== "settlement") return []
+          return [String(event?.payload?.fromUserId || ""), String(event?.payload?.toUserId || "")]
+            .filter(Boolean)
+        }),
+      ),
+    ]
+    const relatedUsers = relatedSettlementUserIds.length > 0
+      ? await User.find({ _id: { $in: relatedSettlementUserIds } })
+        .select("firstName lastName username avatar")
+        .lean()
+      : []
+    const relatedUserMap = Object.fromEntries(relatedUsers.map((u) => [String(u._id), u]))
+
+    const activities = dedupedEvents.map((event) => {
       const actor = event.actorUserId || null
-      const actorName = actor?.firstName ? `${actor.firstName} ${actor.lastName || ""}`.trim() : "Someone"
+      const actorName = formatUserDisplayName(actor)
       return {
         id: event._id,
         type: event.eventType,
@@ -380,7 +443,7 @@ router.get("/:id/activity", cacheUserResponse({ namespace: "groups", ttlSeconds:
         entityId: event.entityId,
         groupId: event.groupId,
         actor,
-        message: formatActivityMessage(event, actorName),
+        message: formatActivityMessage(event, actorName, relatedUserMap),
         payload: event.payload || {},
         createdAt: event.createdAt,
       }
@@ -437,6 +500,11 @@ router.post(
 
       // Emit to user's socket
       req.io.to(`user_${req.user._id}`).emit("group_created", group)
+      emitServerStateSync({
+        io: req.io,
+        groupId: group._id,
+        userIds: group.members.map((member) => String(member.user)),
+      })
 
       await logAuditEvent({
         req,
@@ -495,6 +563,11 @@ router.put(
 
       // Emit to group members
       req.io.to(`group_${group._id}`).emit("group_updated", group)
+      emitServerStateSync({
+        io: req.io,
+        groupId: group._id,
+        userIds: group.members.map((member) => String(member.user)),
+      })
 
       await invalidateGroupCaches({ req, group })
       res.json(group)
@@ -552,6 +625,15 @@ router.post("/join", [body("inviteCode").notEmpty().trim()], async (req, res) =>
       newMember: req.user,
     })
 
+    // Auto-join the joining user by emitting to their personal socket room
+    req.io.to(`user_${req.user._id}`).emit("group_added", { groupId: group._id })
+
+    emitServerStateSync({
+      io: req.io,
+      groupId: group._id,
+      userIds: group.members.map((member) => String(member.user)),
+    })
+
     await invalidateGroupCaches({ req, group })
     res.json(group)
   } catch (error) {
@@ -560,7 +642,7 @@ router.post("/join", [body("inviteCode").notEmpty().trim()], async (req, res) =>
 })
 
 // Get group balance summary
-router.get("/:id/balances", cacheUserResponse({ namespace: "groups", ttlSeconds: 45 }), async (req, res) => {
+router.get("/:id/balances", async (req, res) => {
   try {
     const group = await Group.findOne({
       _id: req.params.id,
@@ -572,20 +654,21 @@ router.get("/:id/balances", cacheUserResponse({ namespace: "groups", ttlSeconds:
       return res.status(404).json({ message: "Group not found" })
     }
 
+    await reconcileConfirmedSettlementsForGroup(group._id)
+
     const { netByUser, totalExpensesCents, expenseCount } = await buildGroupNetBalances(group._id)
     const minimumTransactions = computeGreedyTransactions(netByUser)
 
     const balancesWithUsers = {}
-    for (const [userId, netCents] of netByUser.entries()) {
-      const member = group.members.find(m => m.user._id.toString() === userId)
-      if (member) {
-        balancesWithUsers[userId] = {
-          netCents,
-          net: netCents / 100,
-          youOwe: netCents < 0 ? Math.abs(netCents) / 100 : 0,
-          youAreOwed: netCents > 0 ? netCents / 100 : 0,
-          user: member.user
-        }
+    for (const member of group.members) {
+      const userId = member.user._id.toString()
+      const netCents = Number(netByUser.get(userId) || 0)
+      balancesWithUsers[userId] = {
+        netCents,
+        net: netCents / 100,
+        youOwe: netCents < 0 ? Math.abs(netCents) / 100 : 0,
+        youAreOwed: netCents > 0 ? netCents / 100 : 0,
+        user: member.user,
       }
     }
 
@@ -627,6 +710,8 @@ router.post("/:id/settle-up", async (req, res) => {
     if (!group) {
       return fail(res, "Group not found", 404)
     }
+
+    await reconcileConfirmedSettlementsForGroup(group._id)
 
     const memberIds = group.members.map((m) => m.user._id.toString())
     if (memberIds.length === 0) {
@@ -712,7 +797,12 @@ router.post("/:id/settle-up", async (req, res) => {
       req.io?.to(`group_${group._id}`).emit("settlement:plan-updated", {
         groupId: String(group._id),
       })
-    } catch {}
+    } catch { }
+    emitServerStateSync({
+      io: req.io,
+      groupId: group._id,
+      userIds: group.members.map((member) => String(member.user)),
+    })
 
     await invalidateGroupCaches({ req, group })
     return ok(res, { settlements: populated, totals: { pendingCents, confirmedCents } })
@@ -787,6 +877,11 @@ router.delete("/:id", async (req, res) => {
       groupId: group._id,
       deletedBy: req.user._id,
     })
+    emitServerStateSync({
+      io: req.io,
+      groupId: group._id,
+      userIds: group.members.map((member) => String(member.user)),
+    })
 
     await logAuditEvent({
       req,
@@ -838,6 +933,11 @@ router.delete("/:id/members/:userId", async (req, res) => {
       groupId: group._id,
       removedUserId: req.params.userId,
     })
+    emitServerStateSync({
+      io: req.io,
+      groupId: group._id,
+      userIds: [...group.members.map((member) => String(member.user)), req.params.userId],
+    })
 
     await invalidateGroupCaches({ req, group, extraUserIds: [req.params.userId] })
     res.json({ message: "Member removed successfully" })
@@ -885,6 +985,11 @@ router.put("/:id/members/:userId", async (req, res) => {
       groupId: group._id,
       userId: req.params.userId,
       role,
+    })
+    emitServerStateSync({
+      io: req.io,
+      groupId: group._id,
+      userIds: [...group.members.map((member) => String(member.user)), req.params.userId],
     })
 
     await invalidateGroupCaches({ req, group, extraUserIds: [req.params.userId] })

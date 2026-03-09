@@ -7,20 +7,42 @@ import { CreditCard, Users, TrendingUp, TrendingDown } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { useExpensesQuery } from "@/hooks/use-expenses-query"
 
+function getCurrentUserShareCents(expense: any, currentUserId: string) {
+  if (!expense?.groupId) {
+    return Number(expense?.amountCents || 0)
+  }
+
+  const mySplit = (expense?.splits || []).find(
+    (split: any) => String(split?.user?._id || split?.user) === currentUserId,
+  )
+
+  if (!mySplit) return 0
+  return Number(mySplit.amountCents ?? (mySplit.amount != null ? Math.round(mySplit.amount * 100) : 0))
+}
+
 export function ExpenseChart() {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || 'USD'
+  const currentUserId = String((user as any)?._id || (user as any)?.id || "")
 
   const { data: expenseData, isLoading } = useExpensesQuery({ limit: 100 })
 
   const expenses = expenseData?.data?.expenses || expenseData?.expenses || []
 
   // Memoize expensive category breakdown computation
-  const { personalExpenses, groupExpenses, personalTotal, groupTotal, totalSpent, topPersonalCategories } = useMemo(() => {
+  const { personalExpenses, groupExpenses, personalTotal, groupTotal, groupUserShareTotal, totalSpent, topPersonalCategories } = useMemo(() => {
     const personal = expenses.filter((exp: any) => !exp.groupId)
     const group = expenses.filter((exp: any) => exp.groupId)
     const pTotal = personal.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
     const gTotal = group.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
+    const gUserShareTotal = group.reduce(
+      (sum: number, exp: any) => sum + getCurrentUserShareCents(exp, currentUserId),
+      0,
+    )
+    const userShareTotal = expenses.reduce(
+      (sum: number, exp: any) => sum + getCurrentUserShareCents(exp, currentUserId),
+      0,
+    )
 
     const categoryBreakdown = personal.reduce((acc: any, exp: any) => {
       const category = exp.category || 'other'
@@ -37,10 +59,11 @@ export function ExpenseChart() {
       groupExpenses: group,
       personalTotal: pTotal,
       groupTotal: gTotal,
-      totalSpent: pTotal + gTotal,
+      groupUserShareTotal: gUserShareTotal,
+      totalSpent: userShareTotal,
       topPersonalCategories: topCategories,
     }
-  }, [expenses])
+  }, [currentUserId, expenses])
 
   if (isLoading) {
     return (
@@ -106,7 +129,7 @@ export function ExpenseChart() {
       <div className="bg-white/5 border border-white/10 rounded-lg p-4">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-sm text-muted-foreground">Total Spent</div>
+            <div className="text-sm text-muted-foreground">Your Total Expenses</div>
             <div className="text-2xl font-bold text-white">
               {formatCurrencyWithSymbol(totalSpent / 100, userCurrency)}
             </div>
@@ -148,13 +171,13 @@ export function ExpenseChart() {
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Personal</span>
             <span className="text-blue-400 font-medium">
-              {personalTotal > 0 ? Math.round((personalTotal / totalSpent) * 100) : 0}%
+              {totalSpent > 0 ? Math.round((personalTotal / totalSpent) * 100) : 0}%
             </span>
           </div>
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Group</span>
             <span className="text-green-400 font-medium">
-              {groupTotal > 0 ? Math.round((groupTotal / totalSpent) * 100) : 0}%
+              {totalSpent > 0 ? Math.round((groupUserShareTotal / totalSpent) * 100) : 0}%
             </span>
           </div>
         </div>

@@ -16,6 +16,7 @@ import { useAuth } from "@/contexts/auth-context"
 import { useEffect, useState } from "react"
 import { useSocket } from "@/contexts/socket-context"
 import { toast } from "@/hooks/use-toast"
+import { syncGroupState } from "@/lib/server-state"
 
 interface GroupBalanceProps {
   groupId: string
@@ -44,23 +45,14 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
   const settleUpMutation = useMutation({
     mutationFn: () => groupAPI.settleUp(groupId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["group-settlements", groupId] })
-      queryClient.invalidateQueries({ queryKey: ["group-balance", groupId] })
-      queryClient.invalidateQueries({ queryKey: ["group-expenses-for-balance", groupId] })
-      queryClient.invalidateQueries({ queryKey: ["my-balance"] })
-      queryClient.invalidateQueries({ queryKey: ["expenses"] })
+      syncGroupState(queryClient, { groupId, includeNotifications: true })
     },
   })
 
   const confirmMutation = useMutation({
     mutationFn: (settlementId: string) => settlementAPI.confirm(settlementId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["group-settlements", groupId] })
-      queryClient.invalidateQueries({ queryKey: ["group-balance", groupId] })
-      queryClient.invalidateQueries({ queryKey: ["group-expenses-for-balance", groupId] })
-      queryClient.invalidateQueries({ queryKey: ["my-balance"] })
-      queryClient.invalidateQueries({ queryKey: ["user-balance-summary"] })
-      queryClient.invalidateQueries({ queryKey: ["expenses"] })
+      syncGroupState(queryClient, { groupId, includeNotifications: true })
     },
     onError: (error: any) => {
       toast({
@@ -75,7 +67,7 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
     mutationFn: ({ settlementId, paymentLink, paymentProvider }: { settlementId: string; paymentLink: string; paymentProvider?: string }) =>
       settlementAPI.setPaymentLink(settlementId, { paymentLink, paymentProvider }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["group-settlements", groupId] })
+      syncGroupState(queryClient, { groupId, includeNotifications: true })
       toast({ title: "Payment link saved" })
     },
     onError: (error: any) => {
@@ -90,6 +82,7 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
   const remindMutation = useMutation({
     mutationFn: (settlementId: string) => settlementAPI.remind(settlementId),
     onSuccess: () => {
+      syncGroupState(queryClient, { groupId, includeNotifications: true })
       toast({ title: "Reminder sent" })
     },
     onError: (error: any) => {
@@ -155,23 +148,22 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
 
     const refetchGroupData = (payload: any) => {
       if (String(payload?.groupId || "") !== String(groupId)) return
-      queryClient.invalidateQueries({ queryKey: ["group-settlements", groupId] })
-      queryClient.invalidateQueries({ queryKey: ["group-balance", groupId] })
-      queryClient.invalidateQueries({ queryKey: ["group-expenses-for-balance", groupId] })
-      queryClient.invalidateQueries({ queryKey: ["my-balance"] })
-      queryClient.invalidateQueries({ queryKey: ["user-balance-summary"] })
-      queryClient.invalidateQueries({ queryKey: ["expenses"] })
+      syncGroupState(queryClient, { groupId, includeNotifications: true })
     }
 
     socket.on("settlement:confirmed", refetchGroupData)
     socket.on("settlement:plan-updated", refetchGroupData)
+    socket.on("expense_added", refetchGroupData)
     socket.on("expense_updated", refetchGroupData)
+    socket.on("expense_deleted", refetchGroupData)
     socket.on("split_settled", refetchGroupData)
 
     return () => {
       socket.off("settlement:confirmed", refetchGroupData)
       socket.off("settlement:plan-updated", refetchGroupData)
+      socket.off("expense_added", refetchGroupData)
       socket.off("expense_updated", refetchGroupData)
+      socket.off("expense_deleted", refetchGroupData)
       socket.off("split_settled", refetchGroupData)
     }
   }, [socket, groupId, queryClient])
@@ -218,7 +210,9 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
     }
   }
 
-  // If no balances from API, compute from expenses
+  // If no balances from API, compute from expenses using edge-based accounting
+  // (mirrors backend buildGroupNetBalances: each unsettled split where user != paidBy
+  //  creates an edge: split.user owes paidBy the split amount)
   if (Object.keys(balancesMap).length === 0) {
     const payload = (expensesData?.data && (expensesData?.data as any).data) ? (expensesData?.data as any).data : (expensesData?.data as any)
     const expensesList: any[] = (payload?.expenses as any[]) || []
@@ -231,20 +225,25 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
       }
     }
 
-    expensesList.forEach((exp: any) => {
-      const total = exp?.amountCents != null ? exp.amountCents / 100 : (exp?.amount ?? 0)
-      if (exp?.paidBy) {
-        addUser(exp.paidBy)
-        const pid = exp.paidBy._id
-        balancesMap[pid].amount = (balancesMap[pid].amount || 0) + total
-      }
-      (exp?.splits || []).forEach((split: any) => {
-        addUser(split.user)
-        const uid = split.user?._id
-        const owe = split?.amount != null ? split.amount : 0
-        balancesMap[uid].amount = (balancesMap[uid].amount || 0) - owe
+    expensesList
+      .filter((exp: any) => exp?.status === "active")
+      .forEach((exp: any) => {
+        if (exp?.paidBy) addUser(exp.paidBy)
+        const pid = exp?.paidBy?._id
+          ; (exp?.splits || []).forEach((split: any) => {
+            addUser(split.user)
+            const uid = split.user?._id
+            if (!uid || !pid) return
+            // Skip self-splits (payer's own share) and settled splits
+            if (uid === pid) return
+            if (split?.settled) return
+            const owe = split?.amountCents != null ? split.amountCents / 100 : (split?.amount ?? 0)
+            if (owe <= 0) return
+            // Edge: split.user owes paidBy this amount
+            balancesMap[uid].amount = (balancesMap[uid].amount || 0) - owe
+            balancesMap[pid].amount = (balancesMap[pid].amount || 0) + owe
+          })
       })
-    })
   }
 
   const balanceEntries = Object.entries(balancesMap)
@@ -256,6 +255,9 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
   const settlementTotals = settlementsPayload?.totals || { pendingCents: 0, confirmedCents: 0 }
   const pendingTotal = (settlementTotals.pendingCents || 0) / 100
   const confirmedTotal = (settlementTotals.confirmedCents || 0) / 100
+  const pendingSettlements = settlements.filter((s: any) => s.status === "PENDING")
+  const confirmedSettlements = settlements.filter((s: any) => s.status === "CONFIRMED")
+  const memberCount = Number(apiBalance?.memberCount || balanceEntries.length || 0)
 
   // Total expenses: prefer API, else compute from expenses
   const expensesPayload = (expensesData?.data && (expensesData?.data as any).data) ? (expensesData?.data as any).data : (expensesData?.data as any)
@@ -288,7 +290,7 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
             </div>
             <div className="text-center">
               <p className="text-sm text-muted-foreground">Members</p>
-              <p className="text-2xl font-bold">{balanceEntries.length}</p>
+              <p className="text-2xl font-bold">{memberCount}</p>
             </div>
           </div>
         </KanbanCardContent>
@@ -329,8 +331,8 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
                   </div>
                   <div className="text-right">
                     <div className={`text-lg font-bold ${balance.amount > 0 ? 'text-green-600' :
-                        balance.amount < 0 ? 'text-red-600' :
-                          'text-muted-foreground'
+                      balance.amount < 0 ? 'text-red-600' :
+                        'text-muted-foreground'
                       }`}>
                       {balance.amount > 0 ? '+' : ''}{formatCurrency(Math.abs(balance.amount), userCurrency)}
                     </div>
@@ -352,8 +354,50 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
       {/* Suggested Transactions */}
       <KanbanCard>
         <KanbanCardHeader>
+          <KanbanCardTitle>Current Position</KanbanCardTitle>
+          <KanbanCardDescription>
+            Net amounts that still need to be paid after applying confirmed settlements
+          </KanbanCardDescription>
+        </KanbanCardHeader>
+        <KanbanCardContent>
+          {transactions.length === 0 ? (
+            <div className="text-center py-6 text-muted-foreground">
+              Everyone is settled up.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {transactions.map((transaction: any, index: number) => (
+                <div key={index} className="flex items-center justify-between p-3 rounded-lg border bg-muted/50">
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={transaction.from?.avatar || "/placeholder.svg"} />
+                      <AvatarFallback className="text-xs">
+                        {getInitials(transaction.from?.firstName || "U", transaction.from?.lastName || "U")}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="font-medium">{transaction.from?.firstName}</span>
+                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={transaction.to?.avatar || "/placeholder.svg"} />
+                      <AvatarFallback className="text-xs">
+                        {getInitials(transaction.to?.firstName || "U", transaction.to?.lastName || "U")}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="font-medium">{transaction.to?.firstName}</span>
+                  </div>
+                  <span className="font-bold">{formatCurrency(transaction.amount, userCurrency)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </KanbanCardContent>
+      </KanbanCard>
+
+      {/* Pending Settlement Plan */}
+      <KanbanCard>
+        <KanbanCardHeader>
           <KanbanCardTitle className="flex items-center justify-between gap-2">
-            <span>Settle Up</span>
+            <span>Pending Settlement Plan</span>
             <Button
               size="sm"
               onClick={() => settleUpMutation.mutate()}
@@ -378,13 +422,13 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
             </div>
           </div>
 
-          {settlements.length === 0 ? (
+          {pendingSettlements.length === 0 ? (
             <div className="text-center py-6 text-muted-foreground">
               No stored settlement plan yet. Click "Settle Up" to generate one.
             </div>
           ) : (
             <div className="space-y-3">
-              {settlements.map((s: any) => {
+              {pendingSettlements.map((s: any) => {
                 const fromUser = s.fromUserId
                 const toUser = s.toUserId
                 const amount = (s.amountCents || 0) / 100
@@ -463,48 +507,56 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
         </KanbanCardContent>
       </KanbanCard>
 
-      {/* Suggested Transactions (computed, not stored) */}
-      {transactions.length > 0 && (
-        <KanbanCard>
-          <KanbanCardHeader>
-            <KanbanCardTitle>Suggested Settlements</KanbanCardTitle>
-            <KanbanCardDescription>
-              Minimum transactions needed to settle all balances
-            </KanbanCardDescription>
-          </KanbanCardHeader>
-          <KanbanCardContent>
-            <div className="space-y-3">
-              {transactions.map((transaction: any, index: number) => (
-                <div key={index} className="flex items-center justify-between p-3 rounded-lg border bg-muted/50">
-                  <div className="flex items-center gap-3">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={transaction.from?.avatar || "/placeholder.svg"} />
-                      <AvatarFallback className="text-xs">
-                        {getInitials(transaction.from?.firstName || "U", transaction.from?.lastName || "U")}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="font-medium">{transaction.from?.firstName}</span>
-                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={transaction.to?.avatar || "/placeholder.svg"} />
-                      <AvatarFallback className="text-xs">
-                        {getInitials(transaction.to?.firstName || "U", transaction.to?.lastName || "U")}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="font-medium">{transaction.to?.firstName}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold">{formatCurrency(transaction.amount, userCurrency)}</span>
-                    <Button size="sm" variant="outline">
-                      Mark as Paid
-                    </Button>
-                  </div>
-                </div>
-              ))}
+      {/* Confirmed Settlement History */}
+      <KanbanCard>
+        <KanbanCardHeader>
+          <KanbanCardTitle>Settlement History</KanbanCardTitle>
+          <KanbanCardDescription>
+            Confirmed settlement records kept for audit/history
+          </KanbanCardDescription>
+        </KanbanCardHeader>
+        <KanbanCardContent>
+          {confirmedSettlements.length === 0 ? (
+            <div className="text-center py-6 text-muted-foreground">
+              No confirmed settlements yet.
             </div>
-          </KanbanCardContent>
-        </KanbanCard>
-      )}
+          ) : (
+            <div className="space-y-3">
+              {confirmedSettlements.map((s: any) => {
+                const fromUser = s.fromUserId
+                const toUser = s.toUserId
+                const amount = (s.amountCents || 0) / 100
+
+                return (
+                  <div key={s._id} className="flex items-center justify-between p-3 rounded-lg border bg-muted/50">
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-8 w-8">
+                        <AvatarImage src={fromUser?.avatar || "/placeholder.svg"} />
+                        <AvatarFallback className="text-xs">
+                          {getInitials(fromUser?.firstName || "U", fromUser?.lastName || "U")}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="font-medium">{fromUser?.firstName}</span>
+                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                      <Avatar className="h-8 w-8">
+                        <AvatarImage src={toUser?.avatar || "/placeholder.svg"} />
+                        <AvatarFallback className="text-xs">
+                          {getInitials(toUser?.firstName || "U", toUser?.lastName || "U")}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="font-medium">{toUser?.firstName}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold">{formatCurrency(amount, userCurrency)}</span>
+                      <Badge>CONFIRMED</Badge>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </KanbanCardContent>
+      </KanbanCard>
 
       <Dialog open={isPaymentLinkDialogOpen} onOpenChange={setIsPaymentLinkDialogOpen}>
         <DialogContent>

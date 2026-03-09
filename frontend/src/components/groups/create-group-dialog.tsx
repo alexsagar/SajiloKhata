@@ -24,6 +24,7 @@ import { groupAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 import { CurrencySelector } from "@/components/currency/currency-selector"
 import { useAuth } from "@/contexts/auth-context"
+import { syncDashboardState } from "@/lib/server-state"
 
 const createGroupSchema = z.object({
   name: z.string().min(1, "Group name is required"),
@@ -63,7 +64,7 @@ export function CreateGroupDialog({ open, onOpenChange }: CreateGroupDialogProps
       return groupAPI.createGroup(form)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["user-groups"] })
+      syncDashboardState(queryClient, { includeNotifications: true })
       toast({
         title: "Group created",
         description: "Your group has been created successfully.",

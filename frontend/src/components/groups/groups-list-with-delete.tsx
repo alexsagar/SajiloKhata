@@ -15,6 +15,7 @@ import Link from "next/link"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
+import { syncGroupState } from "@/lib/server-state"
 
 export function GroupsListWithDelete() {
   const { user } = useAuth()
@@ -32,7 +33,7 @@ export function GroupsListWithDelete() {
   const deleteGroupMutation = useMutation({
     mutationFn: (groupId: string) => groupAPI.deleteGroup(groupId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["user-groups"] })
+      syncGroupState(queryClient, { groupId: groupToDelete?._id, includeNotifications: true })
       toast({
         title: "Group deleted",
         description: `"${groupToDelete?.name}" has been deleted successfully.`,

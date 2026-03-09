@@ -6,6 +6,7 @@ const User = require("../models/User")
 const Group = require("../models/Group")
 const Expense = require("../models/Expense")
 const Settlement = require("../models/Settlement")
+const { reconcileConfirmedSettlementsForGroups } = require("../services/settlementApplicationService")
 const { requireRole } = require("../middleware/auth")
 const { getPagination, escapeRegex } = require("../utils/query")
 const { ok, fail } = require("../utils/http")
@@ -598,7 +599,9 @@ router.get("/balance-summary", async (req, res) => {
       })
     }
 
-    const [expenseEdges, settlementEdges] = await Promise.all([
+    await reconcileConfirmedSettlementsForGroups(groupIds)
+
+    const [expenseEdges] = await Promise.all([
       Expense.aggregate([
         { $match: { groupId: { $in: groupIds }, status: "active" } },
         { $unwind: "$splits" },
@@ -632,15 +635,6 @@ router.get("/balance-summary", async (req, res) => {
           },
         },
       ]),
-      Settlement.aggregate([
-        { $match: { groupId: { $in: groupIds }, status: "CONFIRMED" } },
-        {
-          $group: {
-            _id: { fromUserId: "$fromUserId", toUserId: "$toUserId" },
-            amountCents: { $sum: "$amountCents" },
-          },
-        },
-      ]),
     ])
 
     // Pairwise net relative to current user, so owe/owed do not incorrectly cancel across counterparties.
@@ -658,17 +652,6 @@ router.get("/balance-summary", async (req, res) => {
 
       if (toId === currentUserId && fromId !== currentUserId) bumpPair(fromId, cents)
       if (fromId === currentUserId && toId !== currentUserId) bumpPair(toId, -cents)
-    }
-
-    for (const edge of settlementEdges) {
-      const fromId = String(edge?._id?.fromUserId || "")
-      const toId = String(edge?._id?.toUserId || "")
-      const cents = Math.round(Number(edge?.amountCents || 0))
-      if (cents <= 0) continue
-
-      // Settlement from -> to means from paid to (debt reduced in that direction).
-      if (fromId === currentUserId && toId !== currentUserId) bumpPair(toId, cents)
-      if (toId === currentUserId && fromId !== currentUserId) bumpPair(fromId, -cents)
     }
 
     let youAreOwedCents = 0

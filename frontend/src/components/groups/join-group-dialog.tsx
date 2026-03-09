@@ -21,6 +21,7 @@ import { Loader2 } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { groupAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
+import { syncDashboardState } from "@/lib/server-state"
 
 const joinGroupSchema = z.object({
   inviteCode: z.string().min(1, "Invite code is required").toUpperCase(),
@@ -48,7 +49,7 @@ export function JoinGroupDialog({ children }: JoinGroupDialogProps) {
   const joinGroupMutation = useMutation({
     mutationFn: (data: JoinGroupFormData) => groupAPI.joinGroup(data.inviteCode),
     onSuccess: (response) => {
-      queryClient.invalidateQueries({ queryKey: ["user-groups"] })
+      syncDashboardState(queryClient, { includeNotifications: true })
       toast({
         title: "Joined group",
         description: `You've successfully joined "${response.data.name}".`,

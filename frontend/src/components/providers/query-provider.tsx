@@ -1,10 +1,10 @@
 "use client"
 
 import type React from "react"
-
 import { QueryClient, QueryClientProvider, keepPreviousData } from "@tanstack/react-query"
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { installServerStateBroadcast } from "@/lib/server-state"
 
 export function QueryProvider({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -12,18 +12,19 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            // Enterprise-safe defaults: prefer cache, opt-in to refetch per query
-            staleTime: 5 * 60 * 1000, // 5 minutes — queries stay fresh longer
+            staleTime: 5 * 60 * 1000,
             gcTime: 10 * 60 * 1000,
             retry: 2,
-            refetchOnWindowFocus: false, // opt-in per query where freshness matters
-            refetchOnMount: true, // refetch only when stale (respects staleTime)
-            refetchOnReconnect: false, // avoid reconnect storms
+            refetchOnWindowFocus: true,
+            refetchOnMount: true,
+            refetchOnReconnect: true,
             placeholderData: keepPreviousData,
           },
         },
       }),
   )
+
+  useEffect(() => installServerStateBroadcast(queryClient), [queryClient])
 
   return (
     <QueryClientProvider client={queryClient}>

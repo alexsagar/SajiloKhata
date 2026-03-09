@@ -13,6 +13,7 @@ import { LoadingSpinner } from "@/components/common/loading-spinner"
 import { getInitials } from "@/lib/utils"
 import { toast } from "@/hooks/use-toast"
 import { GroupInviteModal } from "./group-invite-modal"
+import { syncGroupState } from "@/lib/server-state"
 
 interface GroupMembersProps {
   groupId: string
@@ -30,7 +31,7 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
   const removeMemberMutation = useMutation({
     mutationFn: (userId: string) => groupAPI.removeMember(groupId, userId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["group", groupId] })
+      syncGroupState(queryClient, { groupId, includeNotifications: true })
       toast({
         title: "Member removed",
         description: "The member has been removed from the group.",

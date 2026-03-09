@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { groupAPI } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
+import { useQueryClient } from "@tanstack/react-query"
+import { syncGroupState } from "@/lib/server-state"
 
 interface Props {
   groupId: string
@@ -16,6 +18,7 @@ interface Props {
 
 export function GroupInviteModal({ groupId, open, onOpenChange }: Props) {
   const { toast } = useToast()
+  const queryClient = useQueryClient()
   const [friends, setFriends] = useState<any[]>([])
   const [query, setQuery] = useState("")
   const [selected, setSelected] = useState<Record<string, boolean>>({})
@@ -46,6 +49,7 @@ export function GroupInviteModal({ groupId, open, onOpenChange }: Props) {
     try {
       const { api } = await import("@/lib/api")
       await api.post(`/groups/${groupId}/members`, { userIds })
+      syncGroupState(queryClient, { groupId, includeNotifications: true })
       toast({ title: "Members invited", description: `Added ${userIds.length} member(s)` })
       onOpenChange(false)
     } catch (e: any) {

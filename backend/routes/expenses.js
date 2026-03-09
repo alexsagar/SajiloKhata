@@ -15,6 +15,8 @@ const { cacheUserResponse } = require("../middleware/cache")
 const { bumpUsersCacheVersion } = require("../services/cacheService")
 const { logAuditEvent } = require("../services/auditService")
 const { appendLedgerEvent } = require("../services/ledgerService")
+const { reconcileConfirmedSettlementsForGroup } = require("../services/settlementApplicationService")
+const { emitServerStateSync } = require("../services/realtimeSyncService")
 
 const router = express.Router()
 
@@ -75,81 +77,6 @@ async function getMentionRecipientsForExpense({ expense, handles, actorUserId })
     }
   }
   return found
-}
-
-async function reconcileConfirmedSettlementsForGroup(groupId) {
-  const settlements = await Settlement.find({
-    groupId,
-    status: "CONFIRMED",
-  })
-    .select("fromUserId toUserId amountCents confirmedAt createdAt")
-    .sort({ confirmedAt: 1, createdAt: 1 })
-    .lean()
-
-  if (!settlements.length) return
-
-  const expenses = await Expense.find({
-    groupId,
-    status: "active",
-  }).sort({ date: 1, createdAt: 1 })
-
-  const now = new Date()
-  const changedExpenseIds = new Set()
-
-  for (const settlement of settlements) {
-    let remainingCents = Math.max(0, Number(settlement.amountCents || 0))
-    if (remainingCents <= 0) continue
-
-    for (const expense of expenses) {
-      if (remainingCents <= 0) break
-      if (String(expense.paidBy) !== String(settlement.toUserId)) continue
-
-      let changed = false
-      for (const split of expense.splits) {
-        if (remainingCents <= 0) break
-        if (String(split.user) !== String(settlement.fromUserId)) continue
-        if (split.settled) continue
-
-        const dueCents = Math.max(0, Number(split.amountCents || 0))
-        if (dueCents <= 0) {
-          split.settled = true
-          split.settledAt = now
-          changed = true
-          continue
-        }
-
-        if (remainingCents >= dueCents) {
-          split.settled = true
-          split.settledAt = now
-          remainingCents -= dueCents
-          changed = true
-        } else {
-          split.amountCents = dueCents - remainingCents
-          if (typeof split.amount === "number") {
-            split.amount = split.amountCents / 100
-          }
-          remainingCents = 0
-          changed = true
-        }
-      }
-
-      if (changed) {
-        if (expense.splits.every((s) => s.settled)) {
-          expense.status = "settled"
-          expense.settledAt = now
-        }
-        changedExpenseIds.add(String(expense._id))
-      }
-    }
-  }
-
-  if (changedExpenseIds.size > 0) {
-    await Promise.all(
-      expenses
-        .filter((e) => changedExpenseIds.has(String(e._id)))
-        .map((e) => e.save())
-    )
-  }
 }
 
 // Configure multer for file uploads
@@ -460,6 +387,11 @@ router.post("/:id/comments", async (req, res) => {
         expenseId: String(expense._id),
         commentId: String(createdComment._id),
       })
+      emitServerStateSync({
+        io: req.io,
+        groupId: expense.groupId,
+        expenseId: expense._id,
+      })
       await invalidateExpenseCaches({ req, group, groupId: expense.groupId })
     }
 
@@ -579,6 +511,11 @@ router.delete("/:id/comments/:commentId", async (req, res) => {
       req.io?.to(`group_${expense.groupId}`).emit("expense_comment_deleted", {
         expenseId: String(expense._id),
         commentId: req.params.commentId,
+      })
+      emitServerStateSync({
+        io: req.io,
+        groupId: expense.groupId,
+        expenseId: expense._id,
       })
       await invalidateExpenseCaches({ req, group, groupId: expense.groupId })
     }
@@ -794,6 +731,11 @@ router.post("/", upload.single("receipt"), async (req, res) => {
       )
 
       req.io?.to(`group_${groupId}`).emit("expense_added", expense)
+      emitServerStateSync({
+        io: req.io,
+        groupId,
+        expenseId: expense._id,
+      })
     }
 
     await logAuditEvent({
@@ -983,6 +925,11 @@ router.put("/:id", async (req, res) => {
     // Emit to group members if it's a group expense
     if (expense.groupId && req.io) {
       req.io.to(`group_${expense.groupId._id}`).emit("expense_updated", expense)
+      emitServerStateSync({
+        io: req.io,
+        groupId: expense.groupId._id,
+        expenseId: expense._id,
+      })
     }
 
     await logAuditEvent({
@@ -1085,6 +1032,11 @@ router.delete("/:id", async (req, res) => {
         expenseId: expense._id,
         groupId: expense.groupId._id,
       })
+      emitServerStateSync({
+        io: req.io,
+        groupId: expense.groupId._id,
+        expenseId: expense._id,
+      })
     }
 
     await logAuditEvent({
@@ -1168,6 +1120,11 @@ router.patch("/:id/settle", async (req, res) => {
         expenseId: expense._id,
         userId,
         settledBy: req.user._id,
+      })
+      emitServerStateSync({
+        io: req.io,
+        groupId: expense.groupId._id,
+        expenseId: expense._id,
       })
     }
 

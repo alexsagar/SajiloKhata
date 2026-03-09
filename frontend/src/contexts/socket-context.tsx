@@ -1,10 +1,13 @@
 "use client"
 
 import type React from "react"
-import { createContext, useContext, useEffect, useState, useCallback } from "react"
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
 import { io, type Socket } from "socket.io-client"
 import { useAuth } from "./auth-context"
 import { toast } from "@/hooks/use-toast"
+import { useQueryClient } from "@tanstack/react-query"
+import { usePathname, useRouter } from "next/navigation"
+import { syncGroupState } from "@/lib/server-state"
 
 interface SocketContextType {
   socket: Socket | null
@@ -23,6 +26,26 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [isConnected, setIsConnected] = useState(false)
   const [onlineUsers, setOnlineUsers] = useState<string[]>([])
   const { user, isAuthenticated } = useAuth()
+  const queryClient = useQueryClient()
+  const router = useRouter()
+  const pathname = usePathname()
+
+  // Use refs for navigation so they don't trigger socket reconnects
+  const routerRef = useRef(router)
+  const pathnameRef = useRef(pathname)
+
+  useEffect(() => {
+    routerRef.current = router
+    pathnameRef.current = pathname
+  }, [router, pathname])
+
+  const invalidateGroupScopedQueries = useCallback((groupId?: string | null, expenseId?: string | null) => {
+    syncGroupState(queryClient, {
+      groupId: groupId || null,
+      expenseId: expenseId || null,
+      includeNotifications: true,
+    })
+  }, [queryClient])
 
   useEffect(() => {
 
@@ -64,6 +87,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
           description: notification.message,
         })
         window.dispatchEvent(new CustomEvent("socket:notification", { detail: notification }))
+      })
+
+      newSocket.on("server:sync", (payload) => {
+        invalidateGroupScopedQueries(payload?.groupId || null, payload?.expenseId || null)
       })
 
       // Listen for reminder notifications
@@ -133,6 +160,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
       // Listen for expense updates
       newSocket.on("expense_added", (data) => {
+        invalidateGroupScopedQueries(data?.groupId?._id || data?.groupId || data?.group?._id || null, data?._id || null)
         toast({
           title: "New Expense",
           description: `${data.paidBy.firstName} added "${data.description}" for $${data.amount}`,
@@ -141,26 +169,110 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
       // Listen for expense updates
       newSocket.on("expense_updated", (data) => {
+        invalidateGroupScopedQueries(data?.groupId?._id || data?.groupId || data?.group?._id || null, data?._id || null)
         toast({
           title: "Expense Updated",
           description: `"${data.description}" has been updated`,
         })
       })
 
+      newSocket.on("expense_deleted", (data) => {
+        invalidateGroupScopedQueries(data?.groupId?._id || data?.groupId || null, data?.expenseId || null)
+      })
+
       // Listen for group updates
       newSocket.on("group_updated", (data) => {
+        invalidateGroupScopedQueries(data?._id || data?.groupId || null)
         toast({
           title: "Group Updated",
           description: `Group "${data.name}" has been updated`,
         })
       })
 
+      newSocket.on("group_created", (data) => {
+        if (data?._id) {
+          newSocket.emit("join_groups", [data._id])
+        }
+        syncGroupState(queryClient, { includeNotifications: true })
+        window.dispatchEvent(new CustomEvent("socket:group:created"))
+      })
+
+      newSocket.on("group_added", (data) => {
+        if (data?.groupId) {
+          newSocket.emit("join_groups", [data.groupId])
+        }
+        syncGroupState(queryClient, { includeNotifications: true })
+        toast({
+          title: "Added to Group",
+          description: "You have been added to a new group.",
+        })
+      })
+
+      newSocket.on("group_deleted", (data) => {
+        const groupId = String(data?.groupId || "")
+        invalidateGroupScopedQueries(groupId)
+
+        if (groupId && pathnameRef.current?.includes(`/groups/${groupId}`)) {
+          routerRef.current.replace("/groups")
+          toast({
+            title: "Group Deleted",
+            description: "This group was deleted.",
+          })
+        }
+      })
+
+      newSocket.on("member_joined", (data) => {
+        invalidateGroupScopedQueries(data?.group?._id || data?.groupId || null)
+      })
+
+      newSocket.on("group:membersAdded", (data) => {
+        invalidateGroupScopedQueries(data?.groupId || null)
+      })
+
+      newSocket.on("member_removed", (data) => {
+        const groupId = String(data?.groupId || "")
+        invalidateGroupScopedQueries(groupId)
+
+        if (groupId && String(data?.removedUserId || data?.userId || "") === String((user as any)?._id || (user as any)?.id || "") && pathnameRef.current?.includes(`/groups/${groupId}`)) {
+          routerRef.current.replace("/groups")
+          toast({
+            title: "Removed From Group",
+            description: "You no longer have access to this group.",
+          })
+        }
+      })
+
+      newSocket.on("member_role_updated", (data) => {
+        invalidateGroupScopedQueries(data?.groupId || null)
+      })
+
       // Listen for settlement updates
       newSocket.on("settlement_created", (data) => {
+        invalidateGroupScopedQueries(data?.groupId || null)
         toast({
           title: "Settlement Created",
           description: `${data.from.firstName} owes ${data.to.firstName} $${data.amount}`,
         })
+      })
+
+      newSocket.on("settlement:confirmed", (data) => {
+        invalidateGroupScopedQueries(data?.groupId || null)
+      })
+
+      newSocket.on("settlement:plan-updated", (data) => {
+        invalidateGroupScopedQueries(data?.groupId || null)
+      })
+
+      newSocket.on("split_settled", (data) => {
+        invalidateGroupScopedQueries(data?.groupId || null)
+      })
+
+      newSocket.on("expense_comment_added", (data) => {
+        invalidateGroupScopedQueries(data?.groupId || null)
+      })
+
+      newSocket.on("expense_comment_deleted", (data) => {
+        invalidateGroupScopedQueries(data?.groupId || null)
       })
 
       setSocket(newSocket)
@@ -172,7 +284,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         setOnlineUsers([])
       }
     }
-  }, [isAuthenticated, user])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invalidateGroupScopedQueries, isAuthenticated, queryClient, user])
 
   const joinGroups = useCallback((groupIds: string[]) => {
     if (socket && isConnected) {

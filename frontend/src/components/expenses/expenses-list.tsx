@@ -16,6 +16,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { EditExpenseDialog } from "./edit-expense-dialog"
 import { useState } from "react"
 import { toast } from "@/hooks/use-toast"
+import { syncGroupState, syncDashboardState } from "@/lib/server-state"
 
 interface ExpensesListProps {
   groupId?: string
@@ -44,9 +45,10 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
     },
     onSuccess: () => {
       toast({ title: "Expense deleted" })
-      queryClient.invalidateQueries({ queryKey: ["expenses"] })
       if (groupId) {
-        queryClient.invalidateQueries({ queryKey: ["group-balance", groupId] })
+        syncGroupState(queryClient, { groupId, includeNotifications: true })
+      } else {
+        syncDashboardState(queryClient, { includeNotifications: true })
       }
     },
     onError: () => {

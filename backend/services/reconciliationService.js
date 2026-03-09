@@ -4,7 +4,7 @@ const Settlement = require("../models/Settlement")
 const ReconciliationReport = require("../models/ReconciliationReport")
 
 async function computeGroupNetImbalance(groupId) {
-  const [expenseEdges, settlementEdges] = await Promise.all([
+  const [expenseEdges] = await Promise.all([
     Expense.aggregate([
       { $match: { groupId, status: "active" } },
       { $unwind: "$splits" },
@@ -19,10 +19,6 @@ async function computeGroupNetImbalance(groupId) {
       },
       { $match: { $expr: { $and: [{ $gt: ["$amountCents", 0] }, { $ne: ["$fromUserId", "$toUserId"] }] } } },
     ]),
-    Settlement.aggregate([
-      { $match: { groupId, status: "CONFIRMED" } },
-      { $project: { fromUserId: "$fromUserId", toUserId: "$toUserId", amountCents: "$amountCents" } },
-    ]),
   ])
 
   const netByUser = new Map()
@@ -34,11 +30,6 @@ async function computeGroupNetImbalance(groupId) {
   for (const edge of expenseEdges) {
     bump(edge.toUserId, edge.amountCents)
     bump(edge.fromUserId, -edge.amountCents)
-  }
-
-  for (const edge of settlementEdges) {
-    bump(edge.fromUserId, edge.amountCents)
-    bump(edge.toUserId, -edge.amountCents)
   }
 
   let imbalanceCents = 0

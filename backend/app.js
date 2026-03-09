@@ -70,14 +70,14 @@ const apiLimiter = rateLimit({
   message: { message: "Too many requests from this IP, please try again later." },
 })
 
-// const authLimiter = rateLimit({
-//   windowMs: 15 * 60 * 1000,
-//   max: Number(process.env.AUTH_RATE_LIMIT_MAX || 30),
-//   standardHeaders: true,
-//   legacyHeaders: false,
-//   message: { message: "Too many authentication attempts, please try again later." },
-//   skip: (req) => req.path === "/oauth" || req.path.includes("callback"),
-// })
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.AUTH_RATE_LIMIT_MAX || 30),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many authentication attempts, please try again later." },
+  skip: (req) => req.path === "/oauth" || req.path.includes("callback"),
+})
 
 const writeLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -106,11 +106,11 @@ const messageLimiter = rateLimit({
 })
 
 // app.use("/api/auth", authLimiter)
-app.use("/api", apiLimiter)
-app.use("/api", writeLimiter)
-app.use("/api/receipts", uploadLimiter)
-app.use("/api/expenses", uploadLimiter)
-app.use("/api/conversations/messages", messageLimiter)
+// app.use("/api", apiLimiter)
+// app.use("/api", writeLimiter)
+// app.use("/api/receipts", uploadLimiter)
+// app.use("/api/expenses", uploadLimiter)
+// app.use("/api/conversations/messages", messageLimiter)
 
 initSentry(app)
 app.use(requestContext)
@@ -226,6 +226,24 @@ io.on("connection", (socket) => {
 
   // Join user to their personal room
   socket.join(`user_${socket.userId}`)
+
+  // Join all active groups for this user so cross-user CRUD updates are
+  // delivered everywhere, not only on pages that manually join a group room.
+  ;(async () => {
+    try {
+      const Group = require("./models/Group")
+      const groups = await Group.find({
+        "members.user": socket.userId,
+        isActive: true,
+      }).select("_id").lean()
+
+      for (const group of groups) {
+        socket.join(`group_${group._id}`)
+      }
+    } catch (err) {
+      console.error("[Socket] auto-join groups error:", err.message)
+    }
+  })()
 
   // Presence: add to online set and send current state to this socket
   try {

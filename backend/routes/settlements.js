@@ -8,6 +8,7 @@ const { bumpUsersCacheVersion } = require("../services/cacheService")
 const notificationService = require("../services/notificationService")
 const { logAuditEvent } = require("../services/auditService")
 const { appendLedgerEvent } = require("../services/ledgerService")
+const { emitServerStateSync } = require("../services/realtimeSyncService")
 
 const router = express.Router()
 
@@ -71,6 +72,11 @@ router.patch("/:id/payment-link", async (req, res) => {
       )
     }
 
+    emitServerStateSync({
+      io: req.io,
+      groupId: settlement.groupId,
+      userIds: [String(settlement.fromUserId?._id || settlement.fromUserId), String(settlement.toUserId?._id || settlement.toUserId)],
+    })
     return ok(res, settlement)
   } catch (error) {
     return fail(res, error.message || "Server error", 500)
@@ -132,6 +138,12 @@ router.post("/:id/remind", async (req, res) => {
 
     settlement.lastReminderAt = new Date()
     await settlement.save()
+    emitServerStateSync({
+      io: req.io,
+      groupId: settlement.groupId,
+      userIds: [String(settlement.fromUserId?._id || settlement.fromUserId), String(settlement.toUserId?._id || settlement.toUserId)],
+      includeNotifications: true,
+    })
     return ok(res, { message: "Reminder sent" })
   } catch (error) {
     return fail(res, error.message || "Server error", 500)
@@ -150,6 +162,12 @@ router.post("/:id/remind-later", async (req, res) => {
     const snoozedUntil = new Date(Date.now() + Math.max(1, snoozeDays) * 24 * 60 * 60 * 1000)
     settlement.reminderSnoozedUntil = snoozedUntil
     await settlement.save()
+    emitServerStateSync({
+      io: req.io,
+      groupId: settlement.groupId,
+      userIds: [String(settlement.fromUserId), String(settlement.toUserId)],
+      includeNotifications: true,
+    })
     return ok(res, { message: "Reminder snoozed", reminderSnoozedUntil: snoozedUntil })
   } catch (error) {
     return fail(res, error.message || "Server error", 500)
@@ -317,6 +335,11 @@ router.patch("/:id/confirm", async (req, res) => {
     } catch {}
 
     await bumpUsersCacheVersion((group.members || []).map((m) => String(m.user)))
+    emitServerStateSync({
+      io: req.io,
+      groupId: settlement.groupId,
+      userIds: (group.members || []).map((member) => String(member.user)),
+    })
     return ok(res, settlement)
   } catch (error) {
     return fail(res, error.message || "Server error", 500)
