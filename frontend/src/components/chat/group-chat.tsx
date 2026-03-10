@@ -26,6 +26,13 @@ interface GroupMessage {
   isCurrentUser: boolean
 }
 
+interface GroupMember {
+  id: string
+  name: string
+  username?: string
+  avatar?: string
+}
+
 interface Group {
   id: string
   name: string
@@ -34,24 +41,101 @@ interface Group {
   lastMessageTime: string
   unreadCount: number
   memberCount: number
+  members: GroupMember[]
   messages: GroupMessage[]
   conversationId?: string
+}
+
+function getUserId(value: any) {
+  return String(value?._id || value?.id || value || "")
+}
+
+function getDisplayName(userLike: any, fallback = "User") {
+  if (!userLike) return fallback
+  const firstName = String(userLike.firstName || "").trim()
+  const lastName = String(userLike.lastName || "").trim()
+  const fullName = `${firstName} ${lastName}`.trim()
+  return fullName || userLike.username || fallback
+}
+
+function toChatMessage(message: any, currentUserId: string, group?: Group | null): GroupMessage {
+  const senderId = getUserId(message?.sender)
+  const senderFromGroup = group?.members.find((member) => member.id === senderId)
+  const senderName =
+    getDisplayName(message?.sender, "") ||
+    senderFromGroup?.name ||
+    senderFromGroup?.username ||
+    "User"
+
+  return {
+    id: String(message?._id || message?.id || ""),
+    senderId,
+    senderName,
+    senderAvatar: message?.sender?.avatar || senderFromGroup?.avatar,
+    content: String(message?.text || message?.content || ""),
+    timestamp: new Date(message?.createdAt || message?.timestamp || Date.now()).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    isCurrentUser: senderId === currentUserId,
+  }
 }
 
 export function GroupChat() {
   const [groups, setGroups] = useState<Group[]>([])
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null)
   const [message, setMessage] = useState("")
+  const [isSending, setIsSending] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [isMobile, setIsMobile] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const processedMessageIds = useRef<Set<string>>(new Set())
   const { toast } = useToast()
-  const { socket, joinGroups, isConnected } = useSocket()
+  const { socket, joinGroups, joinConversations, isConnected } = useSocket()
   const { user } = useAuth()
+  const currentUserId = getUserId(user)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }
+
+  const appendMessageToGroup = (conversationId: string, newMsg: GroupMessage) => {
+    let matchedGroupId: string | null = null
+
+    setGroups((prev) =>
+      prev.map((group) => {
+        if (group.conversationId !== conversationId) {
+          return group
+        }
+
+        matchedGroupId = group.id
+        const hasMessage = group.messages.some((msg) => msg.id === newMsg.id)
+        return {
+          ...group,
+          messages: hasMessage ? group.messages : [...group.messages, newMsg],
+          lastMessage: newMsg,
+          lastMessageTime: newMsg.timestamp,
+          unreadCount: selectedGroup?.id === group.id ? 0 : group.unreadCount + (hasMessage ? 0 : 1),
+        }
+      }),
+    )
+
+    if (!matchedGroupId || selectedGroup?.id !== matchedGroupId) {
+      return
+    }
+
+    setSelectedGroup((current) => {
+      if (!current || current.id !== matchedGroupId) {
+        return current
+      }
+      const hasMessage = current.messages.some((msg) => msg.id === newMsg.id)
+      return {
+        ...current,
+        messages: hasMessage ? current.messages : [...current.messages, newMsg],
+        lastMessage: newMsg,
+        lastMessageTime: newMsg.timestamp,
+      }
+    })
   }
 
   useEffect(() => {
@@ -88,6 +172,12 @@ export function GroupChat() {
             lastMessageTime: "",
             unreadCount: 0,
             memberCount: g.members?.length || 0,
+            members: (g.members || []).map((member: any) => ({
+              id: getUserId(member?.user),
+              name: getDisplayName(member?.user),
+              username: member?.user?.username,
+              avatar: member?.user?.avatar,
+            })),
             messages: [],
             conversationId: convId
           }
@@ -109,17 +199,21 @@ export function GroupChat() {
     if (user) {
       fetchGroups()
     }
-  }, [user, toast])
+  }, [user, toast, joinGroups])
 
   // Ensure we join groups when socket connects
   useEffect(() => {
     if (isConnected && groups.length > 0) {
       const groupIds = groups.map(g => g.id)
+      const conversationIds = groups.map(g => g.conversationId).filter(Boolean) as string[]
       if (groupIds.length > 0) {
         joinGroups(groupIds)
       }
+      if (conversationIds.length > 0) {
+        joinConversations(conversationIds)
+      }
     }
-  }, [isConnected, groups.length, joinGroups])
+  }, [isConnected, groups, joinGroups, joinConversations])
 
   // Load messages when a group is selected
   useEffect(() => {
@@ -139,22 +233,11 @@ export function GroupChat() {
         }
 
         if (convId) {
+          joinConversations([convId])
           const msgsRes = await conversationAPI.listMessages(convId)
           const msgs = msgsRes.data?.data || []
-
-          const formattedMsgs: GroupMessage[] = msgs.map((m: any) => ({
-            id: m._id,
-            senderId: m.sender,
-            senderName: "User", // We need to populate this, backend sends ID
-            senderAvatar: undefined,
-            content: m.text,
-            timestamp: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            isCurrentUser: m.sender === (user as any)._id || m.sender === (user as any).id
-          }))
-
-          // We need to fetch sender details if not populated. 
-          // For optimization, backend should populate sender.
-          // For now, let's assume basic display.
+          const formattedMsgs: GroupMessage[] = msgs.map((m: any) => toChatMessage(m, currentUserId, selectedGroup))
+          formattedMsgs.forEach((msg) => processedMessageIds.current.add(msg.id))
 
           setSelectedGroup(prev => prev ? { ...prev, messages: formattedMsgs, conversationId: convId } : null)
         }
@@ -164,7 +247,7 @@ export function GroupChat() {
     }
 
     loadMessages()
-  }, [selectedGroup?.id, user])
+  }, [selectedGroup?.id, currentUserId, joinConversations])
 
   // Socket event listeners
   useEffect(() => {
@@ -184,43 +267,9 @@ export function GroupChat() {
 
       const { conversationId } = detail
 
-      // Find which group this conversation belongs to
-      // This is tricky if we don't have the mapping. 
-      // Ideally the socket event should include groupId or we map conversationId to groupId.
-      // For now, we'll check if the current selected group matches the conversationId
-
-      setGroups(prev => prev.map(g => {
-        if (g.conversationId === conversationId) {
-          if (g.messages.some(m => String(m.id) === String(msg._id))) return g
-          const newMsg: GroupMessage = {
-            id: msg._id,
-            senderId: msg.sender,
-            senderName: "User", // Placeholder
-            content: msg.text,
-            timestamp: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            isCurrentUser: msg.sender === (user as any)._id
-          }
-
-          // Update selected group if it matches
-          if (selectedGroup?.id === g.id) {
-            setSelectedGroup(curr => curr ? {
-              ...curr,
-              messages: [...curr.messages, newMsg],
-              lastMessage: newMsg,
-              lastMessageTime: newMsg.timestamp
-            } : null)
-          }
-
-          return {
-            ...g,
-            messages: [...g.messages, newMsg],
-            lastMessage: newMsg,
-            lastMessageTime: newMsg.timestamp,
-            unreadCount: selectedGroup?.id === g.id ? 0 : g.unreadCount + 1
-          }
-        }
-        return g
-      }))
+      const targetGroup = groups.find((group) => group.conversationId === conversationId) || selectedGroup
+      const newMsg = toChatMessage(msg, currentUserId, targetGroup)
+      appendMessageToGroup(String(conversationId || ""), newMsg)
     }
 
     const handleGroupCreated = (newGroup: any) => {
@@ -229,6 +278,12 @@ export function GroupChat() {
         id: newGroup._id,
         name: newGroup.name,
         memberCount: newGroup.members.length,
+        members: (newGroup.members || []).map((member: any) => ({
+          id: getUserId(member?.user),
+          name: getDisplayName(member?.user),
+          username: member?.user?.username,
+          avatar: member?.user?.avatar,
+        })),
         messages: [],
         unreadCount: 0,
         lastMessageTime: ""
@@ -252,7 +307,7 @@ export function GroupChat() {
       window.removeEventListener('socket:message:new', onMessage)
       socket.off('group_created', handleGroupCreated)
     }
-  }, [socket, user, selectedGroup, selectedGroup?.id, joinGroups])
+  }, [socket, currentUserId, selectedGroup, selectedGroup?.id, joinGroups, groups])
 
 
   const filteredGroups = groups.filter(group =>
@@ -260,44 +315,26 @@ export function GroupChat() {
   )
 
   const handleSendMessage = async () => {
-    if (!message.trim() || !selectedGroup || !selectedGroup.conversationId) return
+    const text = message.trim()
+    if (!text || !selectedGroup || !selectedGroup.conversationId || isSending) return
 
     try {
+      setIsSending(true)
+      setMessage("")
       const res = await conversationAPI.sendMessage({
         conversationId: selectedGroup.conversationId,
-        text: message.trim()
+        text
       })
 
       const msg = res.data?.data
-      const newMsg: GroupMessage = {
-        id: msg._id,
-        senderId: msg.sender,
-        senderName: "You",
-        content: msg.text,
-        timestamp: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isCurrentUser: true
-      }
-
-      // Optimistic update
-      setSelectedGroup(prev => prev ? {
-        ...prev,
-        messages: [...prev.messages, newMsg],
-        lastMessage: newMsg,
-        lastMessageTime: newMsg.timestamp
-      } : null)
-
-      setGroups(prev => prev.map(g =>
-        g.id === selectedGroup.id ? {
-          ...g,
-          messages: [...g.messages, newMsg],
-          lastMessage: newMsg,
-          lastMessageTime: newMsg.timestamp
-        } : g
-      ))
-
-      setMessage("")
+      const newMsg = toChatMessage(msg, currentUserId, selectedGroup)
+      processedMessageIds.current.add(newMsg.id)
+      appendMessageToGroup(selectedGroup.conversationId, newMsg)
     } catch (e) {
+      setMessage(text)
       toast({ title: "Error", description: "Failed to send message", variant: "destructive" })
+    } finally {
+      setIsSending(false)
     }
   }
 
@@ -319,6 +356,12 @@ export function GroupChat() {
       lastMessageTime: "now",
       unreadCount: 0,
       memberCount: newGroupData.members.length,
+      members: (newGroupData.members || []).map((member: any) => ({
+        id: getUserId(member?.user),
+        name: getDisplayName(member?.user),
+        username: member?.user?.username,
+        avatar: member?.user?.avatar,
+      })),
       messages: []
     }
 
@@ -567,7 +610,7 @@ export function GroupChat() {
                     onKeyPress={handleKeyPress}
                     className="flex-1"
                   />
-                  <Button onClick={handleSendMessage} disabled={!message.trim()}>
+                  <Button onClick={handleSendMessage} disabled={!message.trim() || isSending}>
                     <Send className="h-4 w-4" />
                   </Button>
                 </div>

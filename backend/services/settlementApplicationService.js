@@ -23,10 +23,12 @@ async function reconcileConfirmedSettlementsForGroup(groupId) {
   for (const settlement of settlements) {
     let remainingCents = Math.max(0, Number(settlement.amountCents || 0))
     if (remainingCents <= 0) continue
+    const settlementCutoff = settlement.confirmedAt || settlement.createdAt || now
 
     for (const expense of expenses) {
       if (remainingCents <= 0) break
       if (String(expense.paidBy) !== String(settlement.toUserId)) continue
+      if (expense.createdAt && new Date(expense.createdAt).getTime() > new Date(settlementCutoff).getTime()) continue
 
       let changed = false
       for (const split of expense.splits) {

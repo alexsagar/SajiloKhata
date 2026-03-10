@@ -93,7 +93,11 @@ router.get("/:id/messages", async (req, res) => {
     const cursor = req.query.cursor
     const query = { conversationId: req.params.id }
     if (cursor) query.createdAt = { $lt: new Date(cursor) }
-    const msgs = await Message.find(query).sort({ createdAt: -1 }).limit(limit).lean()
+    const msgs = await Message.find(query)
+      .populate("sender", "firstName lastName username avatar")
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean()
     const nextCursor = msgs.length === limit ? msgs[msgs.length - 1].createdAt : null
     res.json({ data: msgs.reverse(), nextCursor })
   } catch (e) {
@@ -136,6 +140,7 @@ router.post(
         attachments,
         readBy: [req.user._id],  // sender has read their own message
       })
+      await msg.populate("sender", "firstName lastName username avatar")
       conv.lastMessageAt = msg.createdAt
       await conv.save()
 

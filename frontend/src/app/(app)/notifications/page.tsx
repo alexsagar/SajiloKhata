@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { toast } from "@/hooks/use-toast"
 import { syncDashboardState, syncGroupState } from "@/lib/server-state"
+import { useAuth } from "@/contexts/auth-context"
 
 const PAGE_SIZE = 20
 
@@ -29,6 +30,7 @@ function resolveHref(notification: any) {
 export default function NotificationsPage() {
   const [page, setPage] = useState(1)
   const queryClient = useQueryClient()
+  const { user } = useAuth()
 
   const notificationsQuery = useQuery({
     queryKey: ["notifications", page],
@@ -82,6 +84,7 @@ export default function NotificationsPage() {
   const canNext = page < totalPages
 
   const title = useMemo(() => `Notifications (${unreadCount} unread)`, [unreadCount])
+  const currentUserId = String((user as any)?._id || (user as any)?.id || "")
 
   return (
     <div className="container mx-auto max-w-4xl px-4 py-6 space-y-4">
@@ -102,8 +105,15 @@ export default function NotificationsPage() {
               const type = String(notification.type || "")
               const settlementId = notification?.data?.settlementId
               const paymentLink = notification?.data?.paymentLink
-              const canRecordPaid = ["SETTLEMENT_REQUESTED", "SETTLEMENT_REMINDER"].includes(type) && Boolean(settlementId)
-              const canRemindLater = ["SETTLEMENT_REQUESTED", "SETTLEMENT_REMINDER"].includes(type) && Boolean(settlementId)
+              const settlementPayerId = String(notification?.data?.fromUserId || "")
+              const canRecordPaid =
+                ["SETTLEMENT_REQUESTED", "SETTLEMENT_REMINDER"].includes(type) &&
+                Boolean(settlementId) &&
+                settlementPayerId === currentUserId
+              const canRemindLater =
+                ["SETTLEMENT_REQUESTED", "SETTLEMENT_REMINDER"].includes(type) &&
+                Boolean(settlementId) &&
+                settlementPayerId === currentUserId
 
               return (
                 <div

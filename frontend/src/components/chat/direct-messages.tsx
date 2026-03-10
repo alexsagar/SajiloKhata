@@ -69,6 +69,10 @@ const processedMessageIds = new Set<string>()
 const messagesBeingAdded = new Set<string>()
 const MONGO_OBJECT_ID_REGEX = /^[a-f\d]{24}$/i
 
+function getSenderId(sender: any) {
+  return String(sender?._id || sender?.id || sender || "")
+}
+
 export function DirectMessages() {
   const [conversations, setConversations] = useState<Conversation[]>(mockConversations)
   const [friends, setFriends] = useState<Friend[]>(mockFriends)
@@ -286,7 +290,7 @@ export function DirectMessages() {
 
       // Determine if this message is from the current user
       const currentUserId = String((user as any)?._id || (user as any)?.id || '')
-      const senderId = String(msg.sender || '')
+      const senderId = getSenderId(msg.sender)
       const isFromCurrentUser = !!(currentUserId && senderId === currentUserId)
 
       const newMsg: DirectMessage = {
@@ -309,7 +313,7 @@ export function DirectMessages() {
 
         if (existingIndex === -1) {
           // Remove any local placeholder conversation for this friend
-          const friendId = String(msg.sender)
+          const friendId = senderId
           const withoutLocal = prev.filter((c) => c.id !== `local-${friendId}`)
 
           const friend = friends.find((f) => f.id === friendId) || {
@@ -538,7 +542,7 @@ export function DirectMessages() {
       // Reconcile: replace temp message with server message
       const reconciledMsg: DirectMessage = {
         id: serverId,
-        senderId: String(msgData.sender || optimisticMsg.senderId),
+        senderId: getSenderId(msgData.sender) || optimisticMsg.senderId,
         senderName: 'You',
         senderAvatar: (user as any)?.avatar || '',
         content: msgData.text || text,
@@ -628,7 +632,7 @@ export function DirectMessages() {
 
       const reconciledMsg: DirectMessage = {
         id: String(msgData._id || Date.now()),
-        senderId: String(msgData.sender || failedMsg.senderId),
+        senderId: getSenderId(msgData.sender) || failedMsg.senderId,
         senderName: 'You',
         senderAvatar: failedMsg.senderAvatar,
         content: msgData.text || failedMsg.content,
@@ -709,12 +713,12 @@ export function DirectMessages() {
       const myId = String((user as any)?._id || (user as any)?.id)
       const olderMsgs: DirectMessage[] = allData.map((msg: any) => ({
         id: String(msg._id),
-        senderId: String(msg.sender),
-        senderName: String(msg.sender) === myId ? 'You' : selectedConversation.friend.name,
+        senderId: getSenderId(msg.sender),
+        senderName: getSenderId(msg.sender) === myId ? 'You' : selectedConversation.friend.name,
         senderAvatar: selectedConversation.friend.avatar,
         content: msg.text || '',
         timestamp: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isCurrentUser: String(msg.sender) === myId,
+        isCurrentUser: getSenderId(msg.sender) === myId,
         _status: 'sent' as const,
       }))
 
@@ -786,12 +790,12 @@ export function DirectMessages() {
 
         const loadedMessages: DirectMessage[] = messagesData.map((msg: any) => ({
           id: String(msg._id),
-          senderId: String(msg.sender),
-          senderName: String(msg.sender) === String((user as any)?._id || (user as any)?.id) ? 'You' : selectedConversation.friend.name,
+          senderId: getSenderId(msg.sender),
+          senderName: getSenderId(msg.sender) === String((user as any)?._id || (user as any)?.id) ? 'You' : selectedConversation.friend.name,
           senderAvatar: selectedConversation.friend.avatar,
           content: msg.text || '',
           timestamp: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isCurrentUser: String(msg.sender) === String((user as any)?._id || (user as any)?.id),
+          isCurrentUser: getSenderId(msg.sender) === String((user as any)?._id || (user as any)?.id),
         }))
 
 

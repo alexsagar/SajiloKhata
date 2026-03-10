@@ -20,6 +20,12 @@ const reminderSchema = new mongoose.Schema(
       type: Date, 
       required: true 
     },
+    dueDateKey: {
+      type: String,
+      required: true,
+      match: /^\d{4}-\d{2}-\d{2}$/,
+      index: true,
+    },
     amount: { 
       type: Number,
       min: 0

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { groupAPI, expenseAPI, settlementAPI } from "@/lib/api"
 import { LoadingSpinner } from "@/components/common/loading-spinner"
@@ -521,39 +522,41 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
               No confirmed settlements yet.
             </div>
           ) : (
-            <div className="space-y-3">
-              {confirmedSettlements.map((s: any) => {
-                const fromUser = s.fromUserId
-                const toUser = s.toUserId
-                const amount = (s.amountCents || 0) / 100
+            <ScrollArea className="max-h-96 pr-3">
+              <div className="space-y-3">
+                {confirmedSettlements.map((s: any) => {
+                  const fromUser = s.fromUserId
+                  const toUser = s.toUserId
+                  const amount = (s.amountCents || 0) / 100
 
-                return (
-                  <div key={s._id} className="flex items-center justify-between p-3 rounded-lg border bg-muted/50">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-8 w-8">
-                        <AvatarImage src={fromUser?.avatar || "/placeholder.svg"} />
-                        <AvatarFallback className="text-xs">
-                          {getInitials(fromUser?.firstName || "U", fromUser?.lastName || "U")}
-                        </AvatarFallback>
-                      </Avatar>
-                      <span className="font-medium">{fromUser?.firstName}</span>
-                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                      <Avatar className="h-8 w-8">
-                        <AvatarImage src={toUser?.avatar || "/placeholder.svg"} />
-                        <AvatarFallback className="text-xs">
-                          {getInitials(toUser?.firstName || "U", toUser?.lastName || "U")}
-                        </AvatarFallback>
-                      </Avatar>
-                      <span className="font-medium">{toUser?.firstName}</span>
+                  return (
+                    <div key={s._id} className="flex items-center justify-between p-3 rounded-lg border bg-muted/50">
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={fromUser?.avatar || "/placeholder.svg"} />
+                          <AvatarFallback className="text-xs">
+                            {getInitials(fromUser?.firstName || "U", fromUser?.lastName || "U")}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="font-medium">{fromUser?.firstName}</span>
+                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={toUser?.avatar || "/placeholder.svg"} />
+                          <AvatarFallback className="text-xs">
+                            {getInitials(toUser?.firstName || "U", toUser?.lastName || "U")}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="font-medium">{toUser?.firstName}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold">{formatCurrency(amount, userCurrency)}</span>
+                        <Badge>CONFIRMED</Badge>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold">{formatCurrency(amount, userCurrency)}</span>
-                      <Badge>CONFIRMED</Badge>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+                  )
+                })}
+              </div>
+            </ScrollArea>
           )}
         </KanbanCardContent>
       </KanbanCard>

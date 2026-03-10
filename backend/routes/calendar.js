@@ -12,6 +12,28 @@ function toStringArray(raw) {
   return String(raw).split(",").map(s => s.trim()).filter(Boolean)
 }
 
+function parseLocalDateInput(value) {
+  const raw = String(value || "").trim()
+  const dateOnlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (dateOnlyMatch) {
+    const year = Number(dateOnlyMatch[1])
+    const monthIndex = Number(dateOnlyMatch[2]) - 1
+    const day = Number(dateOnlyMatch[3])
+    return new Date(Date.UTC(year, monthIndex, day, 0, 0, 0, 0))
+  }
+
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return null
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate(), 0, 0, 0, 0))
+}
+
+function toLocalDateKey(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
 // Get calendar month data with expense totals and base currency conversion
 router.get("/month", async (req, res) => {
   try {
@@ -224,6 +246,10 @@ router.post(
       }
 
       const { title, description, date, type, groupId, expenseId } = req.body
+      const scheduledFor = parseLocalDateInput(date)
+      if (!scheduledFor) {
+        return fail(res, "Valid date is required", 400)
+      }
 
       // Create notification for the reminder
       const notificationService = require("../services/notificationService")
@@ -234,11 +260,11 @@ router.post(
         message: description || `Don't forget about your ${type}`,
         data: {
           reminderType: type,
-          scheduledFor: date,
+          scheduledFor: toLocalDateKey(scheduledFor),
           groupId,
           expenseId,
         },
-        scheduledFor: new Date(date),
+        scheduledFor,
       })
 
       res.status(201).json({ message: "Reminder created successfully" })

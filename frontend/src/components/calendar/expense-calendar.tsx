@@ -24,6 +24,45 @@ const months = [
 
 const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
+function toUtcDateKey(date: Date) {
+  const year = date.getUTCFullYear()
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0")
+  const day = String(date.getUTCDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function toLocalDateKey(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function parseLocalDateKey(dateKey: string) {
+  const [year, month, day] = String(dateKey || "").split("-").map(Number)
+  if (!year || !month || !day) return null
+  return new Date(year, month - 1, day, 0, 0, 0, 0)
+}
+
+function formatLocalDateLabel(dateKey: string) {
+  const parsed = parseLocalDateKey(dateKey)
+  return parsed ? parsed.toLocaleDateString() : dateKey
+}
+
+function getReminderDateKey(value: any) {
+  if (value && typeof value === "object" && value.dueDateKey) {
+    return String(value.dueDateKey)
+  }
+  const raw = String(value || "")
+  const isoDateMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/)
+  if (isoDateMatch) {
+    return isoDateMatch[1]
+  }
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return raw
+  return toUtcDateKey(parsed)
+}
+
 interface CalendarDay {
   day: number
   isCurrentMonth: boolean
@@ -76,8 +115,8 @@ export function ExpenseCalendar() {
 
   // Fetch reminders for the month
   const { data: remindersData } = useQuery({
-    queryKey: ['calendar-reminders', year, month],
-    queryFn: () => reminderAPI.getMonth({ year, month }),
+    queryKey: ['calendar-reminders'],
+    queryFn: () => reminderAPI.getAll(),
     staleTime: 5 * 60 * 1000,
   })
 
@@ -101,7 +140,7 @@ export function ExpenseCalendar() {
     // Check if this date has any reminders; if so, open reminder dialog prefilled
     const remindersForDate = reminderList.filter((r: any) => {
       if (!r?.dueDate) return false
-      const key = String(r.dueDate).split("T")[0]
+      const key = getReminderDateKey(r)
       return key === date
     })
 
@@ -138,7 +177,7 @@ export function ExpenseCalendar() {
     const remindersByDate = new Map<string, any[]>()
     reminderList.forEach((r: any) => {
       if (!r?.dueDate) return
-      const dateKey = String(r.dueDate).split('T')[0]
+      const dateKey = getReminderDateKey(r)
       if (!remindersByDate.has(dateKey)) remindersByDate.set(dateKey, [])
       remindersByDate.get(dateKey)!.push(r)
     })
@@ -149,7 +188,7 @@ export function ExpenseCalendar() {
     for (let i = firstDay - 1; i >= 0; i--) {
       const day = daysInPrevMonth - i
       const jsDate = new Date(year, currentMonthIndex - 1, day)
-      const date = jsDate.toISOString().split('T')[0]
+      const date = toLocalDateKey(jsDate)
       days.push({
         day,
         isCurrentMonth: false,
@@ -161,7 +200,7 @@ export function ExpenseCalendar() {
     // Current month days
     for (let day = 1; day <= daysInMonth; day++) {
       const jsDate = new Date(year, currentMonthIndex, day)
-      const date = jsDate.toISOString().split('T')[0]
+      const date = toLocalDateKey(jsDate)
       const dayData = monthData?.data?.days?.find((d: any) => d.date === date)
       days.push({
         day,
@@ -177,7 +216,7 @@ export function ExpenseCalendar() {
     const remainingDays = 42 - days.length
     for (let day = 1; day <= remainingDays; day++) {
       const jsDate = new Date(year, currentMonthIndex + 1, day)
-      const date = jsDate.toISOString().split('T')[0]
+      const date = toLocalDateKey(jsDate)
       days.push({
         day,
         isCurrentMonth: false,
@@ -188,13 +227,14 @@ export function ExpenseCalendar() {
 
     return days
   }, [year, month, monthData, remindersData])
-  const isToday = new Date().toISOString().split('T')[0]
+  const isToday = toLocalDateKey(new Date())
   const reminderStats = useMemo(() => {
     const total = reminderList.length
-    const todayDate = new Date(isToday)
+    const todayDate = parseLocalDateKey(isToday) || new Date()
     const upcoming7d = reminderList.filter((r: any) => {
       if (!r?.dueDate) return false
-      const due = new Date(String(r.dueDate))
+      const dueKey = getReminderDateKey(r)
+      const due = parseLocalDateKey(dueKey)
       if (Number.isNaN(due.getTime())) return false
       const deltaDays = Math.floor((due.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24))
       return deltaDays >= 0 && deltaDays <= 7
@@ -404,7 +444,7 @@ export function ExpenseCalendar() {
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-xs text-muted-foreground">
                 Selected date:{" "}
                 <span className="font-medium text-foreground">
-                  {selectedDate ? new Date(selectedDate).toLocaleDateString() : "Today"}
+                  {selectedDate ? formatLocalDateLabel(selectedDate) : "Today"}
                 </span>
               </div>
               <Button
@@ -413,7 +453,7 @@ export function ExpenseCalendar() {
                 variant="default"
                 onClick={() => {
                   if (!selectedDate) {
-                    const today = new Date().toISOString().split("T")[0]
+                    const today = toLocalDateKey(new Date())
                     setSelectedDate(today)
                   }
                   setIsAddReminderOpen(true)
@@ -433,7 +473,7 @@ export function ExpenseCalendar() {
         <DialogContent className="w-full max-w-md sm:max-w-lg max-h-[85vh] mx-auto bg-white dark:bg-[#12151c] ring-1 ring-black/10 dark:ring-white/10 shadow-xl">
           <DialogHeader className="p-responsive-3">
             <DialogTitle className="text-responsive-lg">
-              Add reminder — {selectedDate ? new Date(selectedDate).toLocaleDateString() : "Select a date"}
+              Add reminder — {selectedDate ? formatLocalDateLabel(selectedDate) : "Select a date"}
             </DialogTitle>
             <DialogDescription className="text-responsive-sm">
               Create a reminder like a bill or subscription; you'll be notified a few days before it is due.

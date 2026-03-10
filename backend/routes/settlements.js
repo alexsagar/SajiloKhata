@@ -197,9 +197,13 @@ router.patch("/:id/confirm", async (req, res) => {
       return ok(res, settlement)
     }
 
+    await settlement.populate("fromUserId", "firstName lastName username avatar")
+    await settlement.populate("toUserId", "firstName lastName username avatar")
+
     // Only the payer (fromUser) can confirm this payment.
-    if (String(settlement.fromUserId) !== String(req.user._id)) {
-      return fail(res, "Only the payer can confirm this settlement", 403)
+    if (String(settlement.fromUserId?._id || settlement.fromUserId) !== String(req.user._id)) {
+      const payerName = settlement.fromUserId?.firstName || settlement.fromUserId?.username || "the payer"
+      return fail(res, `Only ${payerName} can mark this settlement as paid`, 403)
     }
 
     const amountCents = Math.max(0, Number(settlement.amountCents || 0))
@@ -215,10 +219,12 @@ router.patch("/:id/confirm", async (req, res) => {
     // reflect paid amounts immediately without requiring aggregate-only reconciliation.
     let remainingCents = Math.max(0, Number(settlement.amountCents || 0))
     if (remainingCents > 0) {
+      const settlementCutoff = settlement.confirmedAt || new Date()
       const relatedExpenses = await Expense.find({
         groupId: settlement.groupId,
         status: "active",
         paidBy: settlement.toUserId,
+        createdAt: { $lte: settlementCutoff },
         "splits.user": settlement.fromUserId,
         "splits.settled": { $ne: true },
       }).sort({ date: 1, createdAt: 1 })
@@ -266,9 +272,6 @@ router.patch("/:id/confirm", async (req, res) => {
         }
       }
     }
-
-    await settlement.populate("fromUserId", "firstName lastName username avatar")
-    await settlement.populate("toUserId", "firstName lastName username avatar")
 
     const actorId = String(req.user._id)
     const recipientIds = [
