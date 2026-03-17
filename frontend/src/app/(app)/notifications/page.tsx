@@ -35,6 +35,9 @@ export default function NotificationsPage() {
   const notificationsQuery = useQuery({
     queryKey: ["notifications", page],
     queryFn: () => notificationAPI.getNotifications({ page, limit: PAGE_SIZE }),
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   })
 
   const markRead = useMutation({

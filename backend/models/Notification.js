@@ -94,10 +94,10 @@ const notificationSchema = new mongoose.Schema(
 
 // Indexes for efficient queries
 notificationSchema.index({ userId: 1, createdAt: -1 })
-notificationSchema.index({ userId: 1, read: 1 })
 notificationSchema.index({ userId: 1, read: 1, createdAt: -1 })
 notificationSchema.index({ type: 1 })
 notificationSchema.index({ userId: 1, type: 1, groupId: 1, createdAt: -1 })
+notificationSchema.index({ userId: 1, type: 1, groupId: 1, "data.batchKey": 1, createdAt: -1 })
 notificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
 
 // Virtual for checking if notification is expired

@@ -53,8 +53,7 @@ router.get("/month", async (req, res) => {
     }
 
     // Get user's base currency preference
-    const user = await User.findById(userId).select('preferences.baseCurrency')
-    const userBaseCurrency = baseCurrency || user?.preferences?.baseCurrency || 'USD'
+    const userBaseCurrency = baseCurrency || req.user.preferences?.baseCurrency || 'USD'
 
     // Build date range for the month
     const startDate = new Date(yearNum, monthNum - 1, 1)
@@ -79,7 +78,7 @@ router.get("/month", async (req, res) => {
       const userGroups = await Group.find({
         "members.user": userId,
         isActive: true
-      }).select('_id')
+      }).select("_id").lean()
       
       const requestedGroupIds = toStringArray(groupIds)
       if (requestedGroupIds.length > 0) {

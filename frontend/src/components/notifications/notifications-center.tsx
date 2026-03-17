@@ -13,11 +13,10 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Bell, Check, CheckCheck, Trash2, Settings } from "lucide-react"
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { notificationAPI } from "@/lib/api"
 import { formatRelativeTime } from "@/lib/utils"
 import { toast } from "@/hooks/use-toast"
 import Link from "next/link"
+import { useNotifications } from "@/contexts/notification-context"
 
 interface NotificationsCenterProps {
   children: React.ReactNode
@@ -25,51 +24,22 @@ interface NotificationsCenterProps {
 
 export function NotificationsCenter({ children }: NotificationsCenterProps) {
   const [open, setOpen] = useState(false)
-  const queryClient = useQueryClient()
-
-  const { data: notifications } = useQuery({
-    queryKey: ["notifications"],
-    queryFn: () => notificationAPI.getNotifications({ page: 1, limit: 20 }),
-    refetchInterval: 30000, // Refetch every 30 seconds
-  })
-
-  const markAsReadMutation = useMutation({
-    mutationFn: notificationAPI.markAsRead,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["notifications"] })
-    },
-  })
-
-  const markAllAsReadMutation = useMutation({
-    mutationFn: notificationAPI.markAllAsRead,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["notifications"] })
-      toast({
-        title: "All notifications marked as read",
-      })
-    },
-  })
-
-  const deleteNotificationMutation = useMutation({
-    mutationFn: notificationAPI.deleteNotification,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["notifications"] })
-    },
-  })
-
-  const notificationsList = notifications?.data?.notifications || []
-  const unreadCount = notifications?.data?.unreadCount || 0
+  const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification } = useNotifications()
+  const notificationsList = notifications || []
 
   const handleMarkAsRead = (id: string) => {
-    markAsReadMutation.mutate(id)
+    void markAsRead(id)
   }
 
   const handleMarkAllAsRead = () => {
-    markAllAsReadMutation.mutate()
+    void markAllAsRead()
+    toast({
+      title: "All notifications marked as read",
+    })
   }
 
   const handleDelete = (id: string) => {
-    deleteNotificationMutation.mutate(id)
+    void deleteNotification(id)
   }
 
   const getNotificationIcon = (type: string) => {
@@ -127,12 +97,11 @@ export function NotificationsCenter({ children }: NotificationsCenterProps) {
           <h3 className="font-semibold">Notifications</h3>
           <div className="flex items-center gap-2">
             {unreadCount > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleMarkAllAsRead}
-                disabled={markAllAsReadMutation.isPending}
-              >
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleMarkAllAsRead}
+                >
                 <CheckCheck className="h-4 w-4" />
               </Button>
             )}
@@ -187,7 +156,6 @@ export function NotificationsCenter({ children }: NotificationsCenterProps) {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => handleMarkAsRead(notification._id)}
-                                disabled={markAsReadMutation.isPending}
                               >
                                 <Check className="h-3 w-3" />
                               </Button>
@@ -196,7 +164,6 @@ export function NotificationsCenter({ children }: NotificationsCenterProps) {
                               variant="ghost"
                               size="sm"
                               onClick={() => handleDelete(notification._id)}
-                              disabled={deleteNotificationMutation.isPending}
                             >
                               <Trash2 className="h-3 w-3" />
                             </Button>

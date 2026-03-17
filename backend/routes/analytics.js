@@ -12,6 +12,7 @@ const {
   calculateAgingBuckets,
 } = require("../utils/analytics-calcs")
 const { cacheUserResponse } = require("../middleware/cache")
+const { measure } = require("../utils/perf")
 
 const MAX_EXPORT_ROWS = Number(process.env.ANALYTICS_EXPORT_MAX_ROWS || 10000)
 
@@ -158,10 +159,12 @@ async function buildBaseQuery(req, filters) {
   const userIdRaw = req.user._id || req.user.id
   const userId = toObjectId(userIdRaw) || userIdRaw
   const baseCurrency = req.user.preferences?.baseCurrency || 'USD'
-  const userGroups = await Group.find({
-    "members.user": userId,
-    isActive: true
-  }).select('_id')
+  const userGroups = await measure("analytics.baseQuery.groups", () =>
+    Group.find({
+      "members.user": userId,
+      isActive: true
+    }).select("_id").lean(),
+  )
   const userGroupIds = userGroups.map(g => g._id)
 
   let matchQuery = {
@@ -572,8 +575,12 @@ router.get("/balance-matrix", cacheUserResponse({ namespace: "analytics", ttlSec
     }
 
     // Verify user is member of group
-    const group = await Group.findById(groupId)
-    if (!group || !group.members.some(m => m.user.toString() === userId)) {
+    const group = await Group.findOne({
+      _id: groupId,
+      "members.user": userId,
+      isActive: true,
+    }).select("name members.user").lean()
+    if (!group) {
       return fail(res, 'Access denied', 403)
     }
 
@@ -608,8 +615,12 @@ router.get("/simplify", cacheUserResponse({ namespace: "analytics", ttlSeconds: 
     }
 
     // Verify user is member of group
-    const group = await Group.findById(groupId)
-    if (!group || !group.members.some(m => m.user.toString() === userId)) {
+    const group = await Group.findOne({
+      _id: groupId,
+      "members.user": userId,
+      isActive: true,
+    }).select("name members.user").lean()
+    if (!group) {
       return fail(res, 'Access denied', 403)
     }
 
@@ -674,16 +685,17 @@ router.get("/ledger", cacheUserResponse({ namespace: "analytics", ttlSeconds: 90
     const { matchQuery, baseCurrency } = await buildBaseQuery(req, filters)
     const { page, limit, skip } = getPagination(req.query, { defaultLimit: 50, maxLimit: 200 })
 
-    const expenses = await Expense.find(matchQuery)
-      .populate('paidBy', 'firstName lastName')
-      .populate('groupId', 'name')
-      .select('description amountCents currencyCode fxRate category date status groupId paidBy splits')
-      .sort({ date: -1 })
-      .limit(limit)
-      .skip(skip)
-      .lean()
-
-    const total = await Expense.countDocuments(matchQuery)
+    const [expenses, total] = await Promise.all([
+      Expense.find(matchQuery)
+        .populate('paidBy', 'firstName lastName')
+        .populate('groupId', 'name')
+        .select('description amountCents currencyCode fxRate category date status groupId paidBy splits')
+        .sort({ date: -1 })
+        .limit(limit)
+        .skip(skip)
+        .lean(),
+      Expense.countDocuments(matchQuery),
+    ])
 
     const ledger = expenses.map(expense => ({
       id: expense._id,
@@ -815,69 +827,93 @@ router.get("/group-health", cacheUserResponse({ namespace: "analytics", ttlSecon
     }
 
     // Verify user is member of group
-    const group = await Group.findById(groupId)
-    if (!group || !group.members.some(m => m.user.toString() === userId)) {
+    const group = await Group.findOne({
+      _id: groupId,
+      "members.user": userId,
+      isActive: true,
+    }).select("name members.user").lean()
+    if (!group) {
       return fail(res, 'Access denied', 403)
     }
 
     const now = new Date()
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
     const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
+    const [activityAgg, settlementAgg] = await Promise.all([
+      Expense.aggregate([
+        {
+          $match: {
+            groupId: toObjectId(groupId) || groupId,
+            status: { $in: ["active", "settled"] },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            active30dUsers: {
+              $addToSet: {
+                $cond: [{ $gte: ["$date", thirtyDaysAgo] }, "$paidBy", "$$REMOVE"],
+              },
+            },
+            active90dUsers: {
+              $addToSet: {
+                $cond: [{ $gte: ["$date", ninetyDaysAgo] }, "$paidBy", "$$REMOVE"],
+              },
+            },
+            weeklyExpenses: {
+              $sum: {
+                $cond: [{ $gte: ["$date", new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)] }, 1, 0],
+              },
+            },
+            totalExpenses: { $sum: 1 },
+          },
+        },
+      ]),
+      Expense.aggregate([
+        {
+          $match: {
+            groupId: toObjectId(groupId) || groupId,
+            status: "settled",
+            settledAt: { $ne: null },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            settledExpenses: { $sum: 1 },
+            fastSettlements: {
+              $sum: {
+                $cond: [
+                  {
+                    $lte: [
+                      { $divide: [{ $subtract: ["$settledAt", "$date"] }, 1000 * 60 * 60 * 24] },
+                      14,
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]),
+    ])
 
-    // Active members in last 30/90 days
-    const active30d = await Expense.distinct('paidBy', {
-      groupId,
-      date: { $gte: thirtyDaysAgo },
-      status: { $in: ['active', 'settled'] }
-    })
-
-    const active90d = await Expense.distinct('paidBy', {
-      groupId,
-      date: { $gte: ninetyDaysAgo },
-      status: { $in: ['active', 'settled'] }
-    })
-
-    // Expenses per week
-    const weeklyExpenses = await Expense.countDocuments({
-      groupId,
-      date: { $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) },
-      status: { $in: ['active', 'settled'] }
-    })
-
-    // Settlement rate
-    const totalExpenses = await Expense.countDocuments({
-      groupId,
-      status: { $in: ['active', 'settled'] }
-    })
-
-    const settledExpenses = await Expense.countDocuments({
-      groupId,
-      status: 'settled'
-    })
-
-    const settlementRate = totalExpenses > 0 ?
-      Math.round((settledExpenses / totalExpenses) * 100) : 0
-
-    // Fast settlements (< 14 days)
-    const fastSettlements = await Expense.countDocuments({
-      groupId,
-      status: 'settled',
-      $expr: {
-        $lte: [
-          { $divide: [{ $subtract: ['$settledAt', '$date'] }, 1000 * 60 * 60 * 24] },
-          14
-        ]
-      }
-    })
-
-    const fastSettlementRate = settledExpenses > 0 ?
-      Math.round((fastSettlements / settledExpenses) * 100) : 0
+    const activity = activityAgg[0] || {}
+    const settlement = settlementAgg[0] || {}
+    const totalExpenses = Number(activity.totalExpenses || 0)
+    const settledExpenses = Number(settlement.settledExpenses || 0)
+    const settlementRate = totalExpenses > 0 ? Math.round((settledExpenses / totalExpenses) * 100) : 0
+    const fastSettlementRate = settledExpenses > 0
+      ? Math.round((Number(settlement.fastSettlements || 0) / settledExpenses) * 100)
+      : 0
 
     return ok(res, {
-      activeMembers30d: active30d.length,
-      activeMembers90d: active90d.length,
+      activeMembers30d: activity.active30dUsers?.length || 0,
+      activeMembers90d: activity.active90dUsers?.length || 0,
       totalMembers: group.members.length,
-      weeklyExpenses,
+      weeklyExpenses: Number(activity.weeklyExpenses || 0),
       settlementRate,
       fastSettlementRate,
       groupName: group.name

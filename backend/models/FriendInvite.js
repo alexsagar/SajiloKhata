@@ -14,6 +14,8 @@ const friendInviteSchema = new mongoose.Schema(
   { timestamps: true },
 )
 
+friendInviteSchema.index({ inviteeEmail: 1, status: 1, expiresAt: 1 })
+
 module.exports = mongoose.model("FriendInvite", friendInviteSchema)
 
 

@@ -17,8 +17,18 @@ const { logAuditEvent } = require("../services/auditService")
 const { appendLedgerEvent } = require("../services/ledgerService")
 const { reconcileConfirmedSettlementsForGroup } = require("../services/settlementApplicationService")
 const { emitServerStateSync } = require("../services/realtimeSyncService")
+const { measure } = require("../utils/perf")
 
 const router = express.Router()
+
+async function execLean(query, select = null) {
+  if (!query) return query
+  const selected = typeof query.select === "function" && select ? query.select(select) : query
+  if (selected && typeof selected.lean === "function") {
+    return selected.lean()
+  }
+  return selected
+}
 
 async function invalidateExpenseCaches({ req, group = null, groupId = null, extraUserIds = [] }) {
   const userIds = new Set([String(req.user._id), ...extraUserIds.map(String)])
@@ -123,8 +133,9 @@ router.get("/", cacheUserResponse({ namespace: "expenses", ttlSeconds: 60 }), as
         "members.user": req.user._id,
         isActive: true,
       })
+      const groupMembership = await execLean(group, "_id")
 
-      if (!group) {
+      if (!groupMembership) {
         return fail(res, "Group not found", 404)
       }
 
@@ -138,10 +149,10 @@ router.get("/", cacheUserResponse({ namespace: "expenses", ttlSeconds: 60 }), as
       const userGroups = await Group.find({
         "members.user": req.user._id,
         isActive: true,
-      }).select('_id')
+      }).select("_id").lean()
 
       query.$or = [
-        { groupId: { $in: userGroups.map(g => g._id) } },
+        { groupId: { $in: userGroups.map((g) => g._id) } },
         { groupId: null, paidBy: req.user._id } // Personal expenses
       ]
     }
@@ -156,17 +167,20 @@ router.get("/", cacheUserResponse({ namespace: "expenses", ttlSeconds: 60 }), as
       if (endDate) query.date.$lte = new Date(endDate)
     }
 
-    const expenses = await Expense.find(query)
-      .select('description amountCents currencyCode category date paidBy groupId splits status createdAt')
-      .populate({ path: 'paidBy', select: 'firstName lastName username avatar' })
-      .populate({ path: 'splits.user', select: 'firstName lastName username' })
-      .populate({ path: 'groupId', select: 'name' })
-      .sort({ date: -1 })
-      .limit(limit)
-      .skip(skip)
-      .lean()
-
-    const total = await Expense.countDocuments(query)
+    const [expenses, total] = await Promise.all([
+      measure("expenses.list.find", () =>
+        Expense.find(query)
+          .select("description amountCents currencyCode category date paidBy groupId splits status createdAt")
+          .populate({ path: "paidBy", select: "firstName lastName username avatar" })
+          .populate({ path: "splits.user", select: "firstName lastName username" })
+          .populate({ path: "groupId", select: "name" })
+          .sort({ date: -1 })
+          .limit(limit)
+          .skip(skip)
+          .lean(),
+      ),
+      Expense.countDocuments(query),
+    ])
 
     return ok(res, {
       expenses,
@@ -196,29 +210,31 @@ router.get("/group/:groupId", cacheUserResponse({ namespace: "expenses", ttlSeco
     const statusFilter = requestedStatuses.length > 0 ? { $in: requestedStatuses } : { $in: ["active", "settled"] }
 
     // Verify user is member of group
-    const group = await Group.findOne({
+    const groupQuery = Group.findOne({
       _id: groupId,
       "members.user": req.user._id,
       isActive: true,
     })
+    const group = await execLean(groupQuery, "_id")
 
     if (!group) {
       return fail(res, "Group not found", 404)
     }
 
-    const expenses = await Expense.find({
-      groupId,
-      status: statusFilter,
-    })
-      .select('description amountCents currencyCode category date paidBy splits status createdAt')
-      .populate({ path: 'paidBy', select: 'firstName lastName username avatar' })
-      .populate({ path: 'splits.user', select: 'firstName lastName username' })
-      .sort({ date: -1 })
-      .limit(limit)
-      .skip(skip)
-      .lean()
-
-    const total = await Expense.countDocuments({ groupId, status: statusFilter })
+    const expenseQuery = { groupId, status: statusFilter }
+    const [expenses, total] = await Promise.all([
+      measure("expenses.group.find", () =>
+        Expense.find(expenseQuery)
+          .select("description amountCents currencyCode category date paidBy splits status createdAt")
+          .populate({ path: "paidBy", select: "firstName lastName username avatar" })
+          .populate({ path: "splits.user", select: "firstName lastName username" })
+          .sort({ date: -1 })
+          .limit(limit)
+          .skip(skip)
+          .lean(),
+      ),
+      Expense.countDocuments(expenseQuery),
+    ])
 
     return ok(res, {
       expenses,

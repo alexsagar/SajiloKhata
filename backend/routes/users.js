@@ -14,6 +14,7 @@ const multer = require("multer")
 const path = require("path")
 const fs = require("fs")
 const { sendEmail } = require("../services/emailService")
+const { measure } = require("../utils/perf")
 
 const router = express.Router()
 const EMAIL_OTP_LENGTH = 6
@@ -63,20 +64,22 @@ router.get("/profile", async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
       .select("-password -refreshTokens")
+      .lean()
 
     if (!user) {
       return res.status(404).json({ message: "User not found" })
     }
 
     // Get user statistics
-    const groups = await Group.countDocuments({ "members.user": req.user._id })
-    const expenses = await Expense.countDocuments({
-      $or: [{ paidBy: req.user._id }, { "splits.user": req.user._id }],
-    })
-
-    const totalSpent = await Expense.aggregate([
-      { $match: { paidBy: req.user._id } },
-      { $group: { _id: null, total: { $sum: "$amountCents" } } },
+    const [groups, expenses, totalSpent] = await Promise.all([
+      Group.countDocuments({ "members.user": req.user._id }),
+      Expense.countDocuments({
+        $or: [{ paidBy: req.user._id }, { "splits.user": req.user._id }],
+      }),
+      Expense.aggregate([
+        { $match: { paidBy: req.user._id } },
+        { $group: { _id: null, total: { $sum: "$amountCents" } } },
+      ]),
     ])
 
     const userStats = {
@@ -446,12 +449,14 @@ router.put(
 // Get user's groups
 router.get("/groups", async (req, res) => {
   try {
-    const groups = await Group.find({ "members.user": req.user._id })
-      .select('name members createdBy updatedAt')
-      .populate({ path: "members.user", select: "firstName lastName username avatar email" })
-      .populate({ path: "createdBy", select: "firstName lastName username" })
-      .sort({ updatedAt: -1 })
-      .lean()
+    const groups = await measure("users.groups.find", () =>
+      Group.find({ "members.user": req.user._id })
+        .select("name members createdBy updatedAt")
+        .populate({ path: "members.user", select: "firstName lastName username avatar email" })
+        .populate({ path: "createdBy", select: "firstName lastName username" })
+        .sort({ updatedAt: -1 })
+        .lean(),
+    )
 
     const groupIds = groups.map((g) => g._id)
     const stats = await Expense.aggregate([
@@ -493,22 +498,24 @@ router.get("/groups", async (req, res) => {
 router.get("/expenses/recent", async (req, res) => {
   try {
     const { page, limit, skip } = getPagination(req.query, { defaultLimit: 10, maxLimit: 200 })
-
-    const expenses = await Expense.find({
+    const expenseQuery = {
       $or: [{ paidBy: req.user._id }, { "splits.user": req.user._id }],
-    })
-      .select('description amountCents currency category date paidBy groupId splits status createdAt')
-      .populate({ path: "paidBy", select: "firstName lastName username avatar" })
-      .populate({ path: "groupId", select: "name" })
-      .populate({ path: "splits.user", select: "firstName lastName username" })
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .skip(skip)
-      .lean()
+    }
 
-    const total = await Expense.countDocuments({
-      $or: [{ paidBy: req.user._id }, { "splits.user": req.user._id }],
-    })
+    const [expenses, total] = await Promise.all([
+      measure("users.expensesRecent.find", () =>
+        Expense.find(expenseQuery)
+          .select("description amountCents currency category date paidBy groupId splits status createdAt")
+          .populate({ path: "paidBy", select: "firstName lastName username avatar" })
+          .populate({ path: "groupId", select: "name" })
+          .populate({ path: "splits.user", select: "firstName lastName username" })
+          .sort({ createdAt: -1 })
+          .limit(limit)
+          .skip(skip)
+          .lean(),
+      ),
+      Expense.countDocuments(expenseQuery),
+    ])
 
     res.json({
       expenses,
@@ -585,7 +592,7 @@ router.get("/balance-summary", async (req, res) => {
     const groups = await Group.find({
       "members.user": req.user._id,
       isActive: true,
-    }).select("_id").lean()
+    }).select("_id settlementsReconciledAt").lean()
 
     const groupIds = groups.map((g) => g._id)
     if (groupIds.length === 0) {
@@ -599,7 +606,12 @@ router.get("/balance-summary", async (req, res) => {
       })
     }
 
-    await reconcileConfirmedSettlementsForGroups(groupIds)
+    const legacyGroupIds = groups
+      .filter((group) => !group.settlementsReconciledAt)
+      .map((group) => group._id)
+    if (legacyGroupIds.length > 0) {
+      await reconcileConfirmedSettlementsForGroups(legacyGroupIds)
+    }
 
     const [expenseEdges] = await Promise.all([
       Expense.aggregate([
@@ -702,6 +714,7 @@ router.get("/search", async (req, res) => {
     })
       .select("firstName lastName username avatar email")
       .limit(limit)
+      .lean()
 
     res.json({ users })
   } catch (error) {
@@ -715,49 +728,86 @@ router.get("/balance", async (req, res) => {
   try {
     const userId = req.user._id
 
-    // Get all expenses where user is involved
-    const expenses = await Expense.find({
-      $or: [{ paidBy: userId }, { "splits.user": userId }],
-    }).populate("groupId", "name")
+    const baseMatch = {
+      groupId: { $ne: null },
+      status: { $ne: "deleted" },
+    }
+    const [paidByGroup, shareByGroup] = await Promise.all([
+      Expense.aggregate([
+        {
+          $match: {
+            ...baseMatch,
+            paidBy: userId,
+          },
+        },
+        {
+          $group: {
+            _id: "$groupId",
+            totalPaidCents: { $sum: { $ifNull: ["$amountCents", 0] } },
+          },
+        },
+      ]),
+      Expense.aggregate([
+        {
+          $match: {
+            ...baseMatch,
+            "splits.user": userId,
+          },
+        },
+        { $unwind: "$splits" },
+        {
+          $match: {
+            "splits.user": userId,
+          },
+        },
+        {
+          $group: {
+            _id: "$groupId",
+            totalShareCents: { $sum: { $ifNull: ["$splits.amountCents", 0] } },
+          },
+        },
+      ]),
+    ])
 
-    let totalOwed = 0 // Amount user owes to others
-    let totalOwing = 0 // Amount others owe to user
-    const balanceByGroup = {}
-
-    expenses.forEach((expense) => {
-      const groupId = expense.groupId._id.toString()
-      const groupName = expense.groupId.name
-
-      if (!balanceByGroup[groupId]) {
-        balanceByGroup[groupId] = {
-          groupName,
-          balance: 0,
-          totalPaid: 0,
-          totalShare: 0,
-        }
+    const groupedBalancesMap = new Map()
+    for (const entry of paidByGroup) {
+      groupedBalancesMap.set(String(entry._id), {
+        _id: entry._id,
+        totalPaidCents: Number(entry.totalPaidCents || 0),
+        totalShareCents: 0,
+      })
+    }
+    for (const entry of shareByGroup) {
+      const key = String(entry._id)
+      const current = groupedBalancesMap.get(key) || {
+        _id: entry._id,
+        totalPaidCents: 0,
+        totalShareCents: 0,
       }
+      current.totalShareCents += Number(entry.totalShareCents || 0)
+      groupedBalancesMap.set(key, current)
+    }
+    const groupedBalances = Array.from(groupedBalancesMap.values())
 
-      // Amount user paid
-      if (expense.paidBy.toString() === userId.toString()) {
-        balanceByGroup[groupId].totalPaid += Math.round(Number(expense.amountCents || 0)) / 100
-      }
+    const groupIds = groupedBalances.map((entry) => entry._id)
+    const groups = groupIds.length
+      ? await Group.find({ _id: { $in: groupIds } }).select("name").lean()
+      : []
+    const groupNameById = new Map(groups.map((group) => [String(group._id), group.name]))
 
-      // User's share of the expense
-      const userSplit = expense.splits.find((split) => (split.user || split.userId).toString() === userId.toString())
-      if (userSplit) {
-        balanceByGroup[groupId].totalShare += Math.round(Number(userSplit.amountCents || 0)) / 100
-      }
-
-      // Calculate balance for this group
-      balanceByGroup[groupId].balance = balanceByGroup[groupId].totalPaid - balanceByGroup[groupId].totalShare
-    })
-
-    // Calculate totals
-    Object.values(balanceByGroup).forEach((group) => {
-      if (group.balance > 0) {
-        totalOwing += group.balance // Others owe user
-      } else {
-        totalOwed += Math.abs(group.balance) // User owes others
+    let totalOwed = 0
+    let totalOwing = 0
+    const balanceByGroup = groupedBalances.map((entry) => {
+      const totalPaid = Number(entry.totalPaidCents || 0) / 100
+      const totalShare = Number(entry.totalShareCents || 0) / 100
+      const balance = totalPaid - totalShare
+      if (balance > 0) totalOwing += balance
+      if (balance < 0) totalOwed += Math.abs(balance)
+      return {
+        groupName: groupNameById.get(String(entry._id)) || "Unknown group",
+        balance,
+        totalPaid,
+        totalShare,
       }
     })
 
@@ -767,7 +817,7 @@ router.get("/balance", async (req, res) => {
         totalOwing,
         netBalance: totalOwing - totalOwed,
       },
-      balanceByGroup: Object.values(balanceByGroup),
+      balanceByGroup,
     })
   } catch (error) {
     
@@ -803,14 +853,14 @@ router.delete(
       }
 
       // Check if user has pending settlements
-      const pendingExpenses = await Expense.find({
+      const pendingExpenses = await Expense.exists({
         $or: [
           { paidBy: req.user._id, status: "active" },
           { "splits.user": req.user._id, status: "active" },
         ],
       })
 
-      if (pendingExpenses.length > 0) {
+      if (pendingExpenses) {
         return res.status(400).json({
           message: "Cannot delete account with pending expenses. Please settle all debts first.",
         })
@@ -859,6 +909,7 @@ router.get("/admin/all", requireRole(["admin"]), async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(limit)
       .skip(skip)
+      .lean()
 
     const total = await User.countDocuments(query)
 

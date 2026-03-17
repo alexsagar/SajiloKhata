@@ -112,6 +112,8 @@ receiptSchema.index({ createdAt: -1 })
 receiptSchema.index({ "ocrData.processingStatus": 1 })
 receiptSchema.index({ isLinkedToExpense: 1 })
 receiptSchema.index({ userId: 1, "ocrData.duplicateDetection.fingerprint": 1 })
+receiptSchema.index({ userId: 1, createdAt: -1 })
+receiptSchema.index({ userId: 1, "ocrData.processingStatus": 1, createdAt: -1 })
 
 // Virtual for file URL
 receiptSchema.virtual("fileUrl").get(function () {

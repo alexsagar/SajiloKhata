@@ -57,13 +57,14 @@ router.get("/", async (req, res) => {
     const userId = req.user._id
     const convs = await Conversation.find({ participants: userId })
       .populate('participants', 'firstName lastName username email avatar')
+      .select("type groupId participants lastMessageAt createdAt updatedAt")
       .sort({ lastMessageAt: -1 })
       .lean()
 
     // Batch-fetch unread counts
     const convIds = convs.map(c => c._id)
     const unreadAgg = await Message.aggregate([
-      { $match: { conversationId: { $in: convIds }, readBy: { $ne: userId } } },
+      { $match: { conversationId: { $in: convIds }, sender: { $ne: userId }, readBy: { $ne: userId } } },
       { $group: { _id: "$conversationId", count: { $sum: 1 } } },
     ])
     const unreadMap = Object.fromEntries(unreadAgg.map(u => [u._id.toString(), u.count]))

@@ -1,6 +1,18 @@
 const jwt = require("jsonwebtoken")
 const User = require("../models/User")
 
+async function resolveLeanUser(query) {
+  if (!query) return query
+  const selected = typeof query.select === "function"
+    ? query.select("firstName lastName username email avatar preferences isActive role")
+    : query
+
+  if (selected && typeof selected.lean === "function") {
+    return selected.lean()
+  }
+  return selected
+}
+
 const authenticateToken = async (req, res, next) => {
   try {
     // Prefer cookie-based auth
@@ -11,7 +23,7 @@ const authenticateToken = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET)
-    const user = await User.findById(decoded.userId).select("-password")
+    const user = await resolveLeanUser(User.findById(decoded.userId))
 
     if (!user || !user.isActive) {
       return res.status(401).json({ message: "Invalid token or user not found" })

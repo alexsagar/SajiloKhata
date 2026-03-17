@@ -216,6 +216,13 @@ export function CreateExpenseDialog({
   }
 
   useEffect(() => {
+    if (!open) {
+      setLastAppliedReceiptKey(null)
+      return
+    }
+  }, [open])
+
+  useEffect(() => {
     if (!open || !initialReceiptData) return
     const key = JSON.stringify({
       merchant: initialReceiptData.merchant,

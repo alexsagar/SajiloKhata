@@ -133,7 +133,7 @@ router.delete("/read", async (req, res) => {
 // Get notification preferences
 router.get("/preferences", async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("preferences.notifications")
+    const user = await User.findById(req.user._id).select("preferences.notifications").lean()
 
     const defaultPreferences = {
       email: {
@@ -196,7 +196,9 @@ router.put(
           },
         },
         { new: true },
-      ).select("preferences.notifications")
+      )
+        .select("preferences.notifications")
+        .lean()
 
       res.json({
         message: "Notification preferences updated successfully",

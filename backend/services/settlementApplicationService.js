@@ -1,7 +1,35 @@
 const Expense = require("../models/Expense")
 const Settlement = require("../models/Settlement")
+const Group = require("../models/Group")
 
 async function reconcileConfirmedSettlementsForGroup(groupId) {
+  const group = await Group.findById(groupId).select("_id settlementsReconciledAt").lean()
+  if (!group) return
+
+  const latestConfirmedSettlement = await Settlement.findOne({
+    groupId,
+    status: "CONFIRMED",
+  })
+    .select("confirmedAt createdAt")
+    .sort({ confirmedAt: -1, createdAt: -1 })
+    .lean()
+
+  if (!latestConfirmedSettlement) {
+    if (!group.settlementsReconciledAt) {
+      await Group.updateOne({ _id: groupId }, { $set: { settlementsReconciledAt: new Date() } })
+    }
+    return
+  }
+
+  const latestAppliedAt = latestConfirmedSettlement.confirmedAt || latestConfirmedSettlement.createdAt
+  if (
+    group.settlementsReconciledAt &&
+    latestAppliedAt &&
+    new Date(group.settlementsReconciledAt).getTime() >= new Date(latestAppliedAt).getTime()
+  ) {
+    return
+  }
+
   const settlements = await Settlement.find({
     groupId,
     status: "CONFIRMED",
@@ -76,6 +104,11 @@ async function reconcileConfirmedSettlementsForGroup(groupId) {
         .map((expense) => expense.save()),
     )
   }
+
+  await Group.updateOne(
+    { _id: groupId },
+    { $set: { settlementsReconciledAt: latestAppliedAt || new Date() } },
+  )
 }
 
 async function reconcileConfirmedSettlementsForGroups(groupIds = []) {

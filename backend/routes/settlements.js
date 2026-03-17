@@ -214,6 +214,10 @@ router.patch("/:id/confirm", async (req, res) => {
     settlement.status = "CONFIRMED"
     settlement.confirmedAt = new Date()
     await settlement.save()
+    await Group.updateOne(
+      { _id: settlement.groupId },
+      { $set: { settlementsReconciledAt: settlement.confirmedAt } },
+    )
 
     // Apply this confirmed settlement against active expense splits so UI and balances
     // reflect paid amounts immediately without requiring aggregate-only reconciliation.

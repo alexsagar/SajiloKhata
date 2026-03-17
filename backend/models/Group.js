@@ -72,6 +72,10 @@ const groupSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    settlementsReconciledAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -88,7 +92,6 @@ groupSchema.pre("save", function (next) {
 
 // Hot-path indexes for membership and invite lookups
 groupSchema.index({ "members.user": 1, isActive: 1, updatedAt: -1 })
-groupSchema.index({ inviteCode: 1, isActive: 1 })
 groupSchema.index({ createdBy: 1, isActive: 1, updatedAt: -1 })
 
 module.exports = mongoose.model("Group", groupSchema)

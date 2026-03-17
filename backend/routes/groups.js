@@ -14,6 +14,7 @@ const { logAuditEvent } = require("../services/auditService")
 const { appendLedgerEvent } = require("../services/ledgerService")
 const { reconcileConfirmedSettlementsForGroup } = require("../services/settlementApplicationService")
 const { emitServerStateSync } = require("../services/realtimeSyncService")
+const { measure } = require("../utils/perf")
 
 const router = express.Router()
 
@@ -33,45 +34,58 @@ async function invalidateGroupCaches({ req, group = null, groupId = null, extraU
 }
 
 async function buildGroupNetBalances(groupId) {
-  const [expenseEdges, expenseSummary] = await Promise.all([
+  const [result] = await measure("groups.buildGroupNetBalances", () =>
     Expense.aggregate([
       { $match: { groupId, status: "active" } },
-      { $unwind: "$splits" },
       {
-        $project: {
-          fromUserId: "$splits.user",
-          toUserId: "$paidBy",
-          amountCents: {
-            $cond: [
-              { $eq: ["$splits.settled", true] },
-              0,
-              { $ifNull: ["$splits.amountCents", 0] },
-            ],
-          },
-        },
-      },
-      {
-        $match: {
-          $expr: {
-            $and: [
-              { $gt: ["$amountCents", 0] },
-              { $ne: ["$fromUserId", "$toUserId"] },
-            ],
-          },
-        },
-      },
-      {
-        $group: {
-          _id: { fromUserId: "$fromUserId", toUserId: "$toUserId" },
-          amountCents: { $sum: "$amountCents" },
+        $facet: {
+          expenseEdges: [
+            { $unwind: "$splits" },
+            {
+              $project: {
+                fromUserId: "$splits.user",
+                toUserId: "$paidBy",
+                amountCents: {
+                  $cond: [
+                    { $eq: ["$splits.settled", true] },
+                    0,
+                    { $ifNull: ["$splits.amountCents", 0] },
+                  ],
+                },
+              },
+            },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $gt: ["$amountCents", 0] },
+                    { $ne: ["$fromUserId", "$toUserId"] },
+                  ],
+                },
+              },
+            },
+            {
+              $group: {
+                _id: { fromUserId: "$fromUserId", toUserId: "$toUserId" },
+                amountCents: { $sum: "$amountCents" },
+              },
+            },
+          ],
+          summary: [
+            {
+              $group: {
+                _id: null,
+                totalExpensesCents: { $sum: "$amountCents" },
+                expenseCount: { $sum: 1 },
+              },
+            },
+          ],
         },
       },
     ]),
-    Expense.aggregate([
-      { $match: { groupId, status: "active" } },
-      { $group: { _id: null, totalExpensesCents: { $sum: "$amountCents" }, expenseCount: { $sum: 1 } } },
-    ]),
-  ])
+  )
+  const expenseEdges = result?.expenseEdges || []
+  const expenseSummary = result?.summary || []
 
   const netByUser = new Map()
   const bump = (userId, delta) => {
@@ -92,6 +106,8 @@ async function buildGroupNetBalances(groupId) {
 }
 
 function computeGreedyTransactions(netByUser) {
+  if (!netByUser || netByUser.size < 2) return []
+
   const creditors = []
   const debtors = []
   for (const [userId, netCents] of netByUser.entries()) {
@@ -329,15 +345,17 @@ router.post("/:id/members", async (req, res) => {
 // Get all user's groups
 router.get("/", cacheUserResponse({ namespace: "groups", ttlSeconds: 60 }), async (req, res) => {
   try {
-    const groups = await Group.find({
-      "members.user": req.user._id,
-      isActive: true,
-    })
-      .select('name description members createdBy category createdAt updatedAt isActive')
-      .populate({ path: 'members.user', select: 'firstName lastName username avatar' })
-      .populate({ path: 'createdBy', select: 'firstName lastName username' })
-      .sort({ updatedAt: -1 })
-      .lean()
+    const groups = await measure("groups.list.find", () =>
+      Group.find({
+        "members.user": req.user._id,
+        isActive: true,
+      })
+        .select("name description members createdBy category createdAt updatedAt isActive")
+        .populate({ path: "members.user", select: "firstName lastName username avatar" })
+        .populate({ path: "createdBy", select: "firstName lastName username" })
+        .sort({ updatedAt: -1 })
+        .lean(),
+    )
 
     const groupIds = groups.map((group) => group._id)
     const expenseTotals = groupIds.length > 0
@@ -648,13 +666,18 @@ router.get("/:id/balances", async (req, res) => {
       _id: req.params.id,
       "members.user": req.user._id,
       isActive: true,
-    }).populate("members.user", "firstName lastName username avatar")
+    })
+      .select("name members settlementsReconciledAt")
+      .populate("members.user", "firstName lastName username avatar")
+      .lean()
 
     if (!group) {
       return res.status(404).json({ message: "Group not found" })
     }
 
-    await reconcileConfirmedSettlementsForGroup(group._id)
+    if (!group.settlementsReconciledAt) {
+      await reconcileConfirmedSettlementsForGroup(group._id)
+    }
 
     const { netByUser, totalExpensesCents, expenseCount } = await buildGroupNetBalances(group._id)
     const minimumTransactions = computeGreedyTransactions(netByUser)
@@ -672,14 +695,17 @@ router.get("/:id/balances", async (req, res) => {
       }
     }
 
+    const memberById = new Map(
+      (group.members || []).map((member) => [String(member.user?._id || member.user), member.user]),
+    )
     const transactionsWithUsers = minimumTransactions.map(transaction => {
-      const fromMember = group.members.find(m => m.user._id.toString() === transaction.from)
-      const toMember = group.members.find(m => m.user._id.toString() === transaction.to)
+      const fromMember = memberById.get(String(transaction.from))
+      const toMember = memberById.get(String(transaction.to))
 
       return {
         ...transaction,
-        from: fromMember ? fromMember.user : null,
-        to: toMember ? toMember.user : null
+        from: fromMember || null,
+        to: toMember || null
       }
     })
 

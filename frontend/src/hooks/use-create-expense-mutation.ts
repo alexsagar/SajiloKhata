@@ -2,7 +2,7 @@
 "use client"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { expenseAPI, receiptAPI } from "@/lib/api"
+import { expenseAPI } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
 import { toast } from "@/hooks/use-toast"
 import { CreateExpenseSchema } from "@/lib/validation"
@@ -24,6 +24,7 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
     const queryClient = useQueryClient()
     const { user } = useAuth()
     const { selectedMembers = [], selectedGroup } = options
+    const currentUserId = user?.id || user?._id
 
     return useMutation({
         mutationFn: async (data: CreateExpenseFormData & { receiptFile?: File | null }) => {
@@ -40,8 +41,8 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
             if (data.currencyCode) formData.append('currencyCode', data.currencyCode)
 
             // Add required createdBy field
-            if (user?.id) {
-                formData.append('createdBy', user.id)
+            if (currentUserId) {
+                formData.append('createdBy', currentUserId)
             } else {
                 throw new Error('User not authenticated')
             }
@@ -49,7 +50,7 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
             // Build splits for GROUP expenses
             if (data.groupId) {
                 const amountNumber = typeof data.amount === 'string' ? parseFloat(data.amount) : data.amount
-                const participants = Array.from(new Set([user?.id, ...selectedMembers])).filter(Boolean) as string[]
+                const participants = Array.from(new Set([currentUserId, ...selectedMembers])).filter(Boolean) as string[]
 
                 if (participants.length === 0) {
                     // If no selected members but groupId is set, maybe it's just the user? 
@@ -112,7 +113,7 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
             let optimisticSplits: any[] = []
 
             if (data.groupId) {
-                const participants = Array.from(new Set([user?.id, ...selectedMembers])).filter(Boolean) as string[]
+                const participants = Array.from(new Set([currentUserId, ...selectedMembers])).filter(Boolean) as string[]
                 const splitType = data.splitType || 'equal'
 
                 if (participants.length > 0) {
@@ -120,12 +121,12 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
                         const share = amountNum / participants.length
                         const shareCents = Math.round(share * 100)
                         optimisticSplits = participants.map(pid => {
-                            const memberInfo = (selectedGroup?.members || []).find((m: any) => m.user._id === pid)?.user
+                            const memberInfo = (selectedGroup?.members || []).find((m: any) => (m.user._id || m.user.id) === pid)?.user
                             return {
                                 user: {
                                     _id: pid,
-                                    firstName: memberInfo?.firstName || (pid === user?.id ? user?.firstName : 'Member'),
-                                    lastName: memberInfo?.lastName || (pid === user?.id ? user?.lastName : ''),
+                                    firstName: memberInfo?.firstName || (pid === currentUserId ? user?.firstName : 'Member'),
+                                    lastName: memberInfo?.lastName || (pid === currentUserId ? user?.lastName : ''),
                                     avatar: memberInfo?.avatar || '',
                                 },
                                 amount: share,
@@ -140,7 +141,7 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
                         const share = amountNum / participants.length
                         const shareCents = Math.round(share * 100)
                         optimisticSplits = participants.map(pid => {
-                            const memberInfo = (selectedGroup?.members || []).find((m: any) => m.user._id === pid)?.user
+                            const memberInfo = (selectedGroup?.members || []).find((m: any) => (m.user._id || m.user.id) === pid)?.user
                             return {
                                 user: { _id: pid, firstName: memberInfo?.firstName || '' },
                                 amount: share,
@@ -154,7 +155,7 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
                 // Personal
                 optimisticSplits = [{
                     user: {
-                        _id: user?.id,
+                        _id: currentUserId,
                         firstName: user?.firstName || '',
                         lastName: user?.lastName || '',
                         username: user?.username || '',
@@ -178,7 +179,7 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
                 groupId: data.groupId || null,
                 status: 'active',
                 paidBy: {
-                    _id: user?.id,
+                    _id: currentUserId,
                     firstName: user?.firstName || '',
                     lastName: user?.lastName || '',
                     username: user?.username || '',

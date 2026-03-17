@@ -34,6 +34,7 @@ const { ensureCacheConnection } = require("./services/cacheService")
 const logger = require("./services/logger")
 const { initSentry, sentryErrorHandler, captureException } = require("./services/sentry")
 const { requestContext } = require("./middleware/request-context")
+const { buildRequestPerfSummary } = require("./utils/perf")
 
 const app = express()
 const SLOW_REQUEST_MS = Number(process.env.SLOW_REQUEST_MS || 500)
@@ -121,20 +122,20 @@ app.use((req, res, next) => {
   const start = Date.now()
   res.on("finish", () => {
     const duration = Date.now() - start
+    const perf = buildRequestPerfSummary()
+    const logPayload = {
+      statusCode: res.statusCode,
+      durationMs: duration,
+      perf,
+    }
     if (duration >= SLOW_REQUEST_MS || res.statusCode >= 500) {
       req.log?.warn(
-        {
-          statusCode: res.statusCode,
-          durationMs: duration,
-        },
+        logPayload,
         "slow_or_error_request",
       )
     } else {
       req.log?.info(
-        {
-          statusCode: res.statusCode,
-          durationMs: duration,
-        },
+        logPayload,
         "request_complete",
       )
     }

@@ -62,5 +62,6 @@ const settlementSchema = new mongoose.Schema(
 
 settlementSchema.index({ groupId: 1, status: 1, createdAt: -1 })
 settlementSchema.index({ groupId: 1, fromUserId: 1, toUserId: 1, status: 1 })
+settlementSchema.index({ fromUserId: 1, status: 1, createdAt: 1, reminderSnoozedUntil: 1, groupId: 1 })
 
 module.exports = mongoose.model("Settlement", settlementSchema)

@@ -18,7 +18,6 @@ const expenseSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: 0,
-      index: true,
     },
     // deprecated: kept for backward compatibility/migrations only
     amount: {
@@ -46,7 +45,6 @@ const expenseSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true,
     },
     category: {
       type: String,
@@ -65,7 +63,6 @@ const expenseSchema = new mongoose.Schema(
     date: {
       type: Date,
       default: Date.now,
-      index: true,
     },
     splits: [
       {
@@ -149,7 +146,6 @@ const expenseSchema = new mongoose.Schema(
       type: String,
       enum: ["active", "deleted", "archived", "settled", "disputed"],
       default: "active",
-      index: true,
     },
     // Track when expense was fully settled
     settledAt: {
@@ -174,12 +170,16 @@ const expenseSchema = new mongoose.Schema(
   }
 )
 
-// Indexes for analytics queries
-expenseSchema.index({ groupId: 1, date: -1 })
+// Indexes aligned to real hot query patterns.
 expenseSchema.index({ groupId: 1, status: 1, date: -1 })
 expenseSchema.index({ groupId: 1, status: 1, createdAt: -1 })
+expenseSchema.index({ groupId: 1, status: 1, paidBy: 1, "splits.user": 1, createdAt: 1 })
 expenseSchema.index({ paidBy: 1, date: -1 })
+expenseSchema.index({ paidBy: 1, createdAt: -1 })
+expenseSchema.index({ paidBy: 1, groupId: 1 })
 expenseSchema.index({ "splits.user": 1, date: -1 })
+expenseSchema.index({ "splits.user": 1, createdAt: -1 })
+expenseSchema.index({ "splits.user": 1, groupId: 1 })
 expenseSchema.index({ category: 1, date: -1 })
 expenseSchema.index({ status: 1, date: -1 })
 

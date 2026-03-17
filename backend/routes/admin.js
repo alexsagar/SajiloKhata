@@ -40,7 +40,7 @@ router.get("/users", requireRole(["admin"]), async (req, res) => {
   try {
     const { page, limit, skip } = getPagination(req.query, { defaultLimit: 20, maxLimit: 200 })
 
-    const users = await User.find().select("-password").sort({ createdAt: -1 }).skip(skip).limit(limit)
+    const users = await User.find().select("-password").sort({ createdAt: -1 }).skip(skip).limit(limit).lean()
 
     const total = await User.countDocuments()
 

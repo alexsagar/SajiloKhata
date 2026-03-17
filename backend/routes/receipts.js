@@ -98,14 +98,15 @@ router.get("/", async (req, res) => {
       }
     }
 
-    const receipts = await Receipt.find(query)
-      .populate("expenseId", "description amountCents")
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .skip(skip)
-      .lean()
-
-    const total = await Receipt.countDocuments(query)
+    const [receipts, total] = await Promise.all([
+      Receipt.find(query)
+        .populate("expenseId", "description amountCents")
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .skip(skip)
+        .lean(),
+      Receipt.countDocuments(query),
+    ])
 
     return res.json({
       success: true,
