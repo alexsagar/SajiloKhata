@@ -9,12 +9,22 @@ import { LoadingSpinner } from "@/components/common/loading-spinner"
 import { useAuth } from "@/contexts/auth-context"
 import { toast } from "@/hooks/use-toast"
 
+type FriendInvite = {
+  inviter: {
+    firstName?: string
+    lastName?: string
+  }
+  expiresAt: string
+}
+
 export function InviteAcceptClient({ code }: { code: string }) {
   const { isAuthenticated } = useAuth()
   const router = useRouter()
-  const [invite, setInvite] = useState<any>(null)
+  const [invite, setInvite] = useState<FriendInvite | null>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+
+  const getErrorMessage = (error: unknown) => (error instanceof Error ? error.message : "")
 
   useEffect(() => {
     let mounted = true
@@ -35,8 +45,8 @@ export function InviteAcceptClient({ code }: { code: string }) {
       await friendsAPI.acceptInvite(code)
       toast({ title: "You're now friends!" })
       router.push("/friends")
-    } catch (e: any) {
-      toast({ title: "Failed to accept", description: e?.response?.data?.message || "", variant: "destructive" })
+    } catch (e: unknown) {
+      toast({ title: "Failed to accept", description: getErrorMessage(e), variant: "destructive" })
     } finally {
       setSubmitting(false)
     }
@@ -49,8 +59,8 @@ export function InviteAcceptClient({ code }: { code: string }) {
       await friendsAPI.declineInvite(code)
       toast({ title: "Invite declined" })
       router.push("/dashboard")
-    } catch (e: any) {
-      toast({ title: "Failed to decline", description: e?.response?.data?.message || "", variant: "destructive" })
+    } catch (e: unknown) {
+      toast({ title: "Failed to decline", description: getErrorMessage(e), variant: "destructive" })
     } finally {
       setSubmitting(false)
     }
@@ -81,7 +91,7 @@ export function InviteAcceptClient({ code }: { code: string }) {
     <div className="min-h-[60vh] flex items-center justify-center p-6">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>You're invited</CardTitle>
+          <CardTitle>You&apos;re invited</CardTitle>
           <CardDescription>
             {invite.inviter.firstName} {invite.inviter.lastName} invited you to connect on SajiloKhata.
           </CardDescription>

@@ -15,7 +15,6 @@ import {
   RefreshCw,
   Calculator,
   Clock,
-  Globe,
   AlertCircle
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
@@ -149,7 +148,7 @@ export function CurrencyConverter({
           rate: rate.rate
         })
       }
-    } catch (error) {
+    } catch (_error) {
       toast({
         title: "Conversion failed",
         description: "Unable to fetch exchange rates. Please try again.",
@@ -182,15 +181,16 @@ export function CurrencyConverter({
       }, 500)
       return () => clearTimeout(timeoutId)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [amount, fromCurrency, toCurrency])
 
-  const getCurrencyDisplay = (currencyCode: string) => {
-    const currency = currencies.find(c => c.code === currencyCode)
-    return currency ? `${currency.flag} ${currency.code}` : currencyCode
+  const _getCurrencyDisplay = (currencyCode: string) => {
+    const _currency = currencies.find(c => c.code === currencyCode)
+    return _currency ? `${_currency.flag} ${_currency.code}` : currencyCode
   }
 
   const formatCurrency = (value: number, currencyCode: string) => {
-    const currency = currencies.find(c => c.code === currencyCode)
+    const _currency = currencies.find(c => c.code === currencyCode)
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: currencyCode,

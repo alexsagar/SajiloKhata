@@ -10,8 +10,40 @@ import { notificationAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 import { Loader2 } from "lucide-react"
 
+interface ChannelSettings {
+  expenseAdded: boolean
+  expenseUpdated: boolean
+  paymentReminder: boolean
+  groupInvite: boolean
+  weeklyDigest?: boolean
+}
+
+interface NotificationPreferencesState {
+  email: ChannelSettings
+  push: Omit<ChannelSettings, "weeklyDigest">
+  inApp: Omit<ChannelSettings, "weeklyDigest">
+}
+
+interface PreferencesResponse {
+  data?: {
+    preferences?: {
+      email?: boolean | Partial<ChannelSettings>
+      push?: boolean | Partial<Omit<ChannelSettings, "weeklyDigest">>
+      inApp?: boolean | Partial<Omit<ChannelSettings, "weeklyDigest">>
+    }
+  }
+}
+
+interface ErrorWithMessage {
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
 export function NotificationSettings() {
-  const [settings, setSettings] = useState({
+  const [settings, setSettings] = useState<NotificationPreferencesState>({
     email: {
       expenseAdded: true,
       expenseUpdated: true,
@@ -32,12 +64,12 @@ export function NotificationSettings() {
       groupInvite: true,
     }
   })
-  const { data: preferencesResponse, isLoading } = useQuery({
+  const { data: preferencesResponse } = useQuery({
     queryKey: ["notification-preferences"],
     queryFn: () => notificationAPI.getPreferences(),
   })
 
-  const applyChannelValue = <T extends Record<string, boolean>>(target: T, value: unknown): T => {
+  const applyChannelValue = <T extends object>(target: T, value: unknown): T => {
     if (typeof value === "boolean") {
       const updated: Partial<T> = {}
       for (const key of Object.keys(target) as Array<keyof T>) {
@@ -52,7 +84,7 @@ export function NotificationSettings() {
   }
 
   useEffect(() => {
-    const pref = (preferencesResponse as any)?.data?.preferences
+    const pref = (preferencesResponse as PreferencesResponse | undefined)?.data?.preferences
     if (!pref) return
     setSettings((prev) => ({
       email: applyChannelValue(prev.email, pref.email),
@@ -69,7 +101,7 @@ export function NotificationSettings() {
         description: "Your notification preferences have been saved.",
       })
     },
-    onError: (error: any) => {
+    onError: (error: ErrorWithMessage) => {
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to update settings",
@@ -119,7 +151,7 @@ export function NotificationSettings() {
             <div className="space-y-0.5">
               <Label>Expense Updated</Label>
               <p className="text-sm text-muted-foreground">
-                When an expense you're involved in is modified
+                When an expense you&apos;re involved in is modified
               </p>
             </div>
             <Switch

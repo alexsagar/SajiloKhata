@@ -52,7 +52,7 @@ export function LoginForm() {
     setIsLoading(true)
     try {
       await login(data.email, data.password)
-    } catch (error) {
+    } catch (_error) {
       // Error is handled in the auth context
     } finally {
       setIsLoading(false)

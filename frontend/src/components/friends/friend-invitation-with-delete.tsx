@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { KanbanCard, KanbanCardContent, KanbanCardDescription, KanbanCardHeader, KanbanCardTitle } from "@/components/ui/kanban-card"
+import { KanbanCard, KanbanCardContent, KanbanCardHeader, KanbanCardTitle } from "@/components/ui/kanban-card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -18,12 +18,10 @@ import {
   Send,
   Copy,
   Check,
-  Clock,
   X,
   Users,
   MessageSquare,
   DollarSign,
-  Plus,
   Trash2,
   MoreHorizontal
 } from "lucide-react"
@@ -58,10 +56,40 @@ interface PendingInvitation {
   }
 }
 
+interface FriendApiItem {
+  _id: string
+  firstName?: string
+  lastName?: string
+  email: string
+  avatar?: string
+  joinedAt?: string
+}
+
+interface FriendListResponse {
+  data?: {
+    data?: FriendApiItem[]
+  }
+}
+
+interface PendingInvitesResponse {
+  data?: {
+    data?: PendingInvitation[]
+  }
+}
+
+interface ApiErrorLike {
+  message?: string
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
 /** Map raw API response to Friend[] */
-function mapFriends(res: any): Friend[] {
+function mapFriends(res: FriendListResponse): Friend[] {
   const items = Array.isArray(res.data?.data) ? res.data.data : []
-  return items.map((u: any) => ({
+  return items.map((u) => ({
     id: u._id,
     name: [u.firstName, u.lastName].filter(Boolean).join(" "),
     email: u.email,
@@ -92,9 +120,9 @@ export function FriendInvitationWithDelete() {
     queryFn: () => friendsAPI.myInvites(),
     staleTime: 30_000,
     refetchInterval: 30_000,
-    select: (res) => {
+    select: (res: PendingInvitesResponse) => {
       const items = Array.isArray(res.data?.data) ? res.data.data : []
-      return items as PendingInvitation[]
+      return items
     },
   })
 
@@ -190,8 +218,9 @@ export function FriendInvitationWithDelete() {
         toast({ title: "Some invites failed", description: failed.join(', '), variant: 'destructive' })
       }
 
-    } catch (e: any) {
-      toast({ title: "Failed to send invites", description: e?.message || '', variant: 'destructive' })
+    } catch (e: unknown) {
+      const _error = e as ApiErrorLike
+      toast({ title: "Failed to send invites", description: _error.message || "", variant: "destructive" })
     }
     setSending(false)
   }
@@ -205,7 +234,7 @@ export function FriendInvitationWithDelete() {
         title: "Link copied!",
         description: "Invitation link copied to clipboard.",
       })
-    } catch (error) {
+    } catch (_error) {
       toast({
         title: "Failed to copy",
         description: "Please copy the link manually.",
@@ -221,10 +250,11 @@ export function FriendInvitationWithDelete() {
       // Invalidate both queries to refresh from server
       queryClient.invalidateQueries({ queryKey: ['friends-list'] })
       queryClient.invalidateQueries({ queryKey: ['friend-invites'] })
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e as ApiErrorLike
       toast({
         title: "Failed to accept invite",
-        description: e?.response?.data?.message || e?.message || "",
+        description: error.response?.data?.message || error.message || "",
         variant: "destructive",
       })
     }
@@ -235,10 +265,11 @@ export function FriendInvitationWithDelete() {
       await friendsAPI.declineInvite(code)
       toast({ title: "Invite declined" })
       queryClient.invalidateQueries({ queryKey: ['friend-invites'] })
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e as ApiErrorLike
       toast({
         title: "Failed to decline invite",
-        description: e?.response?.data?.message || e?.message || "",
+        description: error.response?.data?.message || error.message || "",
         variant: "destructive",
       })
     }
@@ -259,10 +290,11 @@ export function FriendInvitationWithDelete() {
         description: `${friendToDelete.name} has been removed from your friends list.`,
       })
       queryClient.invalidateQueries({ queryKey: ['friends-list'] })
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e as ApiErrorLike
       toast({
         title: "Failed to remove friend",
-        description: e?.response?.data?.message || e?.message || "An error occurred while removing the friend.",
+        description: error.response?.data?.message || error.message || "An error occurred while removing the friend.",
         variant: "destructive",
       })
     } finally {
@@ -292,8 +324,9 @@ export function FriendInvitationWithDelete() {
     try {
       await conversationAPI.upsertDM(friendId)
       router.push(`/chat?dm=${friendId}`)
-    } catch (e: any) {
-      toast({ title: "Failed to open chat", description: e?.response?.data?.message || "", variant: "destructive" })
+    } catch (e: unknown) {
+      const error = e as ApiErrorLike
+      toast({ title: "Failed to open chat", description: error.response?.data?.message || "", variant: "destructive" })
     }
   }
 
@@ -565,7 +598,7 @@ export function FriendInvitationWithDelete() {
                 <Mail className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                 <h3 className="text-lg font-medium mb-2">No pending invitations</h3>
                 <p className="text-muted-foreground mb-4">
-                  You don't have any incoming friend invites right now.
+                  You don&apos;t have any incoming friend invites right now.
                 </p>
               </KanbanCardContent>
             </KanbanCard>

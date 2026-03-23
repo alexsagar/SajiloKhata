@@ -11,13 +11,50 @@ import { syncDashboardState, syncGroupState } from "@/lib/server-state"
 
 type CreateExpenseFormData = z.infer<typeof CreateExpenseSchema>
 
+type SelectedGroupMemberUser = {
+    _id?: string
+    id?: string
+    firstName?: string
+    lastName?: string
+    avatar?: string
+}
+
 interface UseCreateExpenseMutationOptions {
-    onSuccess?: (data: any) => void
-    onError?: (error: any) => void
+    onSuccess?: (data: unknown) => void
+    onError?: (error: unknown) => void
     onSettled?: () => void
     // Context for split calculation
     selectedMembers?: string[]
-    selectedGroup?: any
+    selectedGroup?: {
+        members?: Array<{
+            user?: SelectedGroupMemberUser | string
+        }>
+    } | null
+}
+
+type ExpenseListPayload = {
+    expenses?: ExpenseLike[]
+}
+
+type ExpenseLike = {
+    _id: string
+    [key: string]: unknown
+}
+
+type ExpenseQueryCache = {
+    data?: {
+        data?: ExpenseListPayload
+        expenses?: ExpenseLike[]
+    } | ExpenseListPayload
+}
+
+type MutationContext = {
+    previousExpenses: unknown
+    previousRecent: unknown
+    previousSummary: unknown
+    previousGroupExpenses: unknown
+    tempId: string
+    groupId?: string
 }
 
 export function useCreateExpenseMutation(options: UseCreateExpenseMutationOptions = {}) {
@@ -110,7 +147,7 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
             const amountCents = Math.round(amountNum * 100)
 
             // Calculate splits optimistically
-            let optimisticSplits: any[] = []
+            let optimisticSplits: Array<Record<string, unknown>> = []
 
             if (data.groupId) {
                 const participants = Array.from(new Set([currentUserId, ...selectedMembers])).filter(Boolean) as string[]
@@ -121,7 +158,8 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
                         const share = amountNum / participants.length
                         const shareCents = Math.round(share * 100)
                         optimisticSplits = participants.map(pid => {
-                            const memberInfo = (selectedGroup?.members || []).find((m: any) => (m.user._id || m.user.id) === pid)?.user
+                            const mUser = (selectedGroup?.members || []).find((m) => (typeof m.user === 'object' && m.user ? (m.user._id || m.user.id) : m.user) === pid)?.user
+                            const memberInfo = typeof mUser === 'object' ? mUser : undefined
                             return {
                                 user: {
                                     _id: pid,
@@ -141,7 +179,8 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
                         const share = amountNum / participants.length
                         const shareCents = Math.round(share * 100)
                         optimisticSplits = participants.map(pid => {
-                            const memberInfo = (selectedGroup?.members || []).find((m: any) => (m.user._id || m.user.id) === pid)?.user
+                            const mUser = (selectedGroup?.members || []).find((m) => (typeof m.user === 'object' && m.user ? (m.user._id || m.user.id) : m.user) === pid)?.user
+                            const memberInfo = typeof mUser === 'object' ? mUser : undefined
                             return {
                                 user: { _id: pid, firstName: memberInfo?.firstName || '' },
                                 amount: share,
@@ -190,9 +229,10 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
             }
 
             // 4. Inject into caches
-            const updateListCache = (old: any, limit?: number) => {
+            const updateListCache = (old: ExpenseQueryCache | undefined, limit?: number) => {
                 if (!old?.data) return old
-                const payload = old.data?.data || old.data
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const payload = ('data' in (old.data || {}) ? (old.data as any).data : old.data) as any
                 const list = Array.isArray(payload) ? payload : (payload?.expenses || [])
 
                 if (Array.isArray(list)) {
@@ -204,7 +244,7 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
                         data: {
                             ...old.data,
                             data: {
-                                ...(old.data?.data || old.data),
+                                ...(payload || {}),
                                 expenses: slicedList
                             },
                             expenses: slicedList // Polyfill
@@ -214,18 +254,18 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
                 return old
             }
 
-            queryClient.setQueryData(["expenses"], (old: any) => updateListCache(old))
-            queryClient.setQueryData(["recent-expenses"], (old: any) => updateListCache(old, 8))
-            queryClient.setQueryData(["expense-summary"], (old: any) => updateListCache(old))
+            queryClient.setQueryData(["expenses"], (old: ExpenseQueryCache | undefined) => updateListCache(old))
+            queryClient.setQueryData(["recent-expenses"], (old: ExpenseQueryCache | undefined) => updateListCache(old, 8))
+            queryClient.setQueryData(["expense-summary"], (old: ExpenseQueryCache | undefined) => updateListCache(old))
 
             if (data.groupId) {
-                queryClient.setQueryData(["group-expenses", data.groupId], (old: any) => updateListCache(old))
+                queryClient.setQueryData(["group-expenses", data.groupId], (old: ExpenseQueryCache | undefined) => updateListCache(old))
             }
 
             return { previousExpenses, previousRecent, previousSummary, previousGroupExpenses, tempId, groupId: data.groupId }
         },
 
-        onError: (error: any, _variables, context) => {
+        onError: (error: unknown, _variables, context?: MutationContext) => {
             if (context?.previousExpenses) queryClient.setQueryData(["expenses"], context.previousExpenses)
             if (context?.previousRecent) queryClient.setQueryData(["recent-expenses"], context.previousRecent)
             if (context?.previousSummary) queryClient.setQueryData(["expense-summary"], context.previousSummary)
@@ -233,7 +273,7 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
                 queryClient.setQueryData(["group-expenses", context.groupId], context.previousGroupExpenses)
             }
 
-            const message = error?.response?.data?.message || error?.message || 'Failed to create expense'
+            const message = error instanceof Error ? error.message : 'Failed to create expense'
             toast({
                 variant: "destructive",
                 title: "Expense creation failed",
@@ -242,20 +282,21 @@ export function useCreateExpenseMutation(options: UseCreateExpenseMutationOption
             options.onError?.(error)
         },
 
-        onSuccess: async (response, variables, context) => {
+        onSuccess: async (response, variables, context?: MutationContext) => {
             const created = response?.data?.data || response?.data
             const tempId = context?.tempId
 
             // Helper to replace tempId
-            const replaceInList = (list: any[]) => list.map(e => e._id === tempId ? created : e)
-            const updateListCache = (old: any) => {
+            const replaceInList = (list: ExpenseLike[]) => list.map(e => e._id === tempId ? created : e)
+            const updateListCache = (old: ExpenseQueryCache | undefined) => {
                 if (!old?.data) return old
-                const payload = old.data?.data || old.data
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const payload = ('data' in (old.data || {}) ? (old.data as any).data : old.data) as any
                 const list = Array.isArray(payload) ? payload : (payload?.expenses || [])
 
                 if (Array.isArray(list)) {
                     const updated = replaceInList(list)
-                    return { ...old, data: { ...old.data, data: { ...(old.data?.data || old.data), expenses: updated }, expenses: updated } }
+                    return { ...old, data: { ...old.data, data: { ...(payload || {}), expenses: updated }, expenses: updated } }
                 }
                 return old
             }

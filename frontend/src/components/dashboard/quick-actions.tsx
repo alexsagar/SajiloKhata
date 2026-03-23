@@ -21,6 +21,24 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { NormalizedReceiptData } from "@/lib/receipt-normalizer"
 
+interface QuickActionGroup {
+  _id: string
+  name: string
+}
+
+interface QueryData<T> {
+  data?: T | QueryData<T>
+}
+
+function unwrapQueryData<T>(value: QueryData<T> | undefined): T | undefined {
+  if (!value) return undefined
+  const candidate = value.data
+  if (candidate && typeof candidate === "object" && "data" in candidate) {
+    return (candidate as QueryData<T>).data as T | undefined
+  }
+  return candidate as T | undefined
+}
+
 export function QuickActions() {
   const [showPersonalExpense, setShowPersonalExpense] = useState(false)
   const [showGroupExpense, setShowGroupExpense] = useState(false)
@@ -34,7 +52,7 @@ export function QuickActions() {
     queryKey: ["user-groups"],
     queryFn: () => groupAPI.getGroups(),
   })
-  const groups = ((groupsResp as any)?.data?.data || (groupsResp as any)?.data || []) as Array<{ _id: string; name: string }>
+  const groups = unwrapQueryData<QuickActionGroup[]>(groupsResp?.data as QueryData<QuickActionGroup[]> | undefined) || []
 
   const resetReceiptPrefillFlow = () => {
     setShowReceiptTarget(false)
@@ -94,7 +112,7 @@ export function QuickActions() {
             <div className="flex items-start gap-2">
               <span className="text-amber-400">💡</span>
               <p className="text-sm text-slate-300">
-                <strong className="text-slate-100">Tip:</strong> Personal expenses use your profile currency, while group expenses use the group's currency.
+                <strong className="text-slate-100">Tip:</strong> Personal expenses use your profile currency, while group expenses use the group&apos;s currency.
               </p>
             </div>
           </div>

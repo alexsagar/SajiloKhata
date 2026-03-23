@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -9,14 +9,10 @@ import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { 
   Globe, 
-  TrendingUp, 
-  TrendingDown, 
   RefreshCw,
   Info,
-  Calculator,
   Eye,
-  EyeOff,
-  Settings
+  EyeOff
 } from "lucide-react"
 
 interface Currency {
@@ -26,22 +22,7 @@ interface Currency {
   flag: string
 }
 
-interface ExchangeRate {
-  from: string
-  to: string
-  rate: number
-  lastUpdated: string
-}
 
-interface MultiCurrencyAmount {
-  baseCurrency: string
-  baseAmount: number
-  conversions: {
-    currency: string
-    amount: number
-    rate: number
-  }[]
-}
 
 // Currency data
 const currencies: Currency[] = [
@@ -90,7 +71,7 @@ export function MultiCurrencyDisplay({
   displayCurrencies = ['USD', 'EUR', 'GBP', 'JPY'],
   showRates = true,
   compact = false,
-  onCurrencyChange,
+  onCurrencyChange: _onCurrencyChange,
   className
 }: MultiCurrencyDisplayProps) {
   const [selectedCurrencies, setSelectedCurrencies] = useState<string[]>(displayCurrencies)
@@ -134,7 +115,7 @@ export function MultiCurrencyDisplay({
         minimumFractionDigits: decimals,
         maximumFractionDigits: decimals
       }).format(amount)
-    } catch (error) {
+    } catch (_error) {
       // Fallback for unsupported currencies
       return `${currency.symbol}${amount.toFixed(decimals)}`
     }
@@ -416,7 +397,7 @@ export function InlineCurrencyDisplay({
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
       }).format(amount)
-    } catch (error) {
+    } catch (_error) {
       return `${currency.symbol}${amount.toFixed(2)}`
     }
   }

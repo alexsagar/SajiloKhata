@@ -3,17 +3,34 @@
 import { useMemo } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import { formatCurrencyWithSymbol } from "@/lib/currency"
-import { CreditCard, Users, TrendingUp, TrendingDown } from "lucide-react"
+import { CreditCard, Users } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { useExpensesQuery } from "@/hooks/use-expenses-query"
 
-function getCurrentUserShareCents(expense: any, currentUserId: string) {
+interface ExpenseSplit {
+  user?: { _id?: string } | string
+  amountCents?: number
+  amount?: number
+}
+
+interface ExpenseChartItem {
+  groupId?: string | null
+  amountCents?: number
+  category?: string
+  splits?: ExpenseSplit[]
+}
+
+interface ExpensesPayload {
+  expenses?: ExpenseChartItem[]
+}
+
+function getCurrentUserShareCents(expense: ExpenseChartItem, currentUserId: string) {
   if (!expense?.groupId) {
     return Number(expense?.amountCents || 0)
   }
 
   const mySplit = (expense?.splits || []).find(
-    (split: any) => String(split?.user?._id || split?.user) === currentUserId,
+    (split) => String((typeof split?.user === "string" ? split.user : split?.user?._id) || split?.user) === currentUserId,
   )
 
   if (!mySplit) return 0
@@ -23,30 +40,31 @@ function getCurrentUserShareCents(expense: any, currentUserId: string) {
 export function ExpenseChart() {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || 'USD'
-  const currentUserId = String((user as any)?._id || (user as any)?.id || "")
+  const currentUserId = String(user?._id || user?.id || "")
 
   const { data: expenseData, isLoading } = useExpensesQuery({ limit: 100 })
 
-  const expenses = expenseData?.data?.expenses || expenseData?.expenses || []
+  const payload = (expenseData?.data as ExpensesPayload | undefined) || (expenseData as ExpensesPayload | undefined)
+  const expenses = useMemo(() => payload?.expenses || [], [payload?.expenses])
 
   // Memoize expensive category breakdown computation
   const { personalExpenses, groupExpenses, personalTotal, groupTotal, groupUserShareTotal, totalSpent, topPersonalCategories } = useMemo(() => {
-    const personal = expenses.filter((exp: any) => !exp.groupId)
-    const group = expenses.filter((exp: any) => exp.groupId)
-    const pTotal = personal.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
-    const gTotal = group.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
+    const personal = expenses.filter((expense) => !expense.groupId)
+    const group = expenses.filter((expense) => expense.groupId)
+    const pTotal = personal.reduce((sum, expense) => sum + (expense.amountCents || 0), 0)
+    const gTotal = group.reduce((sum, expense) => sum + (expense.amountCents || 0), 0)
     const gUserShareTotal = group.reduce(
-      (sum: number, exp: any) => sum + getCurrentUserShareCents(exp, currentUserId),
+      (sum, expense) => sum + getCurrentUserShareCents(expense, currentUserId),
       0,
     )
     const userShareTotal = expenses.reduce(
-      (sum: number, exp: any) => sum + getCurrentUserShareCents(exp, currentUserId),
+      (sum, expense) => sum + getCurrentUserShareCents(expense, currentUserId),
       0,
     )
 
-    const categoryBreakdown = personal.reduce((acc: any, exp: any) => {
-      const category = exp.category || 'other'
-      acc[category] = (acc[category] || 0) + (exp.amountCents || 0)
+    const categoryBreakdown = personal.reduce<Record<string, number>>((acc, expense) => {
+      const category = expense.category || 'other'
+      acc[category] = (acc[category] || 0) + (expense.amountCents || 0)
       return acc
     }, {})
 

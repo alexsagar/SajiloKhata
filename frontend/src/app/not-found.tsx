@@ -8,7 +8,7 @@ export default function NotFound() {
       <div className="text-center space-y-4">
         <FileQuestion className="h-16 w-16 text-muted-foreground mx-auto" />
         <h2 className="text-2xl font-bold">Page Not Found</h2>
-        <p className="text-muted-foreground max-w-md">The page you're looking for doesn't exist or has been moved.</p>
+        <p className="text-muted-foreground max-w-md">The page you&apos;re looking for doesn&apos;t exist or has been moved.</p>
         <Button asChild>
           <Link href="/">Return Home</Link>
         </Button>

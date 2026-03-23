@@ -3,6 +3,10 @@ import { validateEmail } from "@/lib/validation";
 import { notify } from "@/lib/notification";
 import { resetPassword } from "@/lib/auth";
 
+interface ErrorWithMessage {
+  message?: string;
+}
+
 const PasswordResetForm: React.FC = () => {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -23,8 +27,9 @@ const PasswordResetForm: React.FC = () => {
       await resetPassword(email);
       setSuccess(true);
       notify("Password reset instructions sent to your email.");
-    } catch (err: any) {
-      setError(err?.message || "Failed to send reset instructions.");
+    } catch (err: unknown) {
+      const error = err as ErrorWithMessage;
+      setError(error?.message || "Failed to send reset instructions.");
     } finally {
       setLoading(false);
     }

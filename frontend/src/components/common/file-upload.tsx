@@ -7,6 +7,10 @@ interface FileUploadProps {
   label?: string;
 }
 
+interface ErrorWithMessage {
+  message?: string;
+}
+
 const FileUpload: React.FC<FileUploadProps> = ({ accept, onUpload, label = "Upload File" }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
@@ -18,8 +22,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ accept, onUpload, label = "Uplo
     try {
       await onUpload(file);
       notify("File uploaded successfully.");
-    } catch (err: any) {
-      notify(err?.message || "File upload failed.");
+    } catch (err: unknown) {
+      const error = err as ErrorWithMessage;
+      notify(error?.message || "File upload failed.");
     } finally {
       setLoading(false);
     }

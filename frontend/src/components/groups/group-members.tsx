@@ -19,6 +19,30 @@ interface GroupMembersProps {
   groupId: string
 }
 
+type GroupMember = {
+  user: {
+    _id: string
+    firstName: string
+    lastName: string
+    email?: string
+    avatar?: string
+  }
+  role: "owner" | "admin" | "member"
+  joinedAt: string
+}
+
+type GroupResponse = {
+  members?: GroupMember[]
+}
+
+type ApiErrorLike = {
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
 export function GroupMembers({ groupId }: GroupMembersProps) {
   const [inviteOpen, setInviteOpen] = React.useState(false)
   const queryClient = useQueryClient()
@@ -37,10 +61,11 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
         description: "The member has been removed from the group.",
       })
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
+      const apiError = error as ApiErrorLike
       toast({
         title: "Error",
-        description: error.response?.data?.message || "Failed to remove member",
+        description: error instanceof Error ? error.message : apiError.response?.data?.message || "Failed to remove member",
         variant: "destructive",
       })
     },
@@ -54,7 +79,7 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
     )
   }
 
-  const groupData = group?.data
+  const groupData = group?.data as GroupResponse | undefined
   const members = groupData?.members || []
 
   const getRoleIcon = (role: string) => {
@@ -116,7 +141,7 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
             </div>
           ) : (
             <div className="space-y-4">
-              {members.map((member: any) => (
+              {members.map((member) => (
                 <div key={member.user._id} className="flex items-center justify-between p-4 rounded-lg border">
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
@@ -188,13 +213,13 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
             </div>
             <div>
               <p className="text-2xl font-bold">
-                {members.filter((m: any) => m.role === 'admin').length}
+                {members.filter((m) => m.role === 'admin').length}
               </p>
               <p className="text-sm text-muted-foreground">Admins</p>
             </div>
             <div>
               <p className="text-2xl font-bold">
-                {members.filter((m: any) => 
+                {members.filter((m) => 
                   new Date(m.joinedAt) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
                 ).length}
               </p>

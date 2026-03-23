@@ -10,17 +10,114 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { groupAPI, expenseAPI, settlementAPI } from "@/lib/api"
 import { LoadingSpinner } from "@/components/common/loading-spinner"
-import { formatCurrency as formatCurrencyUtil, getInitials } from "@/lib/utils"
+import { getInitials } from "@/lib/utils"
 import { formatCurrency } from "@/lib/currency"
-import { TrendingUp, TrendingDown, DollarSign, ArrowRight } from "lucide-react"
+import { DollarSign, ArrowRight } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import { useEffect, useState } from "react"
 import { useSocket } from "@/contexts/socket-context"
 import { toast } from "@/hooks/use-toast"
 import { syncGroupState } from "@/lib/server-state"
+import type { User } from "@/types/user"
 
 interface GroupBalanceProps {
   groupId: string
+}
+
+interface ErrorWithMessage {
+  message?: string
+}
+
+interface QueryEnvelope<T> {
+  data?: T | QueryEnvelope<T>
+}
+
+interface BalanceUser {
+  _id?: string
+  id?: string
+  firstName?: string
+  lastName?: string
+  username?: string
+  email?: string
+  avatar?: string
+}
+
+interface BalanceEntry {
+  user?: BalanceUser
+  userId?: string
+  _id?: string
+  amount?: number
+  net?: number
+  netCents?: number
+  youAreOwed?: number
+  youOwe?: number
+}
+
+interface BalanceTransaction {
+  from?: BalanceUser | null
+  to?: BalanceUser | null
+  amount: number
+}
+
+interface GroupBalancesPayload {
+  balances?: BalanceEntry[] | Record<string, BalanceEntry>
+  minimumTransactions?: BalanceTransaction[]
+  totalExpenses?: number
+  memberCount?: number
+}
+
+interface SettlementRecord {
+  _id: string
+  fromUserId?: BalanceUser | string
+  toUserId?: BalanceUser | string
+  amountCents?: number
+  status?: "PENDING" | "CONFIRMED" | string
+  paymentLink?: string
+  paymentProvider?: string
+}
+
+interface GroupSettlementsPayload {
+  settlements?: SettlementRecord[]
+  totals?: {
+    pendingCents?: number
+    confirmedCents?: number
+  }
+}
+
+interface ExpenseSplit {
+  user?: BalanceUser
+  amountCents?: number
+  amount?: number
+  settled?: boolean
+}
+
+interface BalanceExpense {
+  status?: string
+  paidBy?: BalanceUser
+  splits?: ExpenseSplit[]
+  amountCents?: number
+  amount?: number
+}
+
+interface GroupExpensesPayload {
+  expenses?: BalanceExpense[]
+}
+
+interface GroupSocketPayload {
+  groupId?: string
+}
+
+function unwrapQueryEnvelope<T>(value: QueryEnvelope<T> | undefined): T | undefined {
+  if (!value) return undefined
+  const candidate = value.data
+  if (candidate && typeof candidate === "object" && "data" in candidate) {
+    return (candidate as QueryEnvelope<T>).data as T | undefined
+  }
+  return candidate as T | undefined
+}
+
+function toBalanceUser(value?: BalanceUser | string | null): BalanceUser | undefined {
+  return value && typeof value === "object" ? value : undefined
 }
 
 export function GroupBalance({ groupId }: GroupBalanceProps) {
@@ -55,7 +152,7 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
     onSuccess: () => {
       syncGroupState(queryClient, { groupId, includeNotifications: true })
     },
-    onError: (error: any) => {
+    onError: (error: ErrorWithMessage) => {
       toast({
         title: "Could not confirm payment",
         description: error?.message || "Please try again.",
@@ -71,7 +168,7 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
       syncGroupState(queryClient, { groupId, includeNotifications: true })
       toast({ title: "Payment link saved" })
     },
-    onError: (error: any) => {
+    onError: (error: ErrorWithMessage) => {
       toast({
         title: "Could not save payment link",
         description: error?.message || "Please try again.",
@@ -86,7 +183,7 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
       syncGroupState(queryClient, { groupId, includeNotifications: true })
       toast({ title: "Reminder sent" })
     },
-    onError: (error: any) => {
+    onError: (error: ErrorWithMessage) => {
       toast({
         title: "Could not send reminder",
         description: error?.message || "Please try again.",
@@ -95,7 +192,7 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
     },
   })
 
-  const openPaymentLinkDialog = (settlement: any) => {
+  const openPaymentLinkDialog = (settlement: SettlementRecord) => {
     setSelectedSettlementId(settlement._id)
     setPaymentLink(settlement.paymentLink || "")
     setPaymentProvider(settlement.paymentProvider || "")
@@ -104,11 +201,7 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
 
   const savePaymentLink = () => {
     if (!selectedSettlementId) return
-    try {
-      // Basic URL check before API call
-      // eslint-disable-next-line no-new
-      new URL(paymentLink)
-    } catch (_) {
+    if (!URL.canParse(paymentLink)) {
       toast({
         title: "Invalid link",
         description: "Please enter a valid payment URL.",
@@ -147,7 +240,7 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
   useEffect(() => {
     if (!socket) return
 
-    const refetchGroupData = (payload: any) => {
+    const refetchGroupData = (payload: GroupSocketPayload) => {
       if (String(payload?.groupId || "") !== String(groupId)) return
       syncGroupState(queryClient, { groupId, includeNotifications: true })
     }
@@ -178,35 +271,35 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
   }
 
   // Normalize API balances shape (object map or array) and compute fallback from expenses
-  const apiBalance = balance?.data?.data || balance?.data || {}
-  let balancesMap: Record<string, any> = {}
+  const apiBalance = unwrapQueryEnvelope<GroupBalancesPayload>(balance?.data as QueryEnvelope<GroupBalancesPayload> | undefined) || {}
+  const balancesMap: Record<string, BalanceEntry & { amount: number }> = {}
   if (apiBalance?.balances) {
     if (Array.isArray(apiBalance.balances)) {
-      apiBalance.balances.forEach((b: any) => {
-        const uid = b?.user?._id || b?.userId || b?._id || "unknown"
-        const amount = typeof b?.amount === "number"
-          ? b.amount
-          : typeof b?.net === "number"
-            ? b.net
-            : typeof b?.netCents === "number"
-              ? b.netCents / 100
-              : (typeof b?.youAreOwed === "number" || typeof b?.youOwe === "number")
-                ? (Number(b?.youAreOwed || 0) - Number(b?.youOwe || 0))
+      apiBalance.balances.forEach((balanceEntry) => {
+        const uid = balanceEntry?.user?._id || balanceEntry?.userId || balanceEntry?._id || "unknown"
+        const amount = typeof balanceEntry?.amount === "number"
+          ? balanceEntry.amount
+          : typeof balanceEntry?.net === "number"
+            ? balanceEntry.net
+            : typeof balanceEntry?.netCents === "number"
+              ? balanceEntry.netCents / 100
+              : (typeof balanceEntry?.youAreOwed === "number" || typeof balanceEntry?.youOwe === "number")
+                ? (Number(balanceEntry?.youAreOwed || 0) - Number(balanceEntry?.youOwe || 0))
                 : 0
-        balancesMap[uid] = { ...b, amount }
+        balancesMap[uid] = { ...balanceEntry, amount }
       })
     } else {
-      Object.entries(apiBalance.balances as Record<string, any>).forEach(([uid, b]) => {
-        const amount = typeof b?.amount === "number"
-          ? b.amount
-          : typeof b?.net === "number"
-            ? b.net
-            : typeof b?.netCents === "number"
-              ? b.netCents / 100
-              : (typeof b?.youAreOwed === "number" || typeof b?.youOwe === "number")
-                ? (Number(b?.youAreOwed || 0) - Number(b?.youOwe || 0))
+      Object.entries(apiBalance.balances).forEach(([uid, balanceEntry]) => {
+        const amount = typeof balanceEntry?.amount === "number"
+          ? balanceEntry.amount
+          : typeof balanceEntry?.net === "number"
+            ? balanceEntry.net
+            : typeof balanceEntry?.netCents === "number"
+              ? balanceEntry.netCents / 100
+              : (typeof balanceEntry?.youAreOwed === "number" || typeof balanceEntry?.youOwe === "number")
+                ? (Number(balanceEntry?.youAreOwed || 0) - Number(balanceEntry?.youOwe || 0))
                 : 0
-        balancesMap[uid] = { ...b, amount }
+        balancesMap[uid] = { ...balanceEntry, amount }
       })
     }
   }
@@ -215,34 +308,34 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
   // (mirrors backend buildGroupNetBalances: each unsettled split where user != paidBy
   //  creates an edge: split.user owes paidBy the split amount)
   if (Object.keys(balancesMap).length === 0) {
-    const payload = (expensesData?.data && (expensesData?.data as any).data) ? (expensesData?.data as any).data : (expensesData?.data as any)
-    const expensesList: any[] = (payload?.expenses as any[]) || []
+    const payload = unwrapQueryEnvelope<GroupExpensesPayload>(expensesData?.data as QueryEnvelope<GroupExpensesPayload> | undefined)
+    const expensesList = payload?.expenses || []
 
-    const addUser = (user: any) => {
-      const uid = user?._id
+    const addUser = (balanceUser?: BalanceUser) => {
+      const uid = balanceUser?._id
       if (!uid) return
       if (!balancesMap[uid]) {
-        balancesMap[uid] = { user, amount: 0 }
+        balancesMap[uid] = { user: balanceUser, amount: 0 }
       }
     }
 
     expensesList
-      .filter((exp: any) => exp?.status === "active")
-      .forEach((exp: any) => {
-        if (exp?.paidBy) addUser(exp.paidBy)
-        const pid = exp?.paidBy?._id
-          ; (exp?.splits || []).forEach((split: any) => {
+      .filter((expense) => expense?.status === "active")
+      .forEach((expense) => {
+        if (expense?.paidBy) addUser(expense.paidBy)
+        const payerId = expense?.paidBy?._id
+        ;(expense?.splits || []).forEach((split) => {
             addUser(split.user)
             const uid = split.user?._id
-            if (!uid || !pid) return
+            if (!uid || !payerId) return
             // Skip self-splits (payer's own share) and settled splits
-            if (uid === pid) return
+            if (uid === payerId) return
             if (split?.settled) return
             const owe = split?.amountCents != null ? split.amountCents / 100 : (split?.amount ?? 0)
             if (owe <= 0) return
             // Edge: split.user owes paidBy this amount
             balancesMap[uid].amount = (balancesMap[uid].amount || 0) - owe
-            balancesMap[pid].amount = (balancesMap[pid].amount || 0) + owe
+            balancesMap[payerId].amount = (balancesMap[payerId].amount || 0) + owe
           })
       })
   }
@@ -250,20 +343,20 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
   const balanceEntries = Object.entries(balancesMap)
   const transactions = apiBalance?.minimumTransactions || []
 
-  const settlementsPayload = (settlementsResp?.data && (settlementsResp?.data as any).data) ? (settlementsResp?.data as any).data : (settlementsResp?.data as any)
-  const settlements: any[] = settlementsPayload?.settlements || []
-  const currentUserId = String((user as any)?._id || (user as any)?.id || "")
+  const settlementsPayload = unwrapQueryEnvelope<GroupSettlementsPayload>(settlementsResp?.data as QueryEnvelope<GroupSettlementsPayload> | undefined)
+  const settlements = settlementsPayload?.settlements || []
+  const currentUserId = String((user as User | null)?._id || user?.id || "")
   const settlementTotals = settlementsPayload?.totals || { pendingCents: 0, confirmedCents: 0 }
   const pendingTotal = (settlementTotals.pendingCents || 0) / 100
   const confirmedTotal = (settlementTotals.confirmedCents || 0) / 100
-  const pendingSettlements = settlements.filter((s: any) => s.status === "PENDING")
-  const confirmedSettlements = settlements.filter((s: any) => s.status === "CONFIRMED")
+  const pendingSettlements = settlements.filter((settlement) => settlement.status === "PENDING")
+  const confirmedSettlements = settlements.filter((settlement) => settlement.status === "CONFIRMED")
   const memberCount = Number(apiBalance?.memberCount || balanceEntries.length || 0)
 
   // Total expenses: prefer API, else compute from expenses
-  const expensesPayload = (expensesData?.data && (expensesData?.data as any).data) ? (expensesData?.data as any).data : (expensesData?.data as any)
-  const expensesListForTotal: any[] = (expensesPayload?.expenses as any[]) || []
-  const computedTotal = expensesListForTotal.reduce((sum, exp) => sum + (exp?.amountCents != null ? exp.amountCents / 100 : (exp?.amount ?? 0)), 0)
+  const expensesPayload = unwrapQueryEnvelope<GroupExpensesPayload>(expensesData?.data as QueryEnvelope<GroupExpensesPayload> | undefined)
+  const expensesListForTotal = expensesPayload?.expenses || []
+  const computedTotal = expensesListForTotal.reduce((sum, expense) => sum + (expense?.amountCents != null ? expense.amountCents / 100 : (expense?.amount ?? 0)), 0)
   const totalExpenses = apiBalance?.totalExpenses != null ? apiBalance.totalExpenses : computedTotal
 
   return (
@@ -312,7 +405,7 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
             </div>
           ) : (
             <div className="space-y-3">
-              {balanceEntries.map(([userId, balance]: [string, any]) => (
+              {balanceEntries.map(([userId, balance]) => (
                 <div key={userId} className="flex items-center justify-between p-3 rounded-lg border">
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
@@ -367,7 +460,7 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
             </div>
           ) : (
             <div className="space-y-3">
-              {transactions.map((transaction: any, index: number) => (
+              {transactions.map((transaction, index) => (
                 <div key={index} className="flex items-center justify-between p-3 rounded-lg border bg-muted/50">
                   <div className="flex items-center gap-3">
                     <Avatar className="h-8 w-8">
@@ -425,17 +518,17 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
 
           {pendingSettlements.length === 0 ? (
             <div className="text-center py-6 text-muted-foreground">
-              No stored settlement plan yet. Click "Settle Up" to generate one.
+              No stored settlement plan yet. Click &quot;Settle Up&quot; to generate one.
             </div>
           ) : (
             <div className="space-y-3">
-              {pendingSettlements.map((s: any) => {
-                const fromUser = s.fromUserId
-                const toUser = s.toUserId
+              {pendingSettlements.map((s) => {
+                const fromUser = toBalanceUser(s.fromUserId)
+                const toUser = toBalanceUser(s.toUserId)
                 const amount = (s.amountCents || 0) / 100
                 const isPending = s.status === "PENDING"
-                const isPayer = String(fromUser?._id || fromUser) === currentUserId
-                const isCreditor = String(toUser?._id || toUser) === currentUserId
+                const isPayer = String(fromUser?._id || s.fromUserId || "") === currentUserId
+                const isCreditor = String(toUser?._id || s.toUserId || "") === currentUserId
 
                 return (
                   <div key={s._id} className="flex items-center justify-between p-3 rounded-lg border bg-muted/50">
@@ -524,9 +617,9 @@ export function GroupBalance({ groupId }: GroupBalanceProps) {
           ) : (
             <ScrollArea className="max-h-96 pr-3">
               <div className="space-y-3">
-                {confirmedSettlements.map((s: any) => {
-                  const fromUser = s.fromUserId
-                  const toUser = s.toUserId
+                {confirmedSettlements.map((s) => {
+                  const fromUser = toBalanceUser(s.fromUserId)
+                  const toUser = toBalanceUser(s.toUserId)
                   const amount = (s.amountCents || 0) / 100
 
                   return (

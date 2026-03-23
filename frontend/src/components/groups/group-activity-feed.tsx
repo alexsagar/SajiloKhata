@@ -11,14 +11,40 @@ interface GroupActivityFeedProps {
   groupId: string
 }
 
+interface GroupActivityActor {
+  firstName?: string
+  lastName?: string
+  avatar?: string
+}
+
+interface GroupActivityItem {
+  id: string
+  message: string
+  createdAt: string
+  actor?: GroupActivityActor
+}
+
+interface GroupActivityPayload {
+  activities?: GroupActivityItem[]
+}
+
+function unwrapGroupActivityPayload(
+  value: { data?: GroupActivityPayload } | GroupActivityPayload | undefined,
+): GroupActivityPayload | undefined {
+  if (!value) return undefined
+  if ("data" in value) return value.data
+  return value as GroupActivityPayload
+}
+
 export function GroupActivityFeed({ groupId }: GroupActivityFeedProps) {
   const { data, isLoading } = useQuery({
     queryKey: ["group-activity", groupId],
     queryFn: () => groupAPI.getActivity(groupId, { page: 1, limit: 15 }),
   })
 
-  const payload = (data?.data as any)?.data || (data?.data as any) || {}
-  const activities = Array.isArray(payload.activities) ? payload.activities : []
+  const rawPayload = data?.data as { data?: GroupActivityPayload } | GroupActivityPayload | undefined
+  const payload = unwrapGroupActivityPayload(rawPayload)
+  const activities = Array.isArray(payload?.activities) ? payload.activities : []
 
   return (
     <Card>
@@ -33,9 +59,8 @@ export function GroupActivityFeed({ groupId }: GroupActivityFeedProps) {
         ) : (
           <ScrollArea className="h-96 pr-3">
             <div className="space-y-3">
-              {activities.map((activity: any) => {
+              {activities.map((activity) => {
                 const actor = activity?.actor
-                const actorName = actor?.firstName ? `${actor.firstName} ${actor.lastName || ""}`.trim() : "Someone"
                 return (
                   <div key={activity.id} className="flex items-start gap-3 rounded-md border p-3">
                     <Avatar className="h-8 w-8">

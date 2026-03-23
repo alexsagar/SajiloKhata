@@ -20,6 +20,13 @@ interface ExpenseFiltersProps {
   }) => void
 }
 
+interface GroupOption {
+  _id: string
+  name: string
+}
+
+
+
 export function ExpenseFilters({ onFiltersChange }: ExpenseFiltersProps) {
   const [filters, setFilters] = useState({
     search: "",
@@ -33,6 +40,13 @@ export function ExpenseFilters({ onFiltersChange }: ExpenseFiltersProps) {
     queryKey: ["user-groups"],
     queryFn: () => groupAPI.getGroups(),
   })
+
+  const groupOptions =
+    (Array.isArray(groups?.data?.data)
+      ? groups.data.data
+      : Array.isArray(groups?.data)
+        ? groups.data
+        : []) as GroupOption[]
 
   const emitNormalizedFilters = (source: typeof filters) => {
     onFiltersChange({
@@ -129,7 +143,7 @@ export function ExpenseFilters({ onFiltersChange }: ExpenseFiltersProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All groups</SelectItem>
-                {(((groups as any)?.data?.data) || (groups as any)?.data || []).map((group: any) => (
+                {groupOptions.map((group) => (
                   <SelectItem key={group._id} value={group._id}>
                     {group.name}
                   </SelectItem>

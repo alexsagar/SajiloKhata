@@ -7,6 +7,10 @@ interface AvatarUploadProps {
   onUpload: (file: File) => Promise<string>;
 }
 
+interface ErrorWithMessage {
+  message?: string;
+}
+
 const AvatarUpload: React.FC<AvatarUploadProps> = ({ initialUrl, onUpload }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | undefined>(initialUrl);
@@ -20,8 +24,9 @@ const AvatarUpload: React.FC<AvatarUploadProps> = ({ initialUrl, onUpload }) => 
       const url = await onUpload(file);
       setPreview(url);
       notify("Avatar updated successfully.");
-    } catch (err: any) {
-      notify(err?.message || "Failed to upload avatar.");
+    } catch (err: unknown) {
+      const error = err as ErrorWithMessage;
+      notify(error?.message || "Failed to upload avatar.");
     } finally {
       setLoading(false);
     }

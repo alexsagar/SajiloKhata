@@ -3,9 +3,32 @@
 import { useMemo } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import { formatCurrencyWithSymbol } from "@/lib/currency"
-import { Users, CreditCard, TrendingUp, Building2 } from "lucide-react"
+import { Users, CreditCard, Building2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { useExpensesQuery } from "@/hooks/use-expenses-query"
+
+interface ExpenseGroupSummary {
+  _id?: string
+  name?: string
+}
+
+interface SummaryExpense {
+  groupId?: string | { name?: string } | null
+  group?: ExpenseGroupSummary
+  amountCents?: number
+}
+
+interface GroupBreakdownEntry {
+  id: string
+  name: string
+  total: number
+  count: number
+  expenses: SummaryExpense[]
+}
+
+interface ExpensePayload {
+  expenses?: SummaryExpense[]
+}
 
 export function GroupSummary() {
   const { user } = useAuth()
@@ -15,25 +38,28 @@ export function GroupSummary() {
 
   // Memoize expensive group breakdown computation
   const { expenses, personalExpenses, groupExpenses, groups } = useMemo(() => {
-    const payload = (expenseData?.data?.data) ? expenseData.data.data : expenseData?.data || expenseData
+    const payload = ((expenseData?.data as { data?: ExpensePayload } | undefined)?.data) ? (expenseData?.data as { data?: ExpensePayload }).data : (expenseData?.data as ExpensePayload | undefined) || (expenseData as ExpensePayload | undefined)
     const allExpenses = payload?.expenses || []
-    const personal = allExpenses.filter((exp: any) => !exp.groupId)
-    const group = allExpenses.filter((exp: any) => exp.groupId)
+    const personal = allExpenses.filter((expense) => !expense.groupId)
+    const group = allExpenses.filter((expense) => expense.groupId)
 
-    const groupBreakdown = group.reduce((acc: any, exp: any) => {
-      const groupId = exp.groupId || exp.group?._id
+    const groupBreakdown = group.reduce<Record<string, GroupBreakdownEntry>>((acc, expense) => {
+      const groupId = typeof expense.groupId === "string" ? expense.groupId : expense.group?._id
+      if (!groupId) {
+        return acc
+      }
       if (!acc[groupId]) {
         acc[groupId] = {
           id: groupId,
-          name: (exp.group && exp.group.name) || (exp.groupId?.name) || 'Unknown Group',
+          name: expense.group?.name || (typeof expense.groupId === "object" ? expense.groupId?.name : undefined) || "Unknown Group",
           total: 0,
           count: 0,
-          expenses: []
+          expenses: [],
         }
       }
-      acc[groupId].total += exp.amountCents || 0
+      acc[groupId].total += expense.amountCents || 0
       acc[groupId].count += 1
-      acc[groupId].expenses.push(exp)
+      acc[groupId].expenses.push(expense)
       return acc
     }, {})
 
@@ -68,10 +94,10 @@ export function GroupSummary() {
               <CreditCard className="h-5 w-5 shrink-0 text-blue-400" />
             </div>
             <div className="min-w-0">
-              <div className="text-sm text-muted-foreground">Personal</div>
-              <div className="text-lg sm:text-xl font-bold text-blue-400 break-all">
-                {formatCurrencyWithSymbol(personalExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0) / 100, userCurrency)}
-              </div>
+                <div className="text-sm text-muted-foreground">Personal</div>
+                <div className="text-lg sm:text-xl font-bold text-blue-400 break-all">
+                {formatCurrencyWithSymbol(personalExpenses.reduce((sum, expense) => sum + (expense.amountCents || 0), 0) / 100, userCurrency)}
+                </div>
               <div className="text-xs text-muted-foreground">
                 {personalExpenses.length} expense{personalExpenses.length !== 1 ? 's' : ''}
               </div>
@@ -85,10 +111,10 @@ export function GroupSummary() {
               <Users className="h-5 w-5 shrink-0 text-green-400" />
             </div>
             <div className="min-w-0">
-              <div className="text-sm text-muted-foreground">Group</div>
-              <div className="text-lg sm:text-xl font-bold text-green-400 break-all">
-                {formatCurrencyWithSymbol(groupExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0) / 100, userCurrency)}
-              </div>
+                <div className="text-sm text-muted-foreground">Group</div>
+                <div className="text-lg sm:text-xl font-bold text-green-400 break-all">
+                {formatCurrencyWithSymbol(groupExpenses.reduce((sum, expense) => sum + (expense.amountCents || 0), 0) / 100, userCurrency)}
+                </div>
               <div className="text-xs text-muted-foreground">
                 {groupExpenses.length} expense{groupExpenses.length !== 1 ? 's' : ''}
               </div>
@@ -119,7 +145,7 @@ export function GroupSummary() {
         <div className="space-y-4">
           <h4 className="text-md font-medium text-white">Group Breakdown</h4>
           <div className="space-y-3">
-            {groups.map((group: any) => (
+            {groups.map((group) => (
               <div key={group.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg border border-white/10 bg-white/5">
                 <div className="flex items-center space-x-3 min-w-0">
                   <div className="p-2 bg-green-500/20 rounded-full">

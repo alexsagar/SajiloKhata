@@ -9,12 +9,9 @@ import { Progress } from "@/components/ui/progress"
 import { 
   Users, 
   DollarSign, 
-  TrendingUp, 
   AlertTriangle, 
   Activity,
   Server,
-  Database,
-  Shield,
   Clock,
   CheckCircle,
   XCircle,
@@ -35,9 +32,29 @@ const systemMetrics = {
   apiCalls: 0
 }
 
-const userGrowthData: any[] = []
-const subscriptionData: any[] = []
-const recentAlerts: any[] = []
+interface UserGrowthPoint {
+  month: string
+  users: number
+  revenue: number
+}
+
+interface SubscriptionPoint {
+  name: string
+  value: number
+  color: string
+}
+
+interface RecentAlert {
+  id: string
+  type: string
+  message: string
+  timestamp: string
+  severity: "high" | "medium" | "low"
+}
+
+const userGrowthData: UserGrowthPoint[] = []
+const subscriptionData: SubscriptionPoint[] = []
+const recentAlerts: RecentAlert[] = []
 
 const systemHealth = [
   { service: 'API Gateway', status: 'healthy', uptime: 99.98, responseTime: 45 },

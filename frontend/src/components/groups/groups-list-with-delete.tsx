@@ -17,11 +17,30 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useToast } from "@/hooks/use-toast"
 import { syncGroupState } from "@/lib/server-state"
 
+interface GroupSummary {
+  _id: string
+  id?: string
+  name: string
+  description?: string
+  isActive?: boolean
+  totalExpenses?: number
+  createdAt?: string
+  members?: Array<unknown>
+}
+
+interface ApiErrorLike {
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
 export function GroupsListWithDelete() {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || "USD"
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [groupToDelete, setGroupToDelete] = useState<any>(null)
+  const [groupToDelete, setGroupToDelete] = useState<GroupSummary | null>(null)
   const { toast } = useToast()
   const queryClient = useQueryClient()
 
@@ -41,7 +60,7 @@ export function GroupsListWithDelete() {
       setGroupToDelete(null)
       setIsDeleteDialogOpen(false)
     },
-    onError: (error: any) => {
+    onError: (error: ApiErrorLike) => {
       toast({
         title: "Failed to delete group",
         description: error.response?.data?.message || "An error occurred while deleting the group.",
@@ -50,7 +69,7 @@ export function GroupsListWithDelete() {
     }
   })
 
-  const handleDeleteGroup = (group: any) => {
+  const handleDeleteGroup = (group: GroupSummary) => {
     setGroupToDelete(group)
     setIsDeleteDialogOpen(true)
   }
@@ -61,6 +80,9 @@ export function GroupsListWithDelete() {
     }
   }
 
+  const deleteGroupTotalExpenses = groupToDelete?.totalExpenses || 0
+  const deleteGroupMemberCount = groupToDelete?.members?.length || 0
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-[400px]">
@@ -69,7 +91,12 @@ export function GroupsListWithDelete() {
     )
   }
 
-  const userGroups = (groups as any)?.data?.data || (groups as any)?.data || []
+  const userGroups =
+    (Array.isArray(groups?.data?.data)
+      ? groups.data.data
+      : Array.isArray(groups?.data)
+        ? groups.data
+        : []) as GroupSummary[]
 
   if (userGroups.length === 0) {
     return (
@@ -84,7 +111,7 @@ export function GroupsListWithDelete() {
   return (
     <>
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {userGroups.map((group: any) => (
+        {userGroups.map((group) => (
           <KanbanCard key={group.id ?? group._id} className="hover:shadow-md transition-shadow">
             <KanbanCardContent className="p-6">
               <div className="flex items-start justify-between mb-4">
@@ -168,7 +195,7 @@ export function GroupsListWithDelete() {
           <DialogHeader className="space-y-2">
             <DialogTitle className="text-lg font-semibold">Delete Group</DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Are you sure you want to delete "{groupToDelete?.name}"?
+              Are you sure you want to delete &quot;{groupToDelete?.name}&quot;?
             </DialogDescription>
           </DialogHeader>
           
@@ -193,18 +220,18 @@ export function GroupsListWithDelete() {
               </div>
             </div>
 
-            {groupToDelete && (groupToDelete.totalExpenses > 0 || (groupToDelete.members?.length || 0) > 1) && (
+            {groupToDelete && (deleteGroupTotalExpenses > 0 || deleteGroupMemberCount > 1) && (
               <div className="p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
                 <div className="flex items-center gap-2 text-yellow-800">
                   <DollarSign className="h-3 w-3" />
                   <span className="font-medium text-sm">Warning</span>
                 </div>
                 <div className="text-xs text-yellow-700 mt-1">
-                  {groupToDelete.totalExpenses > 0 && (
-                    <p>This group has {formatCurrencyWithSymbol(groupToDelete.totalExpenses, userCurrency)} in total expenses.</p>
+                  {deleteGroupTotalExpenses > 0 && (
+                    <p>This group has {formatCurrencyWithSymbol(deleteGroupTotalExpenses, userCurrency)} in total expenses.</p>
                   )}
-                  {(groupToDelete.members?.length || 0) > 1 && (
-                    <p>This group has {groupToDelete.members?.length || 0} members who will lose access.</p>
+                  {deleteGroupMemberCount > 1 && (
+                    <p>This group has {deleteGroupMemberCount} members who will lose access.</p>
                   )}
                   <p className="mt-1">Make sure all balances are settled before deleting.</p>
                 </div>

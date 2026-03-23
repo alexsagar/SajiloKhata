@@ -2,7 +2,6 @@
 
 import React from "react"
 
-import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -12,7 +11,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,8 +20,6 @@ import { Loader2 } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { groupAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
-import { CurrencySelector } from "@/components/currency/currency-selector"
-import { useAuth } from "@/contexts/auth-context"
 import { syncDashboardState } from "@/lib/server-state"
 
 const createGroupSchema = z.object({
@@ -38,16 +34,21 @@ interface CreateGroupDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
+interface ErrorWithMessage {
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
 export function CreateGroupDialog({ open, onOpenChange }: CreateGroupDialogProps) {
   const queryClient = useQueryClient()
-  const { user } = useAuth()
 
   const {
     register,
     handleSubmit,
     reset,
-    watch,
-    setValue,
     formState: { errors },
   } = useForm<CreateGroupFormData>({
     resolver: zodResolver(createGroupSchema),
@@ -72,7 +73,7 @@ export function CreateGroupDialog({ open, onOpenChange }: CreateGroupDialogProps
       onOpenChange(false)
       reset()
     },
-    onError: (error: any) => {
+    onError: (error: ErrorWithMessage) => {
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to create group",

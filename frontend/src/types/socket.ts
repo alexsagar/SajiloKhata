@@ -1,4 +1,4 @@
 export interface SocketEvent {
-  type: string;
-  payload: any;
+  type: string
+  payload: unknown
 }

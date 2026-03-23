@@ -14,6 +14,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { getInitials } from "@/lib/utils"
 import { useGlobalSearch, type SearchResult } from "@/hooks/use-global-search"
 import { formatCurrency } from "@/lib/utils"
+import type { Notification } from "@/types/notification"
 
 interface HeaderProps {
   title: string
@@ -24,6 +25,8 @@ interface HeaderProps {
   onSearch?: (query: string) => void
   onMobileMenuToggle?: () => void
 }
+
+type NotificationItem = Notification & { _id?: string }
 
 export function Header({ 
   title, 
@@ -211,9 +214,10 @@ export function Header({
                       </div>
                     ) : (
                       <div className="space-y-1">
-                        {searchResults.map((result, idx) => (
+                        {searchResults.map((result, idx) => {
+                          return (
                           <div
-                            key={(result as any)?.id || `${result.type}-${result.title}-${idx}`}
+                            key={result.id || `${result.type}-${result.title}-${idx}`}
                             onClick={() => handleSearchResultClick(result)}
                             className="flex items-center space-x-3 p-3 hover:bg-white/5 rounded-lg cursor-pointer transition-colors"
                           >
@@ -253,7 +257,8 @@ export function Header({
                               )}
                             </div>
                           </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     )}
                   </div>
@@ -313,9 +318,9 @@ export function Header({
                   </div>
                 ) : (
                   <div className="space-y-1">
-                    {notifications.slice(0, 10).map((notification, idx) => (
+                    {notifications.slice(0, 10).map((notification: NotificationItem, idx) => (
                       <div
-                        key={(notification as any)?.id || (notification as any)?._id || `${notification.title}-${notification.createdAt}-${idx}`}
+                        key={notification.id || notification._id || `${notification.title}-${notification.createdAt}-${idx}`}
                         className={`p-3 hover:bg-white/5 transition-colors cursor-pointer ${
                           !notification.read ? 'bg-blue-500/10' : ''
                         }`}

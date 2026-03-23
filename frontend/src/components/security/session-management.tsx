@@ -67,6 +67,42 @@ interface SessionManagementProps {
     className?: string
 }
 
+interface SessionApiItem {
+    id?: string
+    _id?: string
+    userAgent?: string
+    deviceType?: Session["deviceType"]
+    deviceName?: string
+    device?: string
+    browser?: string
+    browserVersion?: string
+    os?: string
+    osVersion?: string
+    ip?: string
+    ipAddress?: string
+    location?: Session["location"]
+    lastActive?: string
+    lastActivityAt?: string
+    updatedAt?: string
+    createdAt: string
+    isCurrent?: boolean
+    current?: boolean
+    isTrusted?: boolean
+    trusted?: boolean
+}
+
+interface SessionsResponse {
+    data?: {
+        data?: SessionApiItem[]
+        sessions?: SessionApiItem[]
+    } | SessionApiItem[]
+    sessions?: SessionApiItem[]
+}
+
+interface ApiErrorLike {
+    message?: string
+}
+
 // Device type icons
 const DEVICE_ICONS = {
     desktop: Monitor,
@@ -128,6 +164,14 @@ function formatRelativeTime(dateString: string): string {
     }
 }
 
+function getNormalizedSessionId(session: SessionApiItem, index: number): string {
+    return session.id || session._id || `session-${index}`
+}
+
+function getNormalizedLastActive(session: SessionApiItem): string {
+    return session.lastActive || session.lastActivityAt || session.updatedAt || session.createdAt
+}
+
 export function SessionManagement({ className }: SessionManagementProps) {
     // State
     const [sessions, setSessions] = useState<Session[]>([])
@@ -141,7 +185,7 @@ export function SessionManagement({ className }: SessionManagementProps) {
 
     // Hooks
     const { toast } = useToast()
-    const { user } = useAuth()
+    const { user: _user } = useAuth()
 
     // Computed
     const currentSession = useMemo(() => sessions.find(s => s.isCurrent), [sessions])
@@ -153,15 +197,18 @@ export function SessionManagement({ className }: SessionManagementProps) {
         setIsLoading(true)
         setError(null)
         try {
-            const response = await userAPI.getSessions()
-            const data = response.data?.data || response.data?.sessions || response.data || []
+            const response = await userAPI.getSessions() as SessionsResponse
+            const payload = response.data
+            const data = Array.isArray(payload)
+                ? payload
+                : payload?.data || payload?.sessions || response.sessions || []
 
             // Normalize session data
-            const normalizedSessions: Session[] = data.map((session: any) => {
+            const normalizedSessions: Session[] = data.map((session, index) => {
                 const parsedUA = session.userAgent ? parseUserAgent(session.userAgent) : null
 
                 return {
-                    id: session.id || session._id,
+                    id: getNormalizedSessionId(session, index),
                     deviceType: session.deviceType || parsedUA?.deviceType || "unknown",
                     deviceName: session.deviceName || session.device || `${parsedUA?.os} ${parsedUA?.browser}`,
                     browser: session.browser || parsedUA?.browser || "Unknown",
@@ -170,7 +217,7 @@ export function SessionManagement({ className }: SessionManagementProps) {
                     osVersion: session.osVersion,
                     ip: session.ip || session.ipAddress || "Unknown",
                     location: session.location,
-                    lastActive: session.lastActive || session.lastActivityAt || session.updatedAt,
+                    lastActive: getNormalizedLastActive(session),
                     createdAt: session.createdAt,
                     isCurrent: session.isCurrent || session.current || false,
                     isTrusted: session.isTrusted || session.trusted,
@@ -185,8 +232,9 @@ export function SessionManagement({ className }: SessionManagementProps) {
             })
 
             setSessions(normalizedSessions)
-        } catch (err: any) {
-            setError(err.message || "Failed to load sessions")
+        } catch (err: unknown) {
+            const error = err as ApiErrorLike
+            setError(error.message || "Failed to load sessions")
             toast({
                 title: "Error",
                 description: "Failed to load your sessions. Please try again.",
@@ -221,10 +269,11 @@ export function SessionManagement({ className }: SessionManagementProps) {
                 title: "Session revoked",
                 description: `The session on ${session.deviceName} has been signed out.`,
             })
-        } catch (err: any) {
+        } catch (err: unknown) {
+            const error = err as ApiErrorLike
             toast({
                 title: "Failed to revoke session",
-                description: err.message || "Please try again",
+                description: error.message || "Please try again",
                 variant: "destructive",
             })
         } finally {
@@ -244,10 +293,11 @@ export function SessionManagement({ className }: SessionManagementProps) {
                 title: "All other sessions revoked",
                 description: "You have been signed out of all other devices.",
             })
-        } catch (err: any) {
+        } catch (err: unknown) {
+            const error = err as ApiErrorLike
             toast({
                 title: "Failed to revoke sessions",
-                description: err.message || "Please try again",
+                description: error.message || "Please try again",
                 variant: "destructive",
             })
         } finally {
@@ -429,7 +479,7 @@ export function SessionManagement({ className }: SessionManagementProps) {
                         </div>
                     </div>
                     <CardDescription>
-                        Manage devices where you're currently signed in. Revoke access to any session you don't recognize.
+                        Manage devices where you&apos;re currently signed in. Revoke access to any session you don&apos;t recognize.
                     </CardDescription>
                 </CardHeader>
 
@@ -463,7 +513,7 @@ export function SessionManagement({ className }: SessionManagementProps) {
                                 <CheckCircle2 className="h-10 w-10 text-green-500 mx-auto mb-3" />
                                 <p className="font-medium">No other active sessions</p>
                                 <p className="text-sm text-muted-foreground mt-1">
-                                    You're only signed in on this device.
+                                    You&apos;re only signed in on this device.
                                 </p>
                             </div>
                         </>
@@ -504,7 +554,7 @@ export function SessionManagement({ className }: SessionManagementProps) {
                                 <div>
                                     <p className="font-medium">{sessionToRevoke.deviceName}</p>
                                     <p className="text-sm text-muted-foreground">
-                                        {formatLocation(sessionToRevoke.location)} • Last active{" "}
+                                        {formatLocation(sessionToRevoke.location)} {"\u2022"} Last active{" "}
                                         {formatRelativeTime(sessionToRevoke.lastActive)}
                                     </p>
                                 </div>

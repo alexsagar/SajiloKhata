@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client"
 
 import { useState, useRef, useEffect } from "react"
@@ -190,7 +191,7 @@ export function GroupChat() {
         if (groupIds.length > 0) {
           joinGroups(groupIds)
         }
-      } catch (e) {
+      } catch (_e) {
 
         toast({ title: "Error", description: "Failed to load groups", variant: "destructive" })
       }
@@ -241,12 +242,13 @@ export function GroupChat() {
 
           setSelectedGroup(prev => prev ? { ...prev, messages: formattedMsgs, conversationId: convId } : null)
         }
-      } catch (e) {
+      } catch (_e) {
 
       }
     }
 
     loadMessages()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGroup?.id, currentUserId, joinConversations])
 
   // Socket event listeners
@@ -307,6 +309,7 @@ export function GroupChat() {
       window.removeEventListener('socket:message:new', onMessage)
       socket.off('group_created', handleGroupCreated)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, currentUserId, selectedGroup, selectedGroup?.id, joinGroups, groups])
 
 
@@ -330,7 +333,7 @@ export function GroupChat() {
       const newMsg = toChatMessage(msg, currentUserId, selectedGroup)
       processedMessageIds.current.add(newMsg.id)
       appendMessageToGroup(selectedGroup.conversationId, newMsg)
-    } catch (e) {
+    } catch (_e) {
       setMessage(text)
       toast({ title: "Error", description: "Failed to send message", variant: "destructive" })
     } finally {
@@ -468,7 +471,7 @@ export function GroupChat() {
                     <Search className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                     <h3 className="text-lg font-medium mb-2">No groups found</h3>
                     <p className="text-muted-foreground text-sm">
-                      No groups match your search "{searchTerm}"
+                      No groups match your search &quot;{searchTerm}&quot;
                     </p>
                   </div>
                 )}

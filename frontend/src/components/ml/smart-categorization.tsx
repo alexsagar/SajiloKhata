@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -14,13 +14,10 @@ import {
   Target, 
   CheckCircle,
   AlertCircle,
-  TrendingUp,
   Zap,
-  Settings,
   RefreshCw,
   ThumbsUp,
   ThumbsDown,
-  Eye,
   Edit
 } from "lucide-react"
 
@@ -98,7 +95,7 @@ export function SmartCategorization() {
     setTimeout(() => setIsLearning(false), 1500)
   }
 
-  const predictCategory = async (description: string, merchant: string, amount: number): Promise<CategoryPrediction> => {
+  const predictCategory = async (description: string, merchant: string, _amount: number): Promise<CategoryPrediction> => {
     // Simulate AI prediction
     await new Promise(resolve => setTimeout(resolve, 500))
 

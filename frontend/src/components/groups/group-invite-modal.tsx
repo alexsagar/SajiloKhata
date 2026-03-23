@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
-import { groupAPI } from "@/lib/api"
+import { api, groupAPI } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
 import { useQueryClient } from "@tanstack/react-query"
 import { syncGroupState } from "@/lib/server-state"
@@ -16,10 +16,24 @@ interface Props {
   onOpenChange: (v: boolean) => void
 }
 
+interface FriendOption {
+  _id: string
+  firstName?: string
+  lastName?: string
+}
+
+interface ErrorWithMessage {
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
 export function GroupInviteModal({ groupId, open, onOpenChange }: Props) {
   const { toast } = useToast()
   const queryClient = useQueryClient()
-  const [friends, setFriends] = useState<any[]>([])
+  const [friends, setFriends] = useState<FriendOption[]>([])
   const [query, setQuery] = useState("")
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(false)
@@ -28,7 +42,11 @@ export function GroupInviteModal({ groupId, open, onOpenChange }: Props) {
     if (!open) return
     groupAPI
       .getEligibleFriends(groupId)
-      .then((res: any) => setFriends(res?.data?.data || res?.data || []))
+      .then((res: { data?: { data?: FriendOption[] } | FriendOption[] }) => {
+        const payload = res?.data
+        const nextFriends = Array.isArray(payload) ? payload : payload?.data || []
+        setFriends(nextFriends)
+      })
       .catch(() => setFriends([]))
   }, [open, groupId])
 
@@ -41,19 +59,13 @@ export function GroupInviteModal({ groupId, open, onOpenChange }: Props) {
     if (userIds.length === 0) return
     setLoading(true)
     try {
-      await groupAPI.addMember(groupId, userIds[0] as any) // will override below
-    } catch {}
-    try {
-      await (await import("@/lib/api")).groupAPI.updateGroup // noop to satisfy ts in dynamic import
-    } catch {}
-    try {
-      const { api } = await import("@/lib/api")
       await api.post(`/groups/${groupId}/members`, { userIds })
       syncGroupState(queryClient, { groupId, includeNotifications: true })
       toast({ title: "Members invited", description: `Added ${userIds.length} member(s)` })
       onOpenChange(false)
-    } catch (e: any) {
-      toast({ title: "Failed", description: e?.response?.data?.message || "" , variant: "destructive" })
+    } catch (error: unknown) {
+      const err = error as ErrorWithMessage
+      toast({ title: "Failed", description: err?.response?.data?.message || "", variant: "destructive" })
     } finally {
       setLoading(false)
     }

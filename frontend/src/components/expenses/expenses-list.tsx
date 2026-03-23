@@ -17,6 +17,7 @@ import { EditExpenseDialog } from "./edit-expense-dialog"
 import { useState } from "react"
 import { toast } from "@/hooks/use-toast"
 import { syncGroupState, syncDashboardState } from "@/lib/server-state"
+import type { User } from "@/types/user"
 
 interface ExpensesListProps {
   groupId?: string
@@ -28,10 +29,70 @@ interface ExpensesListProps {
   }
 }
 
+interface ExpenseUserSummary {
+  _id?: string
+  id?: string
+  firstName?: string
+  lastName?: string
+  avatar?: string
+}
+
+interface ExpenseGroupSummary {
+  _id?: string
+  name?: string
+}
+
+interface ExpenseReceiptSummary {
+  id?: string
+  url?: string
+  filename?: string
+}
+
+interface ExpenseSplitSummary {
+  user: ExpenseUserSummary
+  amountCents?: number
+  amount?: number
+  settled?: boolean
+}
+
+interface ExpenseListItem {
+  _id: string
+  groupId?: string | null
+  description: string
+  amountCents?: number
+  amount?: number
+  category?: string
+  date?: string
+  paidBy?: ExpenseUserSummary
+  group?: ExpenseGroupSummary
+  receipt?: ExpenseReceiptSummary
+  notes?: string
+  currencyCode?: string
+  currency?: string
+  splits?: ExpenseSplitSummary[]
+}
+
+interface QueryEnvelope<T> {
+  data?: T | QueryEnvelope<T>
+}
+
+interface ExpensesPayload {
+  expenses?: ExpenseListItem[]
+}
+
+function unwrapQueryEnvelope<T>(value: QueryEnvelope<T> | undefined): T | undefined {
+  if (!value) return undefined
+  const candidate = value.data
+  if (candidate && typeof candidate === "object" && "data" in candidate) {
+    return (candidate as QueryEnvelope<T>).data as T | undefined
+  }
+  return candidate as T | undefined
+}
+
 export function ExpensesList({ groupId, filters }: ExpensesListProps) {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || "USD"
-  const [editingExpense, setEditingExpense] = useState<any>(null)
+  const [editingExpense, setEditingExpense] = useState<ExpenseListItem | null>(null)
   const queryClient = useQueryClient()
 
   const { data: expenses, isLoading } = useQuery({
@@ -76,8 +137,8 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
     )
   }
 
-  const expensesPayload = (expenses?.data && (expenses?.data as any).data) ? (expenses?.data as any).data : (expenses?.data as any)
-  const expensesList = (expensesPayload?.expenses as any[]) || []
+  const expensesPayload = unwrapQueryEnvelope<ExpensesPayload>(expenses?.data as QueryEnvelope<ExpensesPayload> | undefined)
+  const expensesList = expensesPayload?.expenses || []
 
   if (expensesList.length === 0) {
     return (
@@ -90,10 +151,10 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
   }
 
   // Calculate expense summary
-  const personalExpenses = expensesList.filter((exp: any) => !exp.groupId)
-  const groupExpenses = expensesList.filter((exp: any) => exp.groupId)
-  const personalTotal = personalExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
-  const groupTotal = groupExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
+  const personalExpenses = expensesList.filter((expense) => !expense.groupId)
+  const groupExpenses = expensesList.filter((expense) => expense.groupId)
+  const personalTotal = personalExpenses.reduce((sum, expense) => sum + (expense.amountCents || 0), 0)
+  const groupTotal = groupExpenses.reduce((sum, expense) => sum + (expense.amountCents || 0), 0)
 
   const getCategoryColor = (category: string) => {
     const colors = {
@@ -157,8 +218,9 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
       </div>
 
       <div className="space-y-4">
-        {expensesList.map((expense: any) => {
+        {expensesList.map((expense) => {
           const isPersonal = !expense.groupId
+          const categoryLabel = expense.category || "other"
 
           return (
             <KanbanCard key={expense._id} className="hover:-translate-y-0.5 hover:bg-white/[0.06] cursor-pointer">
@@ -187,8 +249,8 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2 mb-1">
                         <h3 className="font-semibold text-base sm:text-lg break-words">{expense.description}</h3>
-                        <Badge className={getCategoryColor(expense.category)}>
-                          {expense.category}
+                        <Badge className={getCategoryColor(categoryLabel)}>
+                          {categoryLabel}
                         </Badge>
                         <Badge variant={isPersonal ? "secondary" : "default"} className="text-xs">
                           {isPersonal ? "Personal" : "Group"}
@@ -220,15 +282,15 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
 
                       {/* Personalized "you owe" / "owes you" context for group expenses */}
                       {!isPersonal && (() => {
-                        const currentUserId = (user as any)?._id || user?.id
+                        const currentUserId = (user as User | null)?._id || user?.id
                         const payerId = expense.paidBy?._id
-                        const mySplit = expense.splits?.find((s: any) => s.user?._id === currentUserId)
+                        const mySplit = expense.splits?.find((split) => split.user?._id === currentUserId)
                         const myShareCents = mySplit?.amountCents ?? (mySplit?.amount != null ? Math.round(mySplit.amount * 100) : 0)
                         const iPaid = payerId === currentUserId
                         const unsettledOtherSharesCents = (expense.splits || [])
-                          .filter((s: any) => !s?.settled && s?.user?._id !== currentUserId)
-                          .reduce((sum: number, s: any) => {
-                            const cents = s?.amountCents ?? (s?.amount != null ? Math.round(s.amount * 100) : 0)
+                          .filter((split) => !split?.settled && split?.user?._id !== currentUserId)
+                          .reduce((sum, split) => {
+                            const cents = split?.amountCents ?? (split?.amount != null ? Math.round(split.amount * 100) : 0)
                             return sum + Math.max(0, cents)
                           }, 0)
 
@@ -285,22 +347,22 @@ export function ExpensesList({ groupId, filters }: ExpensesListProps) {
 
                       {expense.notes && (
                         <p className="text-sm text-muted-foreground mt-2 italic">
-                          "{expense.notes}"
+                          &quot;{expense.notes}&quot;
                         </p>
                       )}
 
                       <div className="mt-3">
                         <div className="text-xs text-muted-foreground mb-1">Split between:</div>
                         <div className="flex flex-wrap gap-2">
-                          {expense.splits?.map((split: any) => (
+                          {expense.splits?.map((split) => (
                             <div key={split.user._id} className={`flex items-center gap-1 text-xs rounded-full px-2 py-1 ring-1 ${split.settled ? "bg-emerald-500/10 ring-emerald-500/30" : "bg-white/5 ring-white/10"}`}>
                               <Avatar className="h-5 w-5">
                                 <AvatarImage src={split.user.avatar || "/placeholder.svg"} />
                                 <AvatarFallback className="text-xs">
-                                  {getInitials(split.user.firstName, split.user.lastName)}
+                                  {getInitials(split.user.firstName || "", split.user.lastName || "")}
                                 </AvatarFallback>
                               </Avatar>
-                              <span>{split.user.firstName}</span>
+                              <span>{split.user.firstName || "Member"}</span>
                               <span className="font-medium">{formatCurrencyWithSymbol(((split.amountCents != null ? split.amountCents : (split.amount != null ? Math.round(split.amount * 100) : 0)) / 100), userCurrency)}</span>
                               {split.settled && (
                                 <span className="inline-flex h-5 items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-300 px-1.5 text-[10px] font-medium leading-none ring-1 ring-emerald-500/30 shrink-0"><CheckCircle2 className="h-3 w-3" />Settled</span>

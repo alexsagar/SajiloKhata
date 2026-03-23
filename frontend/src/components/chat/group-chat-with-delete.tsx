@@ -36,6 +36,12 @@ interface Group {
   messages: GroupMessage[]
 }
 
+interface CreatedGroupData {
+  id: string
+  name: string
+  members: Array<unknown>
+}
+
 // Empty initial data - will be populated from API
 const mockGroups: Group[] = []
 
@@ -102,7 +108,7 @@ export function GroupChatWithDelete() {
     }
   }
 
-  const handleGroupCreated = (newGroupData: any) => {
+  const handleGroupCreated = (newGroupData: CreatedGroupData) => {
     const newGroup: Group = {
       id: newGroupData.id,
       name: newGroupData.name,
@@ -316,7 +322,7 @@ export function GroupChatWithDelete() {
                     <Search className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                     <h3 className="text-lg font-medium mb-2">No groups found</h3>
                     <p className="text-muted-foreground text-sm">
-                      No groups match your search "{searchTerm}"
+                      No groups match your search &quot;{searchTerm}&quot;
                     </p>
                   </div>
                 )}
@@ -512,7 +518,7 @@ export function GroupChatWithDelete() {
           <DialogHeader>
             <DialogTitle>Delete Group</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{groupToDelete?.name}"?
+              Are you sure you want to delete &quot;{groupToDelete?.name}&quot;?
             </DialogDescription>
           </DialogHeader>
           

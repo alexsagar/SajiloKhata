@@ -20,7 +20,7 @@ export function ResponsiveLayout({
   headerContent, 
   className 
 }: ResponsiveLayoutProps) {
-  const [isMobile, setIsMobile] = useState(false)
+  const [, setIsMobile] = useState(false)
 
   useEffect(() => {
     const checkMobile = () => {

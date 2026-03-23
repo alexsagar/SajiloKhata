@@ -2,7 +2,7 @@
 
 import React from "react"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -20,9 +20,8 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Check, Loader2, Upload, X } from "lucide-react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { expenseAPI, groupAPI, receiptAPI } from "@/lib/api"
-import { toast } from "@/hooks/use-toast"
+import { useQuery } from "@tanstack/react-query"
+import { groupAPI, receiptAPI } from "@/lib/api"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { getInitials } from "@/lib/utils"
 import { useDropzone } from "react-dropzone"
@@ -36,6 +35,57 @@ import {
 } from "@/lib/receipt-normalizer"
 
 type CreateExpenseFormData = z.infer<typeof CreateExpenseSchema>
+
+interface GroupMemberUser {
+  _id?: string
+  id?: string
+  firstName?: string
+  lastName?: string
+  avatar?: string
+}
+
+interface GroupMemberOption {
+  user?: GroupMemberUser | string
+}
+
+interface ExpenseGroupOption {
+  _id: string
+  name: string
+  currencyCode?: string
+  members?: GroupMemberOption[]
+}
+
+interface QueryEnvelope<T> {
+  data?: T | QueryEnvelope<T>
+}
+
+interface CreatedExpenseRecord {
+  _id?: string
+  id?: string
+}
+
+interface CreateExpenseResponse {
+  data?: CreatedExpenseRecord | {
+    data?: CreatedExpenseRecord
+  }
+}
+
+function unwrapCreatedExpense(response: CreateExpenseResponse | undefined): CreatedExpenseRecord | undefined {
+  const payload = response?.data
+  if (payload && typeof payload === "object" && "data" in payload) {
+    return payload.data
+  }
+  return payload as CreatedExpenseRecord | undefined
+}
+
+function unwrapQueryEnvelope<T>(value: QueryEnvelope<T> | undefined): T | undefined {
+  if (!value) return undefined
+  const candidate = value.data
+  if (candidate && typeof candidate === "object" && "data" in candidate) {
+    return (candidate as QueryEnvelope<T>).data as T | undefined
+  }
+  return candidate as T | undefined
+}
 
 interface CreateExpenseDialogProps {
   open?: boolean
@@ -54,11 +104,9 @@ export function CreateExpenseDialog({
 }: CreateExpenseDialogProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadedReceiptId, setUploadedReceiptId] = useState<string | null>(null)
-  const [receiptParsed, setReceiptParsed] = useState<any>(null)
+  const [, setReceiptParsed] = useState<NormalizedReceiptData | null>(null)
   const [selectedMembers, setSelectedMembers] = useState<string[]>([])
-  const [showCurrencySelection, setShowCurrencySelection] = useState(false)
   const [lastAppliedReceiptKey, setLastAppliedReceiptKey] = useState<string | null>(null)
-  const queryClient = useQueryClient()
   const { user } = useAuth()
 
   const { data: groups } = useQuery({
@@ -90,8 +138,8 @@ export function CreateExpenseDialog({
 
   const selectedGroupId = watch("groupId")
   const selectedCurrency = watch("currencyCode")
-  const groupsData = (groups as any)?.data?.data || (groups as any)?.data || []
-  const selectedGroup = groupsData.find((g: any) => g._id === selectedGroupId)
+  const groupsData = unwrapQueryEnvelope<ExpenseGroupOption[]>(groups?.data as QueryEnvelope<ExpenseGroupOption[]> | undefined) || []
+  const selectedGroup = groupsData.find((group) => group._id === selectedGroupId)
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: {
@@ -112,7 +160,8 @@ export function CreateExpenseDialog({
     onSuccess: (data) => {
       // Link uploaded receipt if applicable
       try {
-        const created = data?.data?.data || data?.data
+        const response = data as CreateExpenseResponse | undefined
+        const created = unwrapCreatedExpense(response)
         const expenseId = created?._id || created?.id
         if (uploadedReceiptId && expenseId) {
           receiptAPI.linkToExpense(uploadedReceiptId, expenseId)
@@ -125,7 +174,6 @@ export function CreateExpenseDialog({
       setUploadedReceiptId(null)
       setReceiptParsed(null)
       setSelectedMembers([])
-      setShowCurrencySelection(false)
     },
     onError: (error) => {
       console.error("Create expense failed", error)
@@ -146,7 +194,7 @@ export function CreateExpenseDialog({
 
       // Pass receipt file if selected (though receipt scanning is mainly for personal, manual upload might exist)
       createExpense({ ...data, receiptFile: selectedFile })
-    } catch (error) {
+    } catch {
 
     }
   }
@@ -160,30 +208,14 @@ export function CreateExpenseDialog({
     )
   }
 
-  const resolveMemberId = (member: any): string => {
-    const raw = member?.user?._id || member?.user?.id || member?.user
+  const resolveMemberId = (member: GroupMemberOption): string => {
+    const raw = typeof member.user === "string"
+      ? member.user
+      : member.user?._id || member.user?.id
     return raw ? String(raw) : ""
   }
 
-  const handleCurrencySelect = (currency: string) => {
-    try {
-      if (!currency) {
-
-        return
-      }
-      setValue("currencyCode", currency)
-      setShowCurrencySelection(false)
-    } catch (error) {
-
-      toast({
-        title: "Error",
-        description: "Failed to set currency. Please try again.",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const handleReceiptProcessed = (receiptData: NormalizedReceiptData & { receipt?: File | null }) => {
+  const handleReceiptProcessed = useCallback((receiptData: NormalizedReceiptData & { receipt?: File | null }) => {
     const currentDescription = String(getValues("description") || "").trim()
     const currentAmountRaw = Number(getValues("amount") || 0)
     const currentNotes = String(getValues("notes") || "").trim()
@@ -213,7 +245,7 @@ export function CreateExpenseDialog({
       setSelectedFile(receiptData.receipt)
     }
     trigger()
-  }
+  }, [getValues, selectedCurrency, setValue, trigger])
 
   useEffect(() => {
     if (!open) {
@@ -235,7 +267,7 @@ export function CreateExpenseDialog({
     if (key === lastAppliedReceiptKey) return
     handleReceiptProcessed(initialReceiptData)
     setLastAppliedReceiptKey(key)
-  }, [open, initialReceiptData, lastAppliedReceiptKey])
+  }, [handleReceiptProcessed, initialReceiptData, lastAppliedReceiptKey, open])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -337,7 +369,7 @@ export function CreateExpenseDialog({
                   <SelectValue placeholder="Select group" />
                 </SelectTrigger>
                 <SelectContent>
-                  {groupsData.map((group: any) => (
+                  {groupsData.map((group) => (
                     <SelectItem key={group._id} value={group._id}>
                       {group.name}
                     </SelectItem>
@@ -409,13 +441,14 @@ export function CreateExpenseDialog({
             <div className="space-y-2">
               <Label>Select Members to Split With</Label>
               <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto">
-                {selectedGroup.members?.map((member: any) => (
+                {selectedGroup.members?.map((member) => (
                   (() => {
                     const memberId = resolveMemberId(member)
                     const isSelected = selectedMembers.includes(memberId)
-                    const firstName = member?.user?.firstName || ""
-                    const lastName = member?.user?.lastName || ""
-                    const avatar = member?.user?.avatar
+                    const memberUser = typeof member.user === "string" ? undefined : member.user
+                    const firstName = memberUser?.firstName || ""
+                    const lastName = memberUser?.lastName || ""
+                    const avatar = memberUser?.avatar
 
                     return (
                       <button

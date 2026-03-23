@@ -9,22 +9,16 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
+
 import {
   TrendingUp,
-  TrendingDown,
   DollarSign,
   Receipt,
-  Users,
   Clock,
   Download,
   Filter,
-  Calendar,
   Group,
   User,
-  BarChart3,
-  Activity,
-  Target,
   AlertCircle,
   CheckCircle2,
   AlertTriangle,
@@ -70,6 +64,18 @@ interface AnalyticsKpiPayload {
   avgSettlementDays?: number
 }
 
+type FilterValue = AnalyticsFilters[keyof AnalyticsFilters]
+type ApiAnalyticsFilters = Parameters<typeof analyticsAPI.getKPIs>[0]
+type ApiAnalyticsTimeFilter = { range?: string; from?: string; to?: string }
+
+interface LedgerRow {
+  date?: string
+  description?: string
+  _id?: string
+  totalBaseCents?: number
+  amountCents?: number
+}
+
 // Default filters
 const defaultFilters: AnalyticsFilters = {
   mode: 'all',
@@ -95,7 +101,7 @@ export function AnalyticsDashboard() {
   const [showFiltersOnMobile, setShowFiltersOnMobile] = useState(false)
 
   // Responsive state for mobile
-  const [isMobile, setIsMobile] = useState(false)
+  const [, setIsMobile] = useState(false)
   const [viewMode, setViewMode] = useState<'simple' | 'advanced'>(() => {
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('analytics-viewMode') as 'simple' | 'advanced') || 'simple'
@@ -124,9 +130,12 @@ export function AnalyticsDashboard() {
   }, [])
 
   // Build effective filters for API: when ALL_TIME, omit time to fetch across all expenses
-  const effectiveFilters = useMemo(() => {
-    const f: Record<string, unknown> = { ...filters, baseCurrency: userCurrency }
-    const time = f.time as { range?: string; from?: string; to?: string } | undefined
+  const effectiveFilters = useMemo<ApiAnalyticsFilters>(() => {
+    const f: ApiAnalyticsFilters = {
+      ...filters,
+      baseCurrency: userCurrency,
+    }
+    const time = f.time as ApiAnalyticsTimeFilter | undefined
     if (time?.range === 'ALL_TIME') {
       delete time.from
       delete time.to
@@ -293,7 +302,7 @@ export function AnalyticsDashboard() {
 
   // Handle filter changes with debounce to reduce refetches
   const filterTimer = useRef<NodeJS.Timeout | null>(null)
-  const updateFilter = useCallback((key: keyof AnalyticsFilters, value: any) => {
+  const updateFilter = useCallback((key: keyof AnalyticsFilters, value: FilterValue) => {
     if (filterTimer.current) clearTimeout(filterTimer.current)
     filterTimer.current = setTimeout(() => {
       setFilters(prev => ({ ...prev, [key]: value }))
@@ -668,7 +677,6 @@ export function AnalyticsDashboard() {
                   ) : (
                     <SpendingComparisonChart
                       personalData={safeSpendOverTimeData}
-                      categoryData={safeCategoryData}
                       baseCurrency={baseCurrency}
                     />
                   )}
@@ -993,23 +1001,7 @@ interface ChartDataItem {
 
 
 
-interface PartnerDataItem {
-  _id: string
-  totalCents: number
-  totalBaseCents: number
-  count: number
-  name: string
-  avatar?: string
-}
 
-interface GroupDataItem {
-  _id: string
-  totalCents: number
-  totalBaseCents: number
-  count: number
-  name: string
-  memberCount: number
-}
 
 
 
@@ -1017,7 +1009,7 @@ interface GroupDataItem {
 // (Interfaces and Components moved to ./charts.tsx)
 
 
-function SpendingComparisonChart({ personalData, categoryData, baseCurrency }: { personalData: any[]; categoryData: any[]; baseCurrency: string }) {
+function SpendingComparisonChart({ personalData, baseCurrency }: { personalData: ChartDataItem[]; baseCurrency: string }) {
   const personal = Array.isArray(personalData) ? personalData.reduce((s, i) => s + ((i?.personal?.baseCents || 0) / 100), 0) : 0
   const group = Array.isArray(personalData) ? personalData.reduce((s, i) => s + ((i?.group?.baseCents || 0) / 100), 0) : 0
   return (
@@ -1081,7 +1073,7 @@ function AgingBucketsChart({ data, baseCurrency }: { data: Record<string, { coun
   )
 }
 
-function LedgerTable({ data, baseCurrency }: { data: any[]; baseCurrency: string }) {
+function LedgerTable({ data, baseCurrency }: { data: LedgerRow[]; baseCurrency: string }) {
   const rows = Array.isArray(data) ? data.slice(0, 20) : []
   if (rows.length === 0) return <div className="text-sm text-muted-foreground">No ledger data</div>
   return (
@@ -1097,7 +1089,7 @@ function LedgerTable({ data, baseCurrency }: { data: any[]; baseCurrency: string
         <tbody>
           {rows.map((r, idx) => (
             <tr key={idx} className="border-t border-white/10">
-              <td className="p-2">{new Date(r.date).toLocaleDateString()}</td>
+              <td className="p-2">{r.date ? new Date(r.date).toLocaleDateString() : "—"}</td>
               <td className="p-2">{r.description || r._id || '—'}</td>
               <td className="p-2 text-right">{formatCurrency((r.totalBaseCents || r.amountCents || 0) / 100, baseCurrency)}</td>
             </tr>

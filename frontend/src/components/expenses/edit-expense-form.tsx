@@ -8,7 +8,7 @@ interface EditExpenseFormProps {
 }
 
 export function EditExpenseForm({ expenseId }: EditExpenseFormProps) {
-  const [expense, setExpense] = useState(null)
+  const [expense, _setExpense] = useState(null)
   const [open, setOpen] = useState(true)
 
   // This would typically fetch the expense data

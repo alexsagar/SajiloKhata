@@ -12,6 +12,38 @@ import { receiptAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 
 const PAGE_SIZE = 20
+type ReviewReceipt = {
+  _id: string
+  originalName?: string
+  createdAt: string
+  expenseId?: string | { _id?: string }
+  ocrData?: {
+    parsedData?: {
+      merchant?: string
+      total?: string | number
+      currency?: string
+      date?: string
+    }
+    reviewReasons?: string[]
+    confidence?: number
+    duplicateDetection?: {
+      duplicateOf?: string
+      isDuplicate?: boolean
+    }
+  }
+}
+
+type ReviewQueuePayload = {
+  receipts?: ReviewReceipt[]
+  pagination?: {
+    pages?: number
+  }
+}
+
+function getExpenseId(expenseId?: ReviewReceipt["expenseId"]) {
+  if (!expenseId) return undefined
+  return typeof expenseId === "string" ? expenseId : expenseId._id
+}
 
 export default function OCRReviewQueuePage() {
   const [page, setPage] = useState(1)
@@ -36,7 +68,7 @@ export default function OCRReviewQueuePage() {
       queryClient.invalidateQueries({ queryKey: ["receipt-review-queue"] })
       toast({ title: "Marked as reviewed" })
     },
-    onError: (e: any) => {
+    onError: (e: Error) => {
       toast({
         title: "Could not mark reviewed",
         description: e?.message,
@@ -51,7 +83,7 @@ export default function OCRReviewQueuePage() {
       queryClient.invalidateQueries({ queryKey: ["receipt-review-queue"] })
       toast({ title: "Reprocessing queued" })
     },
-    onError: (e: any) => {
+    onError: (e: Error) => {
       toast({
         title: "Could not reprocess receipt",
         description: e?.message,
@@ -60,7 +92,7 @@ export default function OCRReviewQueuePage() {
     },
   })
 
-  const payload = receiptsQuery.data?.data?.data || {}
+  const payload = (receiptsQuery.data?.data?.data || {}) as ReviewQueuePayload
   const receipts = payload.receipts || []
   const pagination = payload.pagination || { pages: 1 }
 
@@ -89,12 +121,12 @@ export default function OCRReviewQueuePage() {
             </CardContent>
           </Card>
         ) : (
-          receipts.map((receipt: any) => {
+          receipts.map((receipt) => {
             const id = String(receipt._id)
             const parsed = receipt?.ocrData?.parsedData || {}
             const reasons: string[] = receipt?.ocrData?.reviewReasons || []
             const duplicateOf = receipt?.ocrData?.duplicateDetection?.duplicateOf
-            const expenseId = receipt?.expenseId?._id || receipt?.expenseId
+            const expenseId = getExpenseId(receipt?.expenseId)
             return (
               <Card key={id}>
                 <CardHeader>

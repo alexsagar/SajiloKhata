@@ -1,9 +1,11 @@
 "use client"
 
 import React from "react"
-import { createContext, useContext, useEffect, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSession, signOut as nextAuthSignOut } from "next-auth/react"
+import type { Session } from "next-auth"
+import type { AxiosError } from "axios"
 import { authAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 import type { User } from "@/types/user"
@@ -15,7 +17,7 @@ interface AuthContextType {
   registerVerifyOtp: (email: string, otp: string) => Promise<void>
   registerResendOtp: (email: string) => Promise<void>
   logout: () => void
-  updateUser: (userData: Partial<User>) => void
+  updateUser: (userData: UserUpdatePatch) => void
   refreshAuth: () => Promise<void>
   loading: boolean
   isAuthenticated: boolean
@@ -31,6 +33,37 @@ interface RegisterData {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
+type AuthError = AxiosError<{ error?: string; message?: string }>
+type OAuthSessionUser = NonNullable<Session["user"]>
+type BackendUser = User & { _id?: string }
+type UserUpdatePatch = Partial<Omit<User, "preferences">> & {
+  preferences?: Partial<User["preferences"]>
+}
+type AuthMeResponse = {
+  user?: BackendUser
+  data?: {
+    user?: BackendUser
+  }
+  id?: string
+}
+const defaultPreferences: User["preferences"] = {
+  currency: "USD",
+  baseCurrency: "USD",
+  language: "en",
+  theme: "system",
+  timezone: "America/New_York",
+  dateFormat: "MM/DD/YYYY",
+  autoSplit: true,
+  defaultSplitType: "equal",
+  notifications: {
+    email: true,
+    push: true,
+    sms: false,
+  },
+  privacy: {
+    profileVisibility: "friends",
+  },
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
@@ -42,17 +75,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isOAuthUser = !!session?.user
   const [oauthSynced, setOauthSynced] = useState(false)
   const [oauthSyncFailed, setOauthSyncFailed] = useState(false)
+  const checkAuth = useCallback(async () => {
+    let retryCount = 0
+    const suppress = typeof window !== "undefined" && sessionStorage.getItem("suppressAuthCheck") === "1"
+    const maxRetries = suppress ? 0 : 1
+    const retryDelayMs = 250
+    if (suppress) {
+      try { sessionStorage.removeItem("suppressAuthCheck") } catch {}
+    }
+
+    const attemptAuth = async (): Promise<BackendUser | null> => {
+      try {
+        const response = await authAPI.me()
+        const data = response.data as AuthMeResponse
+        let nextUser = data?.user || data?.data?.user || (data?.id ? (data as BackendUser) : null)
+        nextUser = normalizeUser(nextUser)
+        return nextUser
+      } catch (error) {
+        const authError = error as AuthError
+        if (authError?.response?.status === 401) {
+          throw authError
+        }
+        if (retryCount < maxRetries) {
+          retryCount++
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+          return attemptAuth()
+        }
+        throw authError
+      }
+    }
+
+    try {
+      const nextUser = await attemptAuth()
+      setUser(nextUser)
+    } catch {
+      setUser(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
   
   // Sync OAuth user with backend when session is available
   useEffect(() => {
     const syncOAuthUser = async () => {
       if (session?.user && !user && !oauthSynced && !oauthSyncFailed) {
         try {
+          const sessionUser = session.user as OAuthSessionUser
           // Use NextAuth session data to sync with backend via /auth/oauth.
-          const provider = (session.user as any).provider || "oauth"
-          const rawEmail = session.user.email || ""
-          const providerAccountId = (session.user as any).providerAccountId as string | undefined
-          const fallbackId = (session.user as any).id as string | undefined
+          const provider = sessionUser.provider || "oauth"
+          const rawEmail = sessionUser.email || ""
+          const providerAccountId = sessionUser.providerAccountId
+          const fallbackId = sessionUser.id
 
           const providerId = providerAccountId || fallbackId || rawEmail
 
@@ -87,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           })
 
           // Response should include backend user and set cookies for access/refresh tokens
-          let backendUser: any = null
+          let backendUser: BackendUser | null = null
           if (response.data?.data?.user) {
             backendUser = response.data.data.user
           } else if (response.data?.user) {
@@ -127,36 +200,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [session, sessionStatus, user, oauthSynced, oauthSyncFailed, loading, router])
   
   // Create user object from OAuth session if no backend user
-  const oauthUser: User | null = session?.user ? {
-    id: (session.user as any).backendUserId || session.user.id || "",
-    email: session.user.email || "",
-    firstName: session.user.name?.split(" ")[0] || "",
-    lastName: session.user.name?.split(" ").slice(1).join(" ") || "",
-    username: session.user.email?.split("@")[0] || "",
-    avatar: session.user.image || undefined,
+  const oauthSessionUser = session?.user as OAuthSessionUser | undefined
+  const oauthUser: User | null = oauthSessionUser ? {
+    id: oauthSessionUser.backendUserId || oauthSessionUser.id || "",
+    email: oauthSessionUser.email || "",
+    firstName: oauthSessionUser.name?.split(" ")[0] || "",
+    lastName: oauthSessionUser.name?.split(" ").slice(1).join(" ") || "",
+    username: oauthSessionUser.email?.split("@")[0] || "",
+    avatar: oauthSessionUser.image || undefined,
     role: "user",
     isActive: true,
     isPremium: false,
     createdAt: new Date().toISOString(),
     lastLoginAt: new Date().toISOString(),
-    preferences: {
-      currency: "USD",
-      baseCurrency: "USD",
-      language: "en",
-      theme: "system",
-      timezone: "America/New_York",
-      dateFormat: "MM/DD/YYYY",
-      autoSplit: true,
-      defaultSplitType: "equal",
-      notifications: {
-        email: true,
-        push: true,
-        sms: false,
-      },
-      privacy: {
-        profileVisibility: "friends",
-      },
-    },
+    preferences: defaultPreferences,
   } as User : null
   
   // Use backend user if available, otherwise use OAuth user (only if sync succeeded)
@@ -167,7 +224,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isAuthenticated = !!user || (oauthSynced && !oauthSyncFailed && !!oauthUser)
 
   // Utility function to normalize user object
-  const normalizeUser = (userData: any) => {
+  const normalizeUser = (userData: BackendUser | null | undefined): BackendUser | null => {
     if (!userData) return null
     
     // Ensure user object has the correct id field
@@ -178,24 +235,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     
     // Ensure preferences exist
     if (!userData.preferences) {
-      userData.preferences = {
-        currency: "USD",
-        baseCurrency: "USD",
-        language: "en",
-        theme: "system",
-        timezone: "America/New_York",
-        dateFormat: "MM/DD/YYYY",
-        autoSplit: true,
-        defaultSplitType: "equal",
-        notifications: {
-          email: true,
-          push: true,
-          sms: false,
-        },
-        privacy: {
-          profileVisibility: "friends",
-        },
-      }
+      userData.preferences = defaultPreferences
       
     }
     
@@ -203,79 +243,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
-    checkAuth()
-  }, [])
-
-  const checkAuth = async () => {
-    let retryCount = 0
-    const suppress = typeof window !== 'undefined' && sessionStorage.getItem('suppressAuthCheck') === '1'
-    const maxRetries = suppress ? 0 : 1
-    const retryDelayMs = 250
-    if (suppress) {
-      try { sessionStorage.removeItem('suppressAuthCheck') } catch {}
-    }
-    
-    const attemptAuth = async (): Promise<any> => {
-      try {
-        const response = await authAPI.me()
-        
-        // Try different possible data structures
-        let user = null
-        if (response.data?.user) {
-          user = response.data.user
-          
-        } else if (response.data?.data?.user) {
-          user = response.data.data.user
-          
-        } else if (response.data?.id) {
-          // If the response itself is the user object
-          user = response.data
-          
-        }
-        
-        // Ensure user object has the correct id field
-        if (user && user._id && !user.id) {
-          user.id = user._id
-          
-        }
-        
-        // Normalize the user object
-        user = normalizeUser(user)
-        
-        return user
-      } catch (error: any) {
-        // If it's a 401, don't retry
-        if (error?.response?.status === 401) {
-          throw error
-        }
-        
-        // If we haven't exceeded max retries, try again
-        if (retryCount < maxRetries) {
-          retryCount++
-          await new Promise(resolve => setTimeout(resolve, retryDelayMs))
-          return attemptAuth()
-        }
-        
-        throw error
-      }
-    }
-    
-    try {
-      const user = await attemptAuth()
-      setUser(user)
-    } catch (error: any) {
-      
-      setUser(null)
-    } finally {
-      setLoading(false)
-      
-    }
-  }
+    void checkAuth()
+  }, [checkAuth])
 
   const login = async (email: string, password: string) => {
     try {
       const response = await authAPI.login(email, password)
-      let user = response.data?.data?.user || response.data.user
+      let user = (response.data?.data?.user || response.data.user) as BackendUser | null
       
       // Ensure user object has the correct id field
       if (user && user._id && !user.id) {
@@ -290,25 +264,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       toast({
         title: "Welcome back!",
-        description: `Hello ${user.firstName}, you're successfully logged in.`,
+        description: `Hello ${user?.firstName || "there"}, you're successfully logged in.`,
       })
 
       try { sessionStorage.setItem('suppressAuthCheck', '1') } catch {}
       router.push("/")
-    } catch (error: any) {
-      const message = error.response?.data?.error || error.response?.data?.message || "Login failed"
+    } catch (error) {
+      const authError = error as AuthError
+      const message = authError.response?.data?.error || authError.response?.data?.message || "Login failed"
+      void message
       throw error
     }
   }
 
   const register = async (userData: RegisterData) => {
     try {
-      const response = await authAPI.register(userData)
+      const response = await authAPI.register({ ...userData })
 
       const email = response.data?.email || userData.email
       return { email }
-    } catch (error: any) {
-      const message = error.response?.data?.error || error.response?.data?.message || "Registration failed"
+    } catch (error) {
+      const authError = error as AuthError
+      const message = authError.response?.data?.error || authError.response?.data?.message || "Registration failed"
       throw new Error(message)
     }
   }
@@ -317,8 +294,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await authAPI.registerVerifyOtp(email, otp)
       router.push("/login?signup=success")
-    } catch (error: any) {
-      const message = error.response?.data?.error || error.response?.data?.message || "OTP verification failed"
+    } catch (error) {
+      const authError = error as AuthError
+      const message = authError.response?.data?.error || authError.response?.data?.message || "OTP verification failed"
       throw new Error(message)
     }
   }
@@ -326,8 +304,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const registerResendOtp = async (email: string) => {
     try {
       await authAPI.registerResendOtp(email)
-    } catch (error: any) {
-      const message = error.response?.data?.error || error.response?.data?.message || "Failed to resend OTP"
+    } catch (error) {
+      const authError = error as AuthError
+      const message = authError.response?.data?.error || authError.response?.data?.message || "Failed to resend OTP"
       throw new Error(message)
     }
   }
@@ -354,10 +333,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.push("/login")
   }
 
-  const updateUser = (userData: Partial<User>) => {
+  const updateUser = (userData: UserUpdatePatch) => {
     setUser((prev) => {
       if (!prev) return null
-      const updatedUser = { ...prev, ...userData }
+      const updatedUser = {
+        ...prev,
+        ...userData,
+        preferences: userData.preferences
+          ? {
+              ...prev.preferences,
+              ...userData.preferences,
+            }
+          : prev.preferences,
+      }
       return normalizeUser(updatedUser)
     })
   }

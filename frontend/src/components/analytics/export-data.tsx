@@ -19,20 +19,38 @@ interface ExportDataProps {
   groupId?: string
 }
 
+interface ExportResponse {
+  data?: unknown
+}
+
+interface ErrorWithMessage {
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
+function toDownloadString(value: unknown) {
+  if (typeof value === "string") return value
+  if (value == null) return ""
+  return JSON.stringify(value, null, 2)
+}
+
 export function ExportData({ period, groupId }: ExportDataProps) {
   const [isExporting, setIsExporting] = useState(false)
 
   const exportMutation = useMutation({
     mutationFn: ({ format }: { format: string }) => 
       analyticsAPI.exportData(format, period, groupId),
-    onSuccess: (response, variables) => {
+    onSuccess: (response: ExportResponse, variables) => {
       if (variables.format === 'csv') {
         // For CSV, the response should be the CSV content
-        downloadFile(response.data, `expenses-${period}.csv`, 'text/csv')
+        downloadFile(toDownloadString(response.data), `expenses-${period}.csv`, 'text/csv')
       } else {
         // For JSON, download as JSON file
         downloadFile(
-          JSON.stringify(response.data, null, 2), 
+          toDownloadString(response.data), 
           `expenses-${period}.json`, 
           'application/json'
         )
@@ -42,7 +60,7 @@ export function ExportData({ period, groupId }: ExportDataProps) {
         description: `Your data has been exported as ${variables.format.toUpperCase()}.`,
       })
     },
-    onError: (error: any) => {
+    onError: (error: ErrorWithMessage) => {
       toast({
         title: "Export failed",
         description: error.response?.data?.message || "Failed to export data",

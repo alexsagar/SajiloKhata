@@ -9,6 +9,20 @@ import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 
+interface InviteResponse {
+  data?: {
+    inviteUrl?: string
+  }
+}
+
+interface ErrorWithMessage {
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
 export function InviteFriendDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { toast } = useToast()
   const [email, setEmail] = useState("")
@@ -17,11 +31,12 @@ export function InviteFriendDialog({ open, onOpenChange }: { open: boolean; onOp
 
   const create = async () => {
     try {
-      const res = await friendsAPI.createInvite({ inviteeEmail: email || undefined, message: message || undefined })
-      setLink(res.data.inviteUrl)
+      const res = await friendsAPI.createInvite({ inviteeEmail: email || undefined, message: message || undefined }) as InviteResponse
+      setLink(res.data?.inviteUrl || null)
       toast({ title: "Invite created", description: "Share the link with your friend" })
-    } catch (e: any) {
-      toast({ title: "Failed", description: e?.response?.data?.message || "", variant: "destructive" })
+    } catch (error: unknown) {
+      const err = error as ErrorWithMessage
+      toast({ title: "Failed", description: err?.response?.data?.message || "", variant: "destructive" })
     }
   }
 

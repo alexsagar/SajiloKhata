@@ -97,7 +97,7 @@ export function formatCurrency(amount: number, currencyCode = 'USD', locale = 'e
       minimumFractionDigits: currency.decimals,
       maximumFractionDigits: currency.decimals,
     }).format(amount)
-  } catch (error) {
+  } catch (_error) {
 
     // Fallback to basic formatting if Intl.NumberFormat fails
     return `${getCurrencySymbol(currencyCode)}${amount.toFixed(currency.decimals)}`
@@ -122,7 +122,7 @@ export function formatCurrencyCompact(amount: number, currencyCode = 'USD', loca
       minimumFractionDigits: currency.decimals,
       maximumFractionDigits: currency.decimals,
     }).format(amount)
-  } catch (error) {
+  } catch (_error) {
     // Fallback to basic formatting
     const symbol = getCurrencySymbol(currencyCode)
     if (amount >= 1000000) {

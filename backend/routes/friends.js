@@ -95,7 +95,7 @@ router.post("/invites/:code/decline", async (req, res) => {
 // Create invite
 router.post(
   "/invites",
-  [body("inviteeEmail").optional().isEmail().normalizeEmail(), body("message").optional().isLength({ max: 500 })],
+  [body("inviteeEmail").optional().isEmail(), body("message").optional().isLength({ max: 500 })],
   async (req, res) => {
     try {
       const errors = validationResult(req)

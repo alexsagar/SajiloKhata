@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
@@ -15,17 +15,14 @@ import {
   Search, 
   Flag, 
   Eye,
-  Ban,
   CheckCircle,
   XCircle,
   AlertTriangle,
   MessageSquare,
-  Image,
+  Image as ImageIcon,
   FileText,
   Clock,
-  User,
-  Calendar,
-  Filter
+  User
 } from "lucide-react"
 import DataTable from "@/components/common/data-table"
 
@@ -61,6 +58,12 @@ interface ModerationItem {
 
 // Empty initial data - will be populated from API
 const mockModerationItems: ModerationItem[] = []
+
+interface TableRow<T> {
+  row: {
+    original: T
+  }
+}
 
 export function ContentModeration() {
   const [items, setItems] = useState<ModerationItem[]>(mockModerationItems)
@@ -162,7 +165,7 @@ export function ContentModeration() {
       case 'user_profile':
         return <User className="h-4 w-4" />
       case 'receipt':
-        return <Image className="h-4 w-4" />
+        return <ImageIcon className="h-4 w-4" />
       default:
         return <Flag className="h-4 w-4" />
     }
@@ -172,7 +175,7 @@ export function ContentModeration() {
     {
       header: 'Type',
       accessorKey: 'type',
-      cell: ({ row }: any) => {
+      cell: ({ row }: TableRow<ModerationItem>) => {
         const item = row.original
         return (
           <div className="flex items-center gap-2">
@@ -185,14 +188,14 @@ export function ContentModeration() {
     {
       header: 'Content',
       accessorKey: 'content',
-      cell: ({ row }: any) => (
+      cell: ({ row }: TableRow<ModerationItem>) => (
         <div className="max-w-[300px] truncate">{row.original.content}</div>
       )
     },
     {
       header: 'Reported User',
       accessorKey: 'reportedUser',
-      cell: ({ row }: any) => {
+      cell: ({ row }: TableRow<ModerationItem>) => {
         const user = row.original.reportedUser
         return (
           <div className="flex items-center gap-2">
@@ -213,22 +216,22 @@ export function ContentModeration() {
     {
       header: 'Category',
       accessorKey: 'category',
-      cell: ({ row }: any) => getCategoryBadge(row.original.category)
+      cell: ({ row }: TableRow<ModerationItem>) => getCategoryBadge(row.original.category)
     },
     {
       header: 'Priority',
       accessorKey: 'priority',
-      cell: ({ row }: any) => getPriorityBadge(row.original.priority)
+      cell: ({ row }: TableRow<ModerationItem>) => getPriorityBadge(row.original.priority)
     },
     {
       header: 'Status',
       accessorKey: 'status',
-      cell: ({ row }: any) => getStatusBadge(row.original.status)
+      cell: ({ row }: TableRow<ModerationItem>) => getStatusBadge(row.original.status)
     },
     {
       header: 'Report Date',
       accessorKey: 'reportDate',
-      cell: ({ row }: any) => (
+      cell: ({ row }: TableRow<ModerationItem>) => (
         <div className="text-sm">
           {new Date(row.original.reportDate).toLocaleDateString()}
         </div>
@@ -237,7 +240,7 @@ export function ContentModeration() {
     {
       header: 'Actions',
       accessorKey: 'actions',
-      cell: ({ row }: any) => {
+      cell: ({ row }: TableRow<ModerationItem>) => {
         const item = row.original
         return (
           <div className="flex items-center gap-2">

@@ -42,7 +42,7 @@ export default function LoginPage() {
 
         <div className="text-center">
           <p className="text-sm sm:text-base text-muted-foreground">
-            Don't have an account?{" "}
+            Don&apos;t have an account?{" "}
             <Button variant="link" asChild className="p-0">
               <Link href="/register">Sign up</Link>
             </Button>

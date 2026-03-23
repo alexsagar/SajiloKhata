@@ -2,8 +2,8 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+
+
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
@@ -330,7 +330,7 @@ export function formatCurrency(amount: number, currencyCode: string, locale = 'e
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     }).format(amount)
-  } catch (error) {
+  } catch (_error) {
     // Fallback for unsupported currencies
     return `${currency.symbol}${amount.toFixed(2)}`
   }

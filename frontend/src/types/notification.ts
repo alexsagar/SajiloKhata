@@ -20,7 +20,7 @@ export interface Notification {
     | "group_invite"
   title: string
   message: string
-  data?: any
+  data?: Record<string, unknown>
   read: boolean
   isRead?: boolean
   createdAt: string

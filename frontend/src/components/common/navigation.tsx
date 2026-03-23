@@ -1,10 +1,14 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { groupAPI, expenseAPI, userAPI, analyticsAPI, conversationAPI, calendarAPI } from "@/lib/api";
+
+type IdleCallback = () => void
+type IdleScheduler = (callback: IdleCallback) => number
+type CollectionParams = { page: number; limit: number }
 
 const Navigation: React.FC = () => {
   const { isAuthenticated, user, logout } = useAuth();
@@ -32,7 +36,7 @@ const Navigation: React.FC = () => {
     if (!isAuthenticated) return;
     queryClient.prefetchQuery({
       queryKey: ["expenses", "list", { page: 1 }],
-      queryFn: () => expenseAPI.getExpenses({ page: 1, limit: 10 } as any),
+      queryFn: () => expenseAPI.getExpenses({ page: 1, limit: 10 } as CollectionParams),
       staleTime: 5 * 60 * 1000,
     });
   };
@@ -87,7 +91,11 @@ const Navigation: React.FC = () => {
     prefetchRoute("/calendar");
 
     // Idle-time data prefetching for slow pages
-    const ric: any = (window as any).requestIdleCallback || ((cb: Function) => setTimeout(() => cb(), 300));
+    const win = window as Window & {
+      requestIdleCallback?: IdleScheduler
+      cancelIdleCallback?: (id: number) => void
+    }
+    const ric: IdleScheduler = win.requestIdleCallback || ((cb: IdleCallback) => window.setTimeout(() => cb(), 300))
     const idleId = ric(() => {
       if (isAuthenticated) {
         prefetchGroups();
@@ -98,7 +106,8 @@ const Navigation: React.FC = () => {
         prefetchCalendar();
       }
     });
-    return () => { try { (window as any).cancelIdleCallback?.(idleId) } catch {} };
+    return () => { try { win.cancelIdleCallback?.(idleId) } catch {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

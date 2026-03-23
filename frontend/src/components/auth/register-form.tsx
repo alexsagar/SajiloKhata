@@ -41,6 +41,10 @@ export function RegisterForm() {
   })
   const { register: registerUser, registerVerifyOtp, registerResendOtp } = useAuth()
 
+  interface ErrorWithMessage {
+    message?: string
+  }
+
   const {
     register,
     handleSubmit,
@@ -71,7 +75,7 @@ export function RegisterForm() {
       })
       setPendingEmail(result.email)
       setStep("otp")
-    } catch (error) {
+    } catch {
       // Error is handled in the auth context
     } finally {
       setIsLoading(false)
@@ -83,8 +87,9 @@ export function RegisterForm() {
     setOtpError("")
     try {
       await registerVerifyOtp(pendingEmail, otp)
-    } catch (error: any) {
-      setOtpError(error?.message || "OTP verification failed")
+    } catch (error: unknown) {
+      const err = error as ErrorWithMessage
+      setOtpError(err?.message || "OTP verification failed")
     } finally {
       setIsLoading(false)
     }
@@ -95,8 +100,9 @@ export function RegisterForm() {
     setOtpError("")
     try {
       await registerResendOtp(pendingEmail)
-    } catch (error: any) {
-      setOtpError(error?.message || "Failed to resend OTP")
+    } catch (error: unknown) {
+      const err = error as ErrorWithMessage
+      setOtpError(err?.message || "Failed to resend OTP")
     } finally {
       setIsLoading(false)
     }

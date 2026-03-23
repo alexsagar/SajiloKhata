@@ -1,6 +1,6 @@
 "use client"
 
-import { useQuery, type UseQueryOptions } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { expenseAPI } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
 

@@ -33,7 +33,7 @@ export function CurrencyDisplay({
     locale
   })
 
-  const currencySymbol = getCurrencySymbol(currencyCode)
+  const _currencySymbol = getCurrencySymbol(currencyCode)
   const currencyName = getCurrencyName(currencyCode)
 
   const getVariantClasses = () => {

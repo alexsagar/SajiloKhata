@@ -12,10 +12,31 @@ import { toast } from "@/hooks/use-toast"
 import { Bell } from "lucide-react"
 import { syncDashboardState, syncGroupState } from "@/lib/server-state"
 import { useAuth } from "@/contexts/auth-context"
+import type { Notification } from "@/types/notification"
+import type { User } from "@/types/user"
 
 const PAGE_SIZE = 20
 
-function resolveHref(notification: any) {
+type NotificationWithLegacyId = Notification & { _id?: string }
+
+type NotificationPagePayload = {
+    notifications?: NotificationWithLegacyId[]
+    unreadCount?: number
+    pagination?: {
+        pages?: number
+    }
+}
+
+type SettlementResponse = {
+    groupId?: string | { _id?: string }
+}
+
+function getSettlementGroupId(groupId?: SettlementResponse["groupId"]) {
+    if (!groupId) return null
+    return typeof groupId === "string" ? groupId : groupId._id || null
+}
+
+function resolveHref(notification: NotificationWithLegacyId) {
     if (notification?.data?.actionUrl) return notification.data.actionUrl
     const type = notification?.type
     if (
@@ -77,9 +98,9 @@ export default function MobileNotificationsPage() {
 
     const confirmSettlement = useMutation({
         mutationFn: (settlementId: string) => settlementAPI.confirm(settlementId),
-        onSuccess: (response: any) => {
-            const settlement = response?.data?.data || response?.data || {}
-            const groupId = settlement?.groupId?._id || settlement?.groupId || null
+        onSuccess: (response) => {
+            const settlement = (response?.data?.data || response?.data || {}) as SettlementResponse
+            const groupId = getSettlementGroupId(settlement?.groupId)
             if (groupId) {
                 syncGroupState(queryClient, { groupId: String(groupId), includeNotifications: true })
             } else {
@@ -87,7 +108,7 @@ export default function MobileNotificationsPage() {
             }
             toast({ title: "Settlement recorded" })
         },
-        onError: (e: any) =>
+        onError: (e: Error) =>
             toast({ title: "Could not record settlement", description: e?.message, variant: "destructive" }),
     })
 
@@ -97,11 +118,11 @@ export default function MobileNotificationsPage() {
             syncDashboardState(queryClient, { includeNotifications: true })
             toast({ title: "Reminder snoozed for 3 days" })
         },
-        onError: (e: any) =>
+        onError: (e: Error) =>
             toast({ title: "Could not snooze reminder", description: e?.message, variant: "destructive" }),
     })
 
-    const payload = notificationsQuery.data?.data || {}
+    const payload = (notificationsQuery.data?.data || {}) as NotificationPagePayload
     const list = payload.notifications || []
     const unreadCount = Number(payload.unreadCount || 0)
     const totalPages = Number(payload.pagination?.pages || 1)
@@ -113,7 +134,7 @@ export default function MobileNotificationsPage() {
         () => (unreadCount > 0 ? `Notifications (${unreadCount})` : "Notifications"),
         [unreadCount],
     )
-    const currentUserId = String((user as any)?._id || (user as any)?.id || "")
+    const currentUserId = String((user as User | null)?._id || user?.id || "")
 
     return (
         <>
@@ -143,12 +164,12 @@ export default function MobileNotificationsPage() {
                     />
                 ) : (
                     <>
-                        {list.map((notification: any) => {
-                            const id = notification.id || notification._id
+                        {list.map((notification) => {
+                            const id = String(notification.id || notification._id || "")
                             const isRead = Boolean(notification.isRead ?? notification.read)
                             const type = String(notification.type || "")
                             const settlementId = notification?.data?.settlementId
-                            const paymentLink = notification?.data?.paymentLink
+                            const paymentLink = typeof notification?.data?.paymentLink === "string" ? notification.data.paymentLink : ""
                             const settlementPayerId = String(notification?.data?.fromUserId || "")
                             const canRecordPaid =
                                 ["SETTLEMENT_REQUESTED", "SETTLEMENT_REMINDER"].includes(type) &&
@@ -172,7 +193,7 @@ export default function MobileNotificationsPage() {
                                                 href={resolveHref(notification)}
                                                 className="font-medium text-sm text-white hover:underline"
                                                 onClick={() => {
-                                                    if (!isRead) markRead.mutate(id)
+                                                    if (!isRead && id) markRead.mutate(id)
                                                 }}
                                             >
                                                 {notification.title}
@@ -194,8 +215,8 @@ export default function MobileNotificationsPage() {
                                                     size="sm"
                                                     variant="outline"
                                                     className="min-h-[44px] text-xs"
-                                                    onClick={() => markRead.mutate(id)}
-                                                    disabled={markRead.isPending}
+                                                    onClick={() => id && markRead.mutate(id)}
+                                                    disabled={markRead.isPending || !id}
                                                 >
                                                     Mark read
                                                 </Button>
@@ -221,13 +242,13 @@ export default function MobileNotificationsPage() {
                                                     Remind Later
                                                 </Button>
                                             )}
-                                            {paymentLink && (
+                                            {paymentLink ? (
                                                 <Button size="sm" variant="outline" className="min-h-[44px] text-xs" asChild>
-                                                    <a href={String(paymentLink)} target="_blank" rel="noreferrer">
+                                                    <a href={paymentLink} target="_blank" rel="noreferrer">
                                                         Pay Link
                                                     </a>
                                                 </Button>
-                                            )}
+                                            ) : null}
                                         </div>
                                     )}
                                 </div>

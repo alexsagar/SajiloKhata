@@ -1,30 +1,23 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+
 import { 
   Search, 
-  Filter, 
-  MoreHorizontal, 
   UserPlus, 
-  Mail, 
-  Phone, 
-  Calendar,
   Shield,
   Ban,
   CheckCircle,
-  AlertTriangle,
-  Download,
-  Upload
+  Download
 } from "lucide-react"
 import DataTable from "@/components/common/data-table"
 
@@ -46,6 +39,12 @@ interface User {
 
 // Empty initial data - will be populated from API
 const mockUsers: User[] = []
+
+interface TableRow<T> {
+  row: {
+    original: T
+  }
+}
 
 export function UserManagement() {
   const [users, setUsers] = useState<User[]>(mockUsers)
@@ -127,7 +126,7 @@ export function UserManagement() {
     {
       header: 'User',
       accessorKey: 'user',
-      cell: ({ row }: any) => {
+      cell: ({ row }: TableRow<User>) => {
         const user = row.original
         return (
           <div className="flex items-center gap-3">
@@ -148,29 +147,29 @@ export function UserManagement() {
     {
       header: 'Status',
       accessorKey: 'status',
-      cell: ({ row }: any) => getStatusBadge(row.original.status)
+      cell: ({ row }: TableRow<User>) => getStatusBadge(row.original.status)
     },
     {
       header: 'Subscription',
       accessorKey: 'subscription',
-      cell: ({ row }: any) => getSubscriptionBadge(row.original.subscription)
+      cell: ({ row }: TableRow<User>) => getSubscriptionBadge(row.original.subscription)
     },
     {
       header: 'Role',
       accessorKey: 'role',
-      cell: ({ row }: any) => getRoleBadge(row.original.role)
+      cell: ({ row }: TableRow<User>) => getRoleBadge(row.original.role)
     },
     {
       header: 'Groups',
       accessorKey: 'groupsCount',
-      cell: ({ row }: any) => (
+      cell: ({ row }: TableRow<User>) => (
         <div className="text-center">{row.original.groupsCount}</div>
       )
     },
     {
       header: 'Total Expenses',
       accessorKey: 'totalExpenses',
-      cell: ({ row }: any) => (
+      cell: ({ row }: TableRow<User>) => (
         <div className="text-right font-medium">
           ${row.original.totalExpenses.toLocaleString()}
         </div>
@@ -179,7 +178,7 @@ export function UserManagement() {
     {
       header: 'Last Active',
       accessorKey: 'lastActive',
-      cell: ({ row }: any) => (
+      cell: ({ row }: TableRow<User>) => (
         <div className="text-sm">
           {new Date(row.original.lastActive).toLocaleDateString()}
         </div>
@@ -188,7 +187,7 @@ export function UserManagement() {
     {
       header: 'Actions',
       accessorKey: 'actions',
-      cell: ({ row }: any) => {
+      cell: ({ row }: TableRow<User>) => {
         const user = row.original
         return (
           <div className="flex items-center gap-2">

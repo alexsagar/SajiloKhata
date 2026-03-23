@@ -9,9 +9,22 @@ import { Trash2, Plus } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { groupAPI } from "@/lib/api"
 
+interface TestGroup {
+  _id: string
+  name: string
+}
+
+interface ApiErrorLike {
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
 export function TestDeleteGroup() {
   const [groupName, setGroupName] = useState("")
-  const [testGroups, setTestGroups] = useState<any[]>([])
+  const [testGroups, setTestGroups] = useState<TestGroup[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
 
@@ -40,10 +53,11 @@ export function TestDeleteGroup() {
         title: "Test group created",
         description: `Created "${response.data.name}" successfully.`,
       })
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const apiError = error as ApiErrorLike
       toast({
         title: "Failed to create group",
-        description: error.response?.data?.message || "An error occurred.",
+        description: apiError.response?.data?.message || "An error occurred.",
         variant: "destructive"
       })
     } finally {
@@ -62,10 +76,11 @@ export function TestDeleteGroup() {
         title: "Group deleted",
         description: `"${groupName}" has been deleted successfully.`,
       })
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const apiError = error as ApiErrorLike
       toast({
         title: "Failed to delete group",
-        description: error.response?.data?.message || "An error occurred.",
+        description: apiError.response?.data?.message || "An error occurred.",
         variant: "destructive"
       })
     } finally {

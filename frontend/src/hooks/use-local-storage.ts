@@ -11,7 +11,7 @@ export function useLocalStorage<T>(key: string, initial: T) {
         if (stored) {
           setValue(JSON.parse(stored));
         }
-      } catch (error) {
+      } catch (_error) {
         ;
       }
     }
@@ -22,7 +22,7 @@ export function useLocalStorage<T>(key: string, initial: T) {
     if (isLocalStorageAvailable()) {
       try {
         localStorage.setItem(key, JSON.stringify(val));
-      } catch (error) {
+      } catch (_error) {
         ;
       }
     }

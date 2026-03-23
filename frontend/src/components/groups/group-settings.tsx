@@ -12,35 +12,77 @@ import { Loader2 } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { groupAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
-import { CurrencySelector } from "@/components/currency/currency-selector"
 import { syncGroupState } from "@/lib/server-state"
 
 interface GroupSettingsProps {
   groupId: string
 }
 
+interface GroupData {
+  name?: string
+  description?: string
+  settings?: {
+    allowMemberInvites?: boolean
+    requireApprovalForExpenses?: boolean
+    defaultSplitType?: "equal" | "percentage" | "exact"
+  }
+}
+
+type GroupSettingsForm = {
+  name: string
+  description: string
+  allowMemberInvites: boolean
+  requireApprovalForExpenses: boolean
+  defaultSplitType: "equal" | "percentage" | "exact"
+}
+
+type GroupUpdatePayload = {
+  name: string
+  description: string
+  settings: {
+    allowMemberInvites: boolean
+    requireApprovalForExpenses: boolean
+    defaultSplitType: "equal" | "percentage" | "exact"
+  }
+}
+
+type ApiErrorLike = {
+  response?: {
+    data?: {
+      message?: string
+      error?: string
+    }
+  }
+}
+
+function toGroupUpdateFormData(data: GroupUpdatePayload) {
+  const formData = new FormData()
+  formData.append("name", data.name)
+  formData.append("description", data.description)
+  formData.append("settings", JSON.stringify(data.settings))
+  return formData
+}
+
 export function GroupSettings({ groupId }: GroupSettingsProps) {
   const queryClient = useQueryClient()
 
-  // Fetch group data
   const { data: group, isLoading, error } = useQuery({
     queryKey: ["group", groupId],
     queryFn: () => groupAPI.getGroup(groupId),
     enabled: !!groupId,
   })
 
-  const [settings, setSettings] = useState({
+  const [settings, setSettings] = useState<GroupSettingsForm>({
     name: "",
     description: "",
     allowMemberInvites: true,
     requireApprovalForExpenses: false,
-    defaultSplitType: "equal" as const,
+    defaultSplitType: "equal",
   })
 
-  // Update settings when group data is loaded
   React.useEffect(() => {
     if (group?.data || group) {
-      const groupData = group.data || group
+      const groupData = (group.data || group) as GroupData
       setSettings({
         name: groupData.name || "",
         description: groupData.description || "",
@@ -52,10 +94,7 @@ export function GroupSettings({ groupId }: GroupSettingsProps) {
   }, [group])
 
   const updateGroupMutation = useMutation({
-    mutationFn: (data: any) => {
-      
-      return groupAPI.updateGroup(groupId, data)
-    },
+    mutationFn: (data: GroupUpdatePayload) => groupAPI.updateGroup(groupId, toGroupUpdateFormData(data)),
     onSuccess: () => {
       syncGroupState(queryClient, { groupId, includeNotifications: true })
       toast({
@@ -63,16 +102,15 @@ export function GroupSettings({ groupId }: GroupSettingsProps) {
         description: "Group settings have been updated successfully.",
       })
     },
-    onError: (error: any) => {
-      
-      
-      
-      
-      const errorMessage = error.response?.data?.message || 
-                          error.response?.data?.error || 
-                          error.message || 
-                          "Failed to update group settings"
-      
+    onError: (error: unknown) => {
+      const apiError = error as ApiErrorLike
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : apiError.response?.data?.message ||
+            apiError.response?.data?.error ||
+            "Failed to update group settings"
+
       toast({
         title: "Error",
         description: errorMessage,
@@ -83,7 +121,6 @@ export function GroupSettings({ groupId }: GroupSettingsProps) {
 
   const handleSave = () => {
     try {
-      // Validate required fields
       if (!settings.name.trim()) {
         toast({
           title: "Validation Error",
@@ -93,7 +130,7 @@ export function GroupSettings({ groupId }: GroupSettingsProps) {
         return
       }
 
-      const updateData = {
+      const updateData: GroupUpdatePayload = {
         name: settings.name.trim(),
         description: settings.description.trim(),
         settings: {
@@ -103,10 +140,8 @@ export function GroupSettings({ groupId }: GroupSettingsProps) {
         },
       }
 
-      
       updateGroupMutation.mutate(updateData)
-    } catch (error) {
-      
+    } catch {
       toast({
         title: "Error",
         description: "An unexpected error occurred while saving",
@@ -115,8 +150,8 @@ export function GroupSettings({ groupId }: GroupSettingsProps) {
     }
   }
 
-  const updateSetting = (key: string, value: any) => {
-    setSettings(prev => ({ ...prev, [key]: value }))
+  const updateSetting = <K extends keyof GroupSettingsForm>(key: K, value: GroupSettingsForm[K]) => {
+    setSettings((prev) => ({ ...prev, [key]: value }))
   }
 
   return (
@@ -148,7 +183,7 @@ export function GroupSettings({ groupId }: GroupSettingsProps) {
           <KanbanCard>
             <KanbanCardHeader>
               <KanbanCardTitle>Basic Information</KanbanCardTitle>
-              <KanbanCardDescription>Update your group's basic details.</KanbanCardDescription>
+              <KanbanCardDescription>Update your group&apos;s basic details.</KanbanCardDescription>
             </KanbanCardHeader>
             <KanbanCardContent className="space-y-4">
               <div className="space-y-2">
@@ -170,8 +205,6 @@ export function GroupSettings({ groupId }: GroupSettingsProps) {
                   disabled={updateGroupMutation.isPending}
                 />
               </div>
-
-
             </KanbanCardContent>
           </KanbanCard>
 
@@ -215,7 +248,7 @@ export function GroupSettings({ groupId }: GroupSettingsProps) {
                 <Label htmlFor="defaultSplitType">Default Split Type</Label>
                 <Select
                   value={settings.defaultSplitType}
-                  onValueChange={(value) => updateSetting("defaultSplitType", value)}
+                  onValueChange={(value: "equal" | "percentage" | "exact") => updateSetting("defaultSplitType", value)}
                   disabled={updateGroupMutation.isPending}
                 >
                   <SelectTrigger>
@@ -232,10 +265,7 @@ export function GroupSettings({ groupId }: GroupSettingsProps) {
           </KanbanCard>
 
           <div className="flex justify-end">
-            <Button
-              onClick={handleSave}
-              disabled={updateGroupMutation.isPending}
-            >
+            <Button onClick={handleSave} disabled={updateGroupMutation.isPending}>
               {updateGroupMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save Settings
             </Button>

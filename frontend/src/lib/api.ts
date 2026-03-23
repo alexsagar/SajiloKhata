@@ -1,6 +1,25 @@
 import axios from "axios"
+import type { AxiosError, AxiosRequestConfig } from "axios"
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"
+type UnknownRecord = Record<string, unknown>
+type SearchParams = { query: string; limit?: number }
+type CollectionParams = Record<string, string | number | boolean | string[] | undefined>
+type NotificationPreferencePayload = UnknownRecord
+type ExpensePayload = FormData | UnknownRecord
+type ReceiptUpdatePayload = UnknownRecord
+type GroupInvitePayload = UnknownRecord
+type AdminPayload = UnknownRecord
+type CalendarProviderPayload = UnknownRecord
+type ConversationAttachment = UnknownRecord
+type AnalyticsFilters = Record<string, string | number | boolean | string[] | { range?: string; from?: string; to?: string } | null | undefined>
+type RetryableRequestConfig = AxiosRequestConfig & { _retry?: boolean }
+type ApiErrorShape = {
+  message?: string
+  error?: {
+    message?: string
+  }
+}
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -30,8 +49,8 @@ api.interceptors.request.use(
 // Response interceptor to handle token refresh and better error handling
 api.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const originalRequest = error.config
+  async (error: AxiosError<ApiErrorShape>) => {
+    const originalRequest = (error.config || {}) as RetryableRequestConfig
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       const url = (originalRequest.url || '') as string
@@ -67,7 +86,7 @@ api.interceptors.response.use(
 // API functions
 export const authAPI = {
   login: (email: string, password: string) => api.post("/auth/login", { email, password }),
-  register: (userData: any) => api.post("/auth/register", userData),
+  register: (userData: UnknownRecord) => api.post("/auth/register", userData),
   registerVerifyOtp: (email: string, otp: string) => api.post("/auth/register/verify-otp", { email, otp }),
   registerResendOtp: (email: string) => api.post("/auth/register/resend-otp", { email }),
   logout: () => api.post("/auth/logout"),
@@ -89,17 +108,17 @@ export const authAPI = {
 
 export const userAPI = {
   getProfile: () => api.get("/users/profile"),
-  updateProfile: (data: any) => api.put("/users/profile", data),
+  updateProfile: (data: UnknownRecord) => api.put("/users/profile", data),
   requestEmailChangeOtp: (data: { newEmail: string; password?: string }) => api.post("/users/email-change/request", data),
   resendEmailChangeOtp: () => api.post("/users/email-change/resend"),
   verifyEmailChangeOtp: (data: { otp: string }) => api.post("/users/email-change/verify", data),
-  updatePreferences: (data: any) => api.put("/users/preferences", data),
-  changePassword: (data: any) => api.put("/users/password", data),
+  updatePreferences: (data: UnknownRecord) => api.put("/users/preferences", data),
+  changePassword: (data: UnknownRecord) => api.put("/users/password", data),
   uploadAvatar: (formData: FormData) =>
     api.post("/users/avatar", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     }),
-  searchUsers: (params: string | { query: string; limit?: number }) => {
+  searchUsers: (params: string | SearchParams) => {
     if (typeof params === 'string') {
       return api.get(`/users/search?q=${encodeURIComponent(params)}`)
     }
@@ -107,7 +126,7 @@ export const userAPI = {
     const lim = params.limit != null ? `&limit=${params.limit}` : ''
     return api.get(`/users/search?q=${q}${lim}`)
   },
-  searchGlobal: (params: { query: string; limit?: number }) => {
+  searchGlobal: (params: SearchParams) => {
     const q = encodeURIComponent(params.query)
     const lim = params.limit != null ? `&limit=${params.limit}` : ""
     return api.get(`/users/search/global?q=${q}${lim}`)
@@ -156,12 +175,12 @@ export const conversationAPI = {
     api.get(`/conversations/${id}/messages`, { params }),
   getMessages: (id: string, params?: { cursor?: string; limit?: number }) =>
     api.get(`/conversations/${id}/messages`, { params }),
-  sendMessage: (data: { conversationId: string; text: string; attachments?: any[] }) => api.post("/conversations/messages", data),
+  sendMessage: (data: { conversationId: string; text: string; attachments?: ConversationAttachment[] }) => api.post("/conversations/messages", data),
   markAsRead: (id: string) => api.post(`/conversations/${id}/read`),
 }
 
 export const groupAPI = {
-  getGroups: (params?: { search?: string; limit?: number; page?: number }) =>
+  getGroups: (params?: CollectionParams) =>
     api.get("/groups", { params }),
   getGroup: (id: string) => api.get(`/groups/${id}`),
   createGroup: (data: FormData) => api.post("/groups", data),
@@ -173,12 +192,12 @@ export const groupAPI = {
   removeMember: (groupId: string, userId: string) => api.delete(`/groups/${groupId}/members/${userId}`),
   updateMemberRole: (groupId: string, userId: string, role: string) =>
     api.put(`/groups/${groupId}/members/${userId}`, { role }),
-  getGroupExpenses: (groupId: string, params?: any) =>
+  getGroupExpenses: (groupId: string, params?: CollectionParams) =>
     api.get(`/groups/${groupId}/expenses`, { params }),
   getGroupBalance: (groupId: string) => api.get(`/groups/${groupId}/balance`),
   getGroupSettlements: (groupId: string) => api.get(`/groups/${groupId}/settlements`),
   settleUp: (groupId: string) => api.post(`/groups/${groupId}/settle-up`),
-  createGroupInvite: (groupId: string, data: any) =>
+  createGroupInvite: (groupId: string, data: GroupInvitePayload) =>
     api.post(`/groups/${groupId}/invites`, data),
   getGroupInvites: (groupId: string) => api.get(`/groups/${groupId}/invites`),
   acceptGroupInvite: (inviteId: string) => api.post(`/invites/${inviteId}/accept`),
@@ -201,7 +220,7 @@ export const settlementAPI = {
 }
 
 export const expenseAPI = {
-  getExpenses: (groupId?: string | { search?: string; limit?: number; page?: number; groupId?: string; sort?: string }) => {
+  getExpenses: (groupId?: string | CollectionParams) => {
     if (typeof groupId === 'string') {
       return api.get(`/expenses?groupId=${groupId}`)
     } else if (groupId && typeof groupId === 'object') {
@@ -210,10 +229,10 @@ export const expenseAPI = {
       return api.get('/expenses')
     }
   },
-  createExpense: (data: any) => api.post("/expenses", data),
-  create: (payload: any) => api.post('/expenses', payload).then(r => r.data?.data),
+  createExpense: (data: ExpensePayload) => api.post("/expenses", data),
+  create: (payload: ExpensePayload) => api.post('/expenses', payload).then(r => r.data?.data),
   getExpense: (id: string) => api.get(`/expenses/${id}`),
-  updateExpense: (id: string, data: any) => api.put(`/expenses/${id}`, data),
+  updateExpense: (id: string, data: ExpensePayload) => api.put(`/expenses/${id}`, data),
   deleteExpense: (id: string) => api.delete(`/expenses/${id}`),
   settleExpense: (id: string, userId: string) => api.patch(`/expenses/${id}/settle`, { userId }),
   getComments: (id: string) => api.get(`/expenses/${id}/comments`),
@@ -222,8 +241,8 @@ export const expenseAPI = {
     api.patch(`/expenses/${id}/comments/${commentId}`, data),
   deleteComment: (id: string, commentId: string) => api.delete(`/expenses/${id}/comments/${commentId}`),
   getRecurringExpenses: () => api.get("/expenses/recurring"),
-  createRecurringExpense: (data: any) => api.post("/expenses/recurring", data),
-  updateRecurringExpense: (id: string, data: any) => api.put(`/expenses/recurring/${id}`, data),
+  createRecurringExpense: (data: UnknownRecord) => api.post("/expenses/recurring", data),
+  updateRecurringExpense: (id: string, data: UnknownRecord) => api.put(`/expenses/recurring/${id}`, data),
   deleteRecurringExpense: (id: string) => api.delete(`/expenses/recurring/${id}`),
 
   // Data export
@@ -239,7 +258,7 @@ export const notificationAPI = {
   markAllAsRead: () => api.patch("/notifications/read-all"),
   deleteNotification: (id: string) => api.delete(`/notifications/${id}`),
   getPreferences: () => api.get("/notifications/preferences"),
-  updatePreferences: (data: any) => api.put("/notifications/preferences", data),
+  updatePreferences: (data: NotificationPreferencePayload) => api.put("/notifications/preferences", data),
 }
 
 export const receiptAPI = {
@@ -256,7 +275,7 @@ export const receiptAPI = {
     limit?: number
   }) => api.get("/receipts", { params }),
   getReceipt: (id: string) => api.get(`/receipts/${id}`),
-  updateReceipt: (id: string, data: any) => api.put(`/receipts/${id}`, data),
+  updateReceipt: (id: string, data: ReceiptUpdatePayload) => api.put(`/receipts/${id}`, data),
   markReviewed: (id: string) => api.post(`/receipts/${id}/review`),
   linkToExpense: (id: string, expenseId: string) => api.put(`/receipts/${id}/link-expense`, { expenseId }),
   reprocessReceipt: (id: string) => api.post(`/receipts/${id}/reprocess`),
@@ -267,14 +286,15 @@ export const receiptAPI = {
  * This is the single source of truth for filter serialization — used by
  * both React Query params and CSV export URL generation.
  */
-export function serializeAnalyticsFilters(filters: Record<string, any>): Record<string, string> {
+export function serializeAnalyticsFilters(filters: AnalyticsFilters): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(filters)) {
     if (value == null || value === '') continue
-    if (key === 'time' && typeof value === 'object') {
-      if (value.range) out['time.range'] = value.range
-      if (value.from) out['time.from'] = value.from
-      if (value.to) out['time.to'] = value.to
+    if (key === 'time' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      const v = value as { range?: string; from?: string; to?: string };
+      if (v.range) out['time.range'] = v.range
+      if (v.from) out['time.from'] = v.from
+      if (v.to) out['time.to'] = v.to
     } else if (Array.isArray(value)) {
       if (value.length > 0) out[key] = value.join(',')
     } else {
@@ -286,27 +306,27 @@ export function serializeAnalyticsFilters(filters: Record<string, any>): Record<
 
 export const analyticsAPI = {
   // KPIs and overview
-  getKPIs: (filters = {}) => api.get('/analytics/kpis', { params: serializeAnalyticsFilters(filters) }),
-  getSpendOverTime: (filters = {}) => api.get('/analytics/spend-over-time', { params: serializeAnalyticsFilters(filters) }),
-  getCategoryBreakdown: (filters = {}) => api.get('/analytics/category-breakdown', { params: serializeAnalyticsFilters(filters) }),
-  getSpendingOverview: (filters = {}) => api.get('/analytics/spending-overview', { params: serializeAnalyticsFilters(filters) }),
-  getExpenseTrends: (filters = {}) => api.get('/analytics/expense-trends', { params: serializeAnalyticsFilters(filters) }),
+  getKPIs: (filters: AnalyticsFilters = {}) => api.get('/analytics/kpis', { params: serializeAnalyticsFilters(filters) }),
+  getSpendOverTime: (filters: AnalyticsFilters = {}) => api.get('/analytics/spend-over-time', { params: serializeAnalyticsFilters(filters) }),
+  getCategoryBreakdown: (filters: AnalyticsFilters = {}) => api.get('/analytics/category-breakdown', { params: serializeAnalyticsFilters(filters) }),
+  getSpendingOverview: (filters: AnalyticsFilters = {}) => api.get('/analytics/spending-overview', { params: serializeAnalyticsFilters(filters) }),
+  getExpenseTrends: (filters: AnalyticsFilters = {}) => api.get('/analytics/expense-trends', { params: serializeAnalyticsFilters(filters) }),
 
   // Partners and relationships
-  getTopPartners: (filters = {}) => api.get('/analytics/top-partners', { params: serializeAnalyticsFilters(filters) }),
+  getTopPartners: (filters: AnalyticsFilters = {}) => api.get('/analytics/top-partners', { params: serializeAnalyticsFilters(filters) }),
 
   // Group-specific analytics
   getBalanceMatrix: (groupId: string) => api.get(`/analytics/balance-matrix?groupId=${groupId}`),
   getSettlementSuggestions: (groupId: string) => api.get(`/analytics/simplify?groupId=${groupId}`),
 
   // Aging and settlements
-  getAgingBuckets: (filters = {}) => api.get('/analytics/aging', { params: serializeAnalyticsFilters(filters) }),
+  getAgingBuckets: (filters: AnalyticsFilters = {}) => api.get('/analytics/aging', { params: serializeAnalyticsFilters(filters) }),
 
   // Data export
-  getLedger: (filters = {}) => api.get('/analytics/ledger', { params: serializeAnalyticsFilters(filters) }),
-  exportCSV: (filters = {}) => api.get('/analytics/export/csv', { params: serializeAnalyticsFilters(filters) }),
+  getLedger: (filters: AnalyticsFilters = {}) => api.get('/analytics/ledger', { params: serializeAnalyticsFilters(filters) }),
+  exportCSV: (filters: AnalyticsFilters = {}) => api.get('/analytics/export/csv', { params: serializeAnalyticsFilters(filters) }),
   /** Build a URL suitable for window.open() that uses the same serializer */
-  buildCSVExportURL: (filters = {}) => {
+  buildCSVExportURL: (filters: AnalyticsFilters = {}) => {
     const params = new URLSearchParams(serializeAnalyticsFilters(filters))
     return `${API_BASE_URL}/analytics/export/csv?${params.toString()}`
   },
@@ -333,7 +353,7 @@ export const calendarAPI = {
   getMonth: (params: { year: number; month: number; mode?: 'personal' | 'group' | 'all'; groupIds?: string[]; baseCurrency?: string }) =>
     api.get("/calendar/month", { params }),
   getIntegrations: () => api.get("/calendar/integrations"),
-  connectProvider: (provider: string, data: any) => api.post(`/calendar/connect/${provider}`, data),
+  connectProvider: (provider: string, data: CalendarProviderPayload) => api.post(`/calendar/connect/${provider}`, data),
   disconnectProvider: (provider: string) => api.delete(`/calendar/disconnect/${provider}`),
   syncEvents: () => api.post("/calendar/sync"),
   getEvents: (params: { start: string; end: string; groupId?: string }) =>
@@ -357,11 +377,11 @@ export const reminderAPI = {
 
 export const adminAPI = {
   getDashboard: () => api.get("/admin/dashboard"),
-  getUsers: (params: any) => api.get("/admin/users", { params }),
-  updateUser: (id: string, data: any) => api.put(`/admin/users/${id}`, data),
-  getGroups: (params: any) => api.get("/admin/groups", { params }),
-  getExpenses: (params: any) => api.get("/admin/expenses", { params }),
+  getUsers: (params: CollectionParams) => api.get("/admin/users", { params }),
+  updateUser: (id: string, data: AdminPayload) => api.put(`/admin/users/${id}`, data),
+  getGroups: (params: CollectionParams) => api.get("/admin/groups", { params }),
+  getExpenses: (params: CollectionParams) => api.get("/admin/expenses", { params }),
   getReports: () => api.get("/admin/reports"),
   getFeatureFlags: () => api.get("/admin/feature-flags"),
-  updateFeatureFlag: (id: string, data: any) => api.put(`/admin/feature-flags/${id}`, data),
+  updateFeatureFlag: (id: string, data: AdminPayload) => api.put(`/admin/feature-flags/${id}`, data),
 }

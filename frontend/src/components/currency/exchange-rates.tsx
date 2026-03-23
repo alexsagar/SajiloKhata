@@ -37,6 +37,8 @@ interface HistoricalRate {
   rate: number
 }
 
+type TooltipValue = number | string
+
 // Mock exchange rates data
 const mockExchangeRates: ExchangeRate[] = [
   {
@@ -187,7 +189,7 @@ export function ExchangeRates() {
       })))
       
       setLastRefresh(new Date())
-    } catch (error) {
+    } catch (_error) {
       
     } finally {
       setIsLoading(false)
@@ -519,7 +521,7 @@ export function ExchangeRates() {
                         />
                         <Tooltip 
                           labelFormatter={(value) => new Date(value).toLocaleDateString()}
-                          formatter={(value: any) => [formatRate(value), 'Rate']}
+                          formatter={(value: TooltipValue) => [formatRate(Number(value)), "Rate"]}
                         />
                         <Line 
                           type="monotone" 

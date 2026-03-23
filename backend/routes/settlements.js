@@ -197,6 +197,11 @@ router.patch("/:id/confirm", async (req, res) => {
       return ok(res, settlement)
     }
 
+    // Capture raw ObjectIds BEFORE populate turns them into full user objects.
+    // String(populatedDoc) yields "[object Object]", breaking ID comparisons.
+    const fromUserOid = settlement.fromUserId
+    const toUserOid = settlement.toUserId
+
     await settlement.populate("fromUserId", "firstName lastName username avatar")
     await settlement.populate("toUserId", "firstName lastName username avatar")
 
@@ -216,7 +221,7 @@ router.patch("/:id/confirm", async (req, res) => {
     await settlement.save()
     await Group.updateOne(
       { _id: settlement.groupId },
-      { $set: { settlementsReconciledAt: settlement.confirmedAt } },
+      { $unset: { settlementsReconciledAt: "" } },
     )
 
     // Apply this confirmed settlement against active expense splits so UI and balances
@@ -227,9 +232,9 @@ router.patch("/:id/confirm", async (req, res) => {
       const relatedExpenses = await Expense.find({
         groupId: settlement.groupId,
         status: "active",
-        paidBy: settlement.toUserId,
+        paidBy: toUserOid,
         createdAt: { $lte: settlementCutoff },
-        "splits.user": settlement.fromUserId,
+        "splits.user": fromUserOid,
         "splits.settled": { $ne: true },
       }).sort({ date: 1, createdAt: 1 })
 
@@ -240,7 +245,7 @@ router.patch("/:id/confirm", async (req, res) => {
 
         for (const split of expense.splits) {
           if (remainingCents <= 0) break
-          if (String(split.user) !== String(settlement.fromUserId)) continue
+          if (String(split.user) !== String(fromUserOid)) continue
           if (split.settled) continue
 
           const dueCents = Math.max(0, Number(split.amountCents || 0))

@@ -13,6 +13,30 @@ import { useAuth } from "@/contexts/auth-context"
 import Link from "next/link"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
+interface GroupListItem {
+  id?: string
+  _id?: string
+  name?: string
+  description?: string
+  members?: unknown[]
+  isActive?: boolean
+  totalExpenses?: number
+  createdAt?: string
+}
+
+interface QueryEnvelope<T> {
+  data?: T | QueryEnvelope<T>
+}
+
+function unwrapQueryEnvelope<T>(value: QueryEnvelope<T> | undefined): T | undefined {
+  if (!value) return undefined
+  const candidate = value.data
+  if (candidate && typeof candidate === "object" && "data" in candidate) {
+    return (candidate as QueryEnvelope<T>).data as T | undefined
+  }
+  return candidate as T | undefined
+}
+
 export function GroupsList() {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || "USD"
@@ -30,7 +54,7 @@ export function GroupsList() {
     )
   }
 
-  const userGroups = (groups as any)?.data?.data || (groups as any)?.data || []
+  const userGroups = unwrapQueryEnvelope<GroupListItem[]>(groups?.data as QueryEnvelope<GroupListItem[]> | undefined) || []
 
   if (userGroups.length === 0) {
     return (
@@ -44,7 +68,7 @@ export function GroupsList() {
 
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-      {userGroups.map((group: any) => (
+      {userGroups.map((group) => (
         <KanbanCard key={group.id ?? group._id} className="hover:-translate-y-0.5 hover:bg-white/[0.06] cursor-pointer">
           <KanbanCardContent className="p-6">
             <div className="flex items-start justify-between mb-4">

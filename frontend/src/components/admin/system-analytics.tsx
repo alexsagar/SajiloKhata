@@ -9,16 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Progress } from "@/components/ui/progress"
 import { 
   TrendingUp, 
-  TrendingDown, 
   Users, 
   DollarSign, 
-  Activity,
   Server,
-  Database,
   Zap,
-  Globe,
-  Smartphone,
-  Monitor,
   Download,
   RefreshCw
 } from "lucide-react"
@@ -40,11 +34,42 @@ import {
 } from "recharts"
 
 // Empty initial data - will be populated from API
-const userGrowthData: any[] = []
-const revenueData: any[] = []
-const platformData: any[] = []
-const featureUsageData: any[] = []
-const performanceData: any[] = []
+interface UserGrowthPoint {
+  month: string
+  users: number
+  newUsers: number
+}
+
+interface RevenuePoint {
+  month: string
+  revenue: number
+  subscriptions: number
+}
+
+interface PlatformPoint {
+  name: string
+  value: number
+  color: string
+}
+
+interface FeatureUsagePoint {
+  feature: string
+  users: number
+  usage: number
+}
+
+interface PerformancePoint {
+  time: string
+  responseTime: number
+  throughput: number
+  errorRate: number
+}
+
+const userGrowthData: UserGrowthPoint[] = []
+const revenueData: RevenuePoint[] = []
+const platformData: PlatformPoint[] = []
+const featureUsageData: FeatureUsagePoint[] = []
+const performanceData: PerformancePoint[] = []
 const systemMetrics = {
   totalUsers: 0,
   activeUsers: 0,
@@ -60,7 +85,7 @@ const systemMetrics = {
 
 export function SystemAnalytics() {
   const [timeRange, setTimeRange] = useState('7d')
-  const [refreshTime, setRefreshTime] = useState(new Date())
+  const [, setRefreshTime] = useState(new Date())
 
   const handleRefresh = () => {
     setRefreshTime(new Date())

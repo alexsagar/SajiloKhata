@@ -17,6 +17,7 @@ import { formatRelativeTime } from "@/lib/utils"
 import { toast } from "@/hooks/use-toast"
 import Link from "next/link"
 import { useNotifications } from "@/contexts/notification-context"
+import type { Notification } from "@/types/notification"
 
 interface NotificationsCenterProps {
   children: React.ReactNode
@@ -61,7 +62,7 @@ export function NotificationsCenter({ children }: NotificationsCenterProps) {
     }
   }
 
-  const getNotificationAction = (notification: any) => {
+  const getNotificationAction = (notification: Notification) => {
     if (notification.data?.actionUrl) {
       return notification.data.actionUrl
     }
@@ -121,12 +122,12 @@ export function NotificationsCenter({ children }: NotificationsCenterProps) {
             </div>
           ) : (
             <div className="divide-y">
-              {notificationsList.map((notification: any) => {
+              {notificationsList.map((notification) => {
                 const actionUrl = getNotificationAction(notification)
                 
                 return (
                   <div
-                    key={notification._id}
+                    key={notification.id}
                     className={`p-4 hover:bg-muted/50 transition-colors ${
                       !notification.read ? 'bg-primary/5' : ''
                     }`}
@@ -155,7 +156,7 @@ export function NotificationsCenter({ children }: NotificationsCenterProps) {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => handleMarkAsRead(notification._id)}
+                                onClick={() => handleMarkAsRead(notification.id)}
                               >
                                 <Check className="h-3 w-3" />
                               </Button>
@@ -163,7 +164,7 @@ export function NotificationsCenter({ children }: NotificationsCenterProps) {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleDelete(notification._id)}
+                              onClick={() => handleDelete(notification.id)}
                             >
                               <Trash2 className="h-3 w-3" />
                             </Button>

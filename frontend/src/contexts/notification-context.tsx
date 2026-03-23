@@ -6,6 +6,17 @@ import { notificationAPI } from "@/lib/api"
 import { useAuth } from "./auth-context"
 import type { Notification } from "@/types/notification"
 
+type NotificationsEnvelope = {
+  notifications?: Notification[]
+  data?: {
+    notifications?: Notification[]
+  }
+}
+
+type UnreadCountEnvelope = {
+  unreadCount?: number
+}
+
 interface NotificationContextType {
   notifications: Notification[]
   unreadCount: number
@@ -34,18 +45,21 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           notificationAPI.getNotifications({ page: 1, limit: 20 }),
           notificationAPI.getUnreadCount(),
         ])
-        const data = listResponse?.data
+        const data = listResponse?.data as NotificationsEnvelope | undefined
         const list = data?.notifications || data?.data?.notifications || []
         const normalized = Array.isArray(list)
-          ? list.map((n: any) => ({
-              ...n,
-              id: n?.id || n?._id || String(n?._id || n?.id || ""),
-              read: Boolean(n?.isRead ?? n?.read),
-            }))
+          ? list.map((n) => {
+              const raw = n as Notification & { _id?: string }
+              return {
+                ...n,
+                id: raw.id || raw._id || "",
+                read: Boolean(raw.isRead ?? raw.read),
+              }
+            })
           : []
         setNotifications(normalized)
-        setUnreadCount(Number(unreadResponse?.data?.unreadCount || 0))
-      } catch (error: any) {
+        setUnreadCount(Number((unreadResponse?.data as UnreadCountEnvelope | undefined)?.unreadCount || 0))
+      } catch {
         if (process.env.NODE_ENV !== "production") {
         }
         setDisabled(true)
@@ -71,7 +85,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       await notificationAPI.markAsRead(id)
       setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)))
       setUnreadCount((prev) => Math.max(0, prev - 1))
-    } catch (error) {
+    } catch {
       
     }
   }
@@ -81,7 +95,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       await notificationAPI.markAllAsRead()
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
       setUnreadCount(0)
-    } catch (error) {
+    } catch {
       
     }
   }
@@ -102,7 +116,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       if (deletingUnread) {
         setUnreadCount((prev) => Math.max(0, prev - 1))
       }
-    } catch (error) {
+    } catch {
       
     }
   }

@@ -11,8 +11,7 @@ import {
   Edit, 
   Trash2, 
   User,
-  Calendar,
-  Tag
+  Calendar
 } from "lucide-react"
 import {
   DropdownMenu,
@@ -237,7 +236,7 @@ export function ExpenseKanbanCard({
                 <span className="font-medium">{expense.splits.length} people</span>
               </div>
               <div className="flex flex-wrap gap-1 mt-2">
-                {expense.splits.slice(0, 3).map((split, index) => (
+                {expense.splits.slice(0, 3).map((split, _index) => (
                   <div key={split.user.id} className="flex items-center gap-1">
                     <Avatar className="h-5 w-5">
                       <AvatarImage src={split.user.avatar} />

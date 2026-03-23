@@ -8,11 +8,11 @@ export function isLocalStorageAvailable(): boolean {
   return isBrowser() && !!window.localStorage
 }
 
-export function setItem(key: string, value: any) {
+export function setItem<T>(key: string, value: T) {
   if (isLocalStorageAvailable()) {
     try {
       localStorage.setItem(key, JSON.stringify(value));
-    } catch (error) {
+    } catch {
       ;
     }
   }
@@ -23,7 +23,7 @@ export function getItem<T>(key: string): T | null {
     try {
       const item = localStorage.getItem(key);
       return item ? JSON.parse(item) : null;
-    } catch (error) {
+    } catch {
       ;
       return null;
     }
@@ -35,7 +35,7 @@ export function removeItem(key: string): void {
   if (isLocalStorageAvailable()) {
     try {
       localStorage.removeItem(key);
-    } catch (error) {
+    } catch {
       ;
     }
   }
@@ -45,7 +45,7 @@ export function clear(): void {
   if (isLocalStorageAvailable()) {
     try {
       localStorage.clear();
-    } catch (error) {
+    } catch {
       ;
     }
   }

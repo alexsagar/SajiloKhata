@@ -192,6 +192,7 @@ export function CreatePersonalExpenseDialog({
     if (key === lastAppliedReceiptKey) return
     handleReceiptProcessed(initialReceiptData)
     setLastAppliedReceiptKey(key)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialReceiptData, lastAppliedReceiptKey])
 
   return (

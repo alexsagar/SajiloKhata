@@ -11,10 +11,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Camera, Loader2 } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query"
 import { userAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 import { getInitials } from "@/lib/utils"
+import type { User } from "@/types/user"
 
 const profileSchema = z.object({
   firstName: z.string().min(2, "First name must be at least 2 characters"),
@@ -26,13 +27,33 @@ const profileSchema = z.object({
 
 type ProfileFormData = z.infer<typeof profileSchema>
 
+interface ProfileUser extends User {
+  phone?: string
+  bio?: string
+}
+
+interface UpdateProfileResponse {
+  data?: {
+    user?: Partial<ProfileUser>
+    avatarUrl?: string
+    devOtp?: string
+  }
+}
+
+interface ErrorWithMessage {
+  message?: string
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
 export function ProfileSettings() {
   const { user, updateUser } = useAuth()
-  const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [newEmail, setNewEmail] = useState("")
   const [emailOtp, setEmailOtp] = useState("")
   const [otpCooldown, setOtpCooldown] = useState(0)
-  const queryClient = useQueryClient()
 
   const {
     register,
@@ -44,21 +65,21 @@ export function ProfileSettings() {
       firstName: user?.firstName || "",
       lastName: user?.lastName || "",
       email: user?.email || "",
-      phone: (user as any)?.phone || "",
-      bio: (user as any)?.bio || "",
+      phone: (user as ProfileUser | null)?.phone || "",
+      bio: (user as ProfileUser | null)?.bio || "",
     },
   })
 
   const updateProfileMutation = useMutation({
     mutationFn: userAPI.updateProfile,
-    onSuccess: (response) => {
-      updateUser(response.data.user)
+    onSuccess: (response: UpdateProfileResponse) => {
+      if (response.data?.user) updateUser(response.data.user)
       toast({
         title: "Profile updated",
         description: "Your profile has been updated successfully.",
       })
     },
-    onError: (error: any) => {
+    onError: (error: ErrorWithMessage) => {
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to update profile",
@@ -69,14 +90,14 @@ export function ProfileSettings() {
 
   const uploadAvatarMutation = useMutation({
     mutationFn: userAPI.uploadAvatar,
-    onSuccess: (response) => {
-      updateUser({ avatar: response.data.avatarUrl })
+    onSuccess: (response: UpdateProfileResponse) => {
+      if (response.data?.avatarUrl) updateUser({ avatar: response.data.avatarUrl })
       toast({
         title: "Avatar updated",
         description: "Your profile picture has been updated.",
       })
     },
-    onError: (error: any) => {
+    onError: (error: ErrorWithMessage) => {
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to upload avatar",
@@ -87,14 +108,14 @@ export function ProfileSettings() {
 
   const requestEmailOtpMutation = useMutation({
     mutationFn: (payload: { newEmail: string; password?: string }) => userAPI.requestEmailChangeOtp(payload),
-    onSuccess: (response) => {
+    onSuccess: (response: UpdateProfileResponse) => {
       const devOtp = response?.data?.devOtp
       toast({
         title: "Verification code sent",
         description: devOtp ? `OTP (dev): ${devOtp}` : "Check your new email inbox for the OTP.",
       })
     },
-    onError: (error: any) => {
+    onError: (error: ErrorWithMessage) => {
       toast({
         title: "Failed to send OTP",
         description: error?.message || "Could not send verification code.",
@@ -105,7 +126,7 @@ export function ProfileSettings() {
 
   const verifyEmailOtpMutation = useMutation({
     mutationFn: (payload: { otp: string }) => userAPI.verifyEmailChangeOtp(payload),
-    onSuccess: (response) => {
+    onSuccess: (response: UpdateProfileResponse) => {
       updateUser(response?.data?.user || {})
       setNewEmail("")
       setEmailOtp("")
@@ -114,7 +135,7 @@ export function ProfileSettings() {
         description: "Your email has been changed successfully.",
       })
     },
-    onError: (error: any) => {
+    onError: (error: ErrorWithMessage) => {
       toast({
         title: "Failed to verify OTP",
         description: error?.message || "Invalid or expired code.",
@@ -125,7 +146,7 @@ export function ProfileSettings() {
 
   const resendEmailOtpMutation = useMutation({
     mutationFn: () => userAPI.resendEmailChangeOtp(),
-    onSuccess: (response) => {
+    onSuccess: (response: UpdateProfileResponse) => {
       const devOtp = response?.data?.devOtp
       setOtpCooldown(60)
       toast({
@@ -133,7 +154,7 @@ export function ProfileSettings() {
         description: devOtp ? `OTP (dev): ${devOtp}` : "A new OTP was sent to your pending email.",
       })
     },
-    onError: (error: any) => {
+    onError: (error: ErrorWithMessage) => {
       toast({
         title: "Failed to resend OTP",
         description: error?.message || "Please try again shortly.",
@@ -162,7 +183,6 @@ export function ProfileSettings() {
   const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file) {
-      setAvatarFile(file)
       const formData = new FormData()
       formData.append('avatar', file)
       uploadAvatarMutation.mutate(formData)

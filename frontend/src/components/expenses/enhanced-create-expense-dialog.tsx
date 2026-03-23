@@ -4,23 +4,19 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Checkbox } from "@/components/ui/checkbox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { 
-  DollarSign, 
   Users, 
   Calculator,
   X,
   Search,
   Plus,
-  Receipt,
-  UserPlus
+  Receipt
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { formatCurrencyWithSymbol } from "@/lib/currency"
@@ -51,12 +47,28 @@ interface Participant {
 interface CreateExpenseDialogProps {
   children: React.ReactNode
   groupId?: string
-  onExpenseCreated?: (expense: any) => void
+  onExpenseCreated?: (expense: CreatedExpense) => void
 }
 
 // Empty initial data - will be populated from API
 const mockFriends: Friend[] = []
 const mockGroups: Group[] = []
+
+type SplitMethod = "equal" | "custom" | "percentage"
+
+interface CreatedExpense {
+  id: string
+  title: string
+  amount: number
+  description: string
+  category: string
+  paidBy: Participant
+  participants: Participant[]
+  splitMethod: SplitMethod
+  groupId?: string
+  createdAt: string
+  date: string
+}
 
 export function EnhancedCreateExpenseDialog({ children, groupId, onExpenseCreated }: CreateExpenseDialogProps) {
   const { user } = useAuth()
@@ -67,10 +79,10 @@ export function EnhancedCreateExpenseDialog({ children, groupId, onExpenseCreate
   const [expenseDescription, setExpenseDescription] = useState('')
   const [expenseCategory, setExpenseCategory] = useState('')
   const [participants, setParticipants] = useState<Participant[]>([])
-  const [splitMethod, setSplitMethod] = useState<'equal' | 'custom' | 'percentage'>('equal')
+  const [splitMethod, setSplitMethod] = useState<SplitMethod>("equal")
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedTab, setSelectedTab] = useState<'friends' | 'groups'>('friends')
-  const { toast } = useToast()
+  const { toast: _toast } = useToast()
 
   // Initialize with current user
   const currentUser: Participant = {
@@ -279,7 +291,7 @@ export function EnhancedCreateExpenseDialog({ children, groupId, onExpenseCreate
                 <h3 className="text-lg font-semibold">Split With</h3>
               </div>
               
-              <Tabs value={selectedTab} onValueChange={(value: any) => setSelectedTab(value)} className="space-y-4">
+              <Tabs value={selectedTab} onValueChange={(value) => setSelectedTab(value as "friends" | "groups")} className="space-y-4">
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="friends">Add Friends</TabsTrigger>
                   <TabsTrigger value="groups">Add from Groups</TabsTrigger>
@@ -374,7 +386,7 @@ export function EnhancedCreateExpenseDialog({ children, groupId, onExpenseCreate
                 Split Method
               </h3>
               
-              <RadioGroup value={splitMethod} onValueChange={(value: any) => setSplitMethod(value)}>
+              <RadioGroup value={splitMethod} onValueChange={(value) => setSplitMethod(value as SplitMethod)}>
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="equal" id="equal" />
                   <Label htmlFor="equal">Split equally</Label>

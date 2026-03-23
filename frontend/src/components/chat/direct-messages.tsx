@@ -18,7 +18,6 @@ import {
   Video,
   MessageSquare,
   UserPlus,
-  Plus,
   RefreshCw,
   Loader2,
   ChevronLeft
@@ -58,6 +57,62 @@ interface Conversation {
   messages: DirectMessage[]
 }
 
+interface UserLike {
+  _id?: string
+  id?: string
+  firstName?: string
+  lastName?: string
+  username?: string
+  email?: string
+  avatar?: string
+}
+
+interface FriendApiRecord extends UserLike {
+  _id: string
+  email: string
+}
+
+interface ConversationApiRecord {
+  _id?: string
+  id?: string
+  type?: string
+  participants?: Array<UserLike | string>
+  unreadCount?: number
+}
+
+interface MessageApiRecord {
+  _id?: string
+  id?: string
+  sender?: UserLike | string
+  text?: string
+  createdAt?: string
+}
+
+interface ConversationEventDetail {
+  conversationId?: string
+}
+
+interface MessageEventDetail extends ConversationEventDetail {
+  message?: MessageApiRecord
+}
+
+interface TypingEventDetail extends ConversationEventDetail {
+  userId?: string
+}
+
+interface WindowSocketEvent<T> extends Event {
+  detail?: T
+}
+
+interface ApiErrorLike {
+  message?: string
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
 // Empty initial data - will be populated from API
 const mockFriends: Friend[] = []
 const mockConversations: Conversation[] = []
@@ -69,8 +124,15 @@ const processedMessageIds = new Set<string>()
 const messagesBeingAdded = new Set<string>()
 const MONGO_OBJECT_ID_REGEX = /^[a-f\d]{24}$/i
 
-function getSenderId(sender: any) {
-  return String(sender?._id || sender?.id || sender || "")
+function getSenderId(sender: UserLike | string | null | undefined) {
+  if (typeof sender === "string") {
+    return sender
+  }
+  return String(sender?._id || sender?.id || "")
+}
+
+function formatMessageTime(value?: string) {
+  return new Date(value || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 }
 
 export function DirectMessages() {
@@ -116,6 +178,7 @@ export function DirectMessages() {
   const searchParams = useSearchParams()
   const { socket, isConnected, onlineUsers, joinConversations } = useSocket()
   const isServerConversationId = useCallback((id: string) => MONGO_OBJECT_ID_REGEX.test(String(id || "")), [])
+  const currentUserId = getSenderId(user as UserLike | undefined)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -138,7 +201,7 @@ export function DirectMessages() {
         if (!mounted) return
 
         const friendsData = Array.isArray(friendsRes.data?.data) ? friendsRes.data.data : []
-        const mappedFriends: Friend[] = friendsData.map((u: any) => ({
+        const mappedFriends: Friend[] = friendsData.map((u: FriendApiRecord) => ({
           id: u._id,
           name: [u.firstName, u.lastName].filter(Boolean).join(" "),
           email: u.email,
@@ -148,15 +211,14 @@ export function DirectMessages() {
         setFriends(mappedFriends)
 
         const convs = Array.isArray(convsRes.data?.data) ? convsRes.data.data : []
-        const myId = (user as any)?.id || (user as any)?._id
-        const dmConvs = convs
-          .filter((c: any) => c.type === "dm")
-          .map((c: any) => {
+        const dmConvs: Conversation[] = convs
+          .filter((c: ConversationApiRecord) => c.type === "dm")
+          .map((c: ConversationApiRecord) => {
             // Participants may be populated objects (with firstName etc.) or plain ObjectId strings
             const participants = c.participants || []
-            const otherParticipant = participants.find((p: any) => {
+            const otherParticipant = participants.find((p) => {
               const pid = typeof p === 'object' ? String(p._id) : String(p)
-              return pid !== String(myId)
+              return pid !== currentUserId
             })
             const otherId = typeof otherParticipant === 'object'
               ? String(otherParticipant._id)
@@ -203,13 +265,13 @@ export function DirectMessages() {
         const conversationsMerged: Conversation[] = [
           ...dmConvs,
           ...mappedFriends
-            .filter((f) => !dmConvs.some((c: any) => c.friend.id === f.id))
+            .filter((f) => !dmConvs.some((c) => c.friend.id === f.id))
             .map((f) => ({ id: `local-${f.id}`, friend: f, unreadCount: 0, messages: [] })),
         ]
 
         setConversations(conversationsMerged)
         // Join all existing DM conversations for real-time messages
-        const idsToJoin = dmConvs.map((c: any) => c.id).filter((id: any) => !String(id).startsWith("local-"))
+        const idsToJoin = dmConvs.map((c) => c.id).filter((id) => !String(id).startsWith("local-"))
         joinConversations(idsToJoin)
 
         // If ?dm is present, ensure/upsert and select that DM
@@ -237,13 +299,15 @@ export function DirectMessages() {
             // join this conversation's room
             if (convId) joinConversations([convId])
             setSelectedConversation(ensured)
-          } catch (e: any) {
-            console.error('[Chat] DM upsert error:', e?.message)
+          } catch (e: unknown) {
+            const error = e as ApiErrorLike
+            console.error('[Chat] DM upsert error:', error?.message)
             toast({ title: 'Could not open conversation', variant: 'destructive' })
           }
         }
-      } catch (e: any) {
-        console.error('[Chat] Failed to load conversations:', e?.message)
+      } catch (e: unknown) {
+        const error = e as ApiErrorLike
+        console.error('[Chat] Failed to load conversations:', error?.message)
         toast({ title: 'Failed to load chats', description: 'Please refresh the page.', variant: 'destructive' })
       }
     }
@@ -251,7 +315,7 @@ export function DirectMessages() {
     return () => {
       mounted = false
     }
-  }, [searchParams, user])
+  }, [currentUserId, joinConversations, searchParams, toast])
 
   // Ensure we join conversations when socket connects
   useEffect(() => {
@@ -262,17 +326,14 @@ export function DirectMessages() {
         joinConversations(idsToJoin)
       }
     }
-  }, [isConnected, conversations.length, joinConversations])
+  }, [isConnected, conversations, conversations.length, joinConversations])
 
   // Use refs for stable event handler references
-  const handleNewMessageRef = useRef<((e: any) => void) | undefined>(undefined)
-  const handleOnlineRef = useRef<((e: any) => void) | undefined>(undefined)
-  const handleOfflineRef = useRef<((e: any) => void) | undefined>(undefined)
-  const handlePresenceStateRef = useRef<((e: any) => void) | undefined>(undefined)
+  const handleNewMessageRef = useRef<((e: WindowSocketEvent<MessageEventDetail>) => void) | undefined>(undefined)
 
   // Update the handler refs when dependencies change
   useEffect(() => {
-    handleNewMessageRef.current = (e: any) => {
+    handleNewMessageRef.current = (e: WindowSocketEvent<MessageEventDetail>) => {
 
       const detail = e.detail || {}
       const convId = String(detail.conversationId || '')
@@ -289,7 +350,6 @@ export function DirectMessages() {
 
 
       // Determine if this message is from the current user
-      const currentUserId = String((user as any)?._id || (user as any)?.id || '')
       const senderId = getSenderId(msg.sender)
       const isFromCurrentUser = !!(currentUserId && senderId === currentUserId)
 
@@ -322,7 +382,7 @@ export function DirectMessages() {
             email: '',
             isOnline: false,
           } as Friend
-          const created: Conversation = { id: convId, friend, unreadCount: 0, messages: [newMsg], lastMessage: newMsg as any }
+          const created: Conversation = { id: convId, friend, unreadCount: 0, messages: [newMsg], lastMessage: newMsg }
 
           messagesBeingAdded.add(msgId)
           setTimeout(() => messagesBeingAdded.delete(msgId), 100) // Cleanup after React finishes
@@ -379,7 +439,7 @@ export function DirectMessages() {
         return prev
       })
     }
-  }, [friends, user])
+  }, [currentUserId, friends])
 
   // Sync online status from SocketContext
   useEffect(() => {
@@ -414,11 +474,12 @@ export function DirectMessages() {
 
   // Register event listeners ONCE with stable wrapper functions
   useEffect(() => {
-    const handleNewMessage = (e: any) => handleNewMessageRef.current?.(e)
+    const handleNewMessage = (e: Event) => handleNewMessageRef.current?.(e as WindowSocketEvent<MessageEventDetail>)
 
     // Listen for read receipts
-    const handleReadReceipt = (e: any) => {
-      const detail = e.detail || {}
+    const handleReadReceipt = (e: Event) => {
+      const event = e as WindowSocketEvent<ConversationEventDetail>
+      const detail = event.detail || {}
       const convId = String(detail.conversationId || '')
       if (!convId) return
       setConversations(prev => prev.map(c =>
@@ -427,8 +488,9 @@ export function DirectMessages() {
     }
 
     // Listen for typing indicators
-    const handleTypingStart = (e: any) => {
-      const { conversationId, userId } = e.detail || {}
+    const handleTypingStart = (e: Event) => {
+      const event = e as WindowSocketEvent<TypingEventDetail>
+      const { conversationId, userId } = event.detail || {}
       if (!conversationId || !userId) return
       setTypingUsers(prev => {
         const current = prev[conversationId] || []
@@ -436,8 +498,9 @@ export function DirectMessages() {
         return { ...prev, [conversationId]: [...current, userId] }
       })
     }
-    const handleTypingStop = (e: any) => {
-      const { conversationId, userId } = e.detail || {}
+    const handleTypingStop = (e: Event) => {
+      const event = e as WindowSocketEvent<TypingEventDetail>
+      const { conversationId, userId } = event.detail || {}
       if (!conversationId || !userId) return
       setTypingUsers(prev => {
         const current = prev[conversationId] || []
@@ -488,10 +551,11 @@ export function DirectMessages() {
         setSelectedConversation((prev) =>
           prev && String(prev.id) === selectedConvId ? { ...prev, id: convId } : prev
         )
-      } catch (e: any) {
+      } catch (e: unknown) {
+        const error = e as ApiErrorLike
         toast({
           title: "Failed to open chat",
-          description: e?.response?.data?.message || e?.message || "",
+          description: error?.response?.data?.message || error?.message || "",
           variant: "destructive",
         })
         return
@@ -504,9 +568,9 @@ export function DirectMessages() {
     // Optimistic: show message immediately
     const optimisticMsg: DirectMessage = {
       id: tempId,
-      senderId: String((user as any)?._id || (user as any)?.id || 'current'),
+      senderId: currentUserId || "current",
       senderName: 'You',
-      senderAvatar: (user as any)?.avatar || '',
+      senderAvatar: (user as UserLike | undefined)?.avatar || '',
       content: text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isCurrentUser: true,
@@ -544,7 +608,7 @@ export function DirectMessages() {
         id: serverId,
         senderId: getSenderId(msgData.sender) || optimisticMsg.senderId,
         senderName: 'You',
-        senderAvatar: (user as any)?.avatar || '',
+        senderAvatar: (user as UserLike | undefined)?.avatar || '',
         content: msgData.text || text,
         timestamp: new Date(msgData.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         isCurrentUser: true,
@@ -561,7 +625,8 @@ export function DirectMessages() {
           ? { ...prev, messages: prev.messages.map(m => m.id === tempId ? reconciledMsg : m), lastMessage: reconciledMsg }
           : prev
       )
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e as ApiErrorLike
       // Mark as failed — user can retry
       setConversations(prev => prev.map(conv =>
         conv.id === convId
@@ -573,7 +638,7 @@ export function DirectMessages() {
           ? { ...prev, messages: prev.messages.map(m => m.id === tempId ? { ...m, _status: 'error' as const } : m) }
           : prev
       )
-      toast({ title: "Failed to send", description: e?.response?.data?.message || "", variant: "destructive" })
+      toast({ title: "Failed to send", description: error?.response?.data?.message || "", variant: "destructive" })
     }
   }
 
@@ -598,10 +663,11 @@ export function DirectMessages() {
         setSelectedConversation((prev) =>
           prev && String(prev.id) === selectedConvId ? { ...prev, id: convId } : prev
         )
-      } catch (e: any) {
+      } catch (e: unknown) {
+        const error = e as ApiErrorLike
         toast({
           title: 'Retry failed',
-          description: e?.response?.data?.message || e?.message || '',
+          description: error?.response?.data?.message || error?.message || '',
           variant: 'destructive',
         })
         return
@@ -651,9 +717,10 @@ export function DirectMessages() {
           ? { ...prev, messages: prev.messages.map(m => m.id === tempId ? reconciledMsg : m) }
           : prev
       )
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e as ApiErrorLike
       updateStatus('error')
-      toast({ title: 'Retry failed', description: e?.response?.data?.message || '', variant: 'destructive' })
+      toast({ title: 'Retry failed', description: error?.response?.data?.message || '', variant: 'destructive' })
     }
   }
 
@@ -692,7 +759,8 @@ export function DirectMessages() {
     const msgs = selectedConversation.messages
     if (msgs.length === 0) return
 
-    const oldestCreatedAt = msgs[0]?.timestamp  // we need the raw createdAt
+    // oldestCreatedAt unused — we use API cursor instead
+    // const oldestCreatedAt = msgs[0]?.timestamp
     // Use the oldest message ID to find cursor — we stored ISO string in load
     // Better: use the raw createdAt from the original data
     // For now, use the API cursor param
@@ -710,15 +778,14 @@ export function DirectMessages() {
 
       if (!nextCursor) setHasMore(prev => ({ ...prev, [convId]: false }))
 
-      const myId = String((user as any)?._id || (user as any)?.id)
-      const olderMsgs: DirectMessage[] = allData.map((msg: any) => ({
+      const olderMsgs: DirectMessage[] = allData.map((msg: MessageApiRecord) => ({
         id: String(msg._id),
         senderId: getSenderId(msg.sender),
-        senderName: getSenderId(msg.sender) === myId ? 'You' : selectedConversation.friend.name,
+        senderName: getSenderId(msg.sender) === currentUserId ? 'You' : selectedConversation.friend.name,
         senderAvatar: selectedConversation.friend.avatar,
         content: msg.text || '',
-        timestamp: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isCurrentUser: getSenderId(msg.sender) === myId,
+        timestamp: formatMessageTime(msg.createdAt),
+        isCurrentUser: getSenderId(msg.sender) === currentUserId,
         _status: 'sent' as const,
       }))
 
@@ -741,8 +808,9 @@ export function DirectMessages() {
           scrollEl.scrollTop = newScrollHeight - prevScrollHeight
         }
       })
-    } catch (e: any) {
-      console.error('[Chat] Load older messages error:', e?.message)
+    } catch (e: unknown) {
+      const error = e as ApiErrorLike
+      console.error('[Chat] Load older messages error:', error?.message)
     } finally {
       setLoadingMore(false)
     }
@@ -788,14 +856,14 @@ export function DirectMessages() {
         const res = await conversationAPI.getMessages(selectedConversation.id)
         const messagesData = res.data?.data || []
 
-        const loadedMessages: DirectMessage[] = messagesData.map((msg: any) => ({
+        const loadedMessages: DirectMessage[] = messagesData.map((msg: MessageApiRecord) => ({
           id: String(msg._id),
           senderId: getSenderId(msg.sender),
-          senderName: getSenderId(msg.sender) === String((user as any)?._id || (user as any)?.id) ? 'You' : selectedConversation.friend.name,
+          senderName: getSenderId(msg.sender) === currentUserId ? 'You' : selectedConversation.friend.name,
           senderAvatar: selectedConversation.friend.avatar,
           content: msg.text || '',
-          timestamp: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isCurrentUser: getSenderId(msg.sender) === String((user as any)?._id || (user as any)?.id),
+          timestamp: formatMessageTime(msg.createdAt),
+          isCurrentUser: getSenderId(msg.sender) === currentUserId,
         }))
 
 
@@ -810,14 +878,16 @@ export function DirectMessages() {
             ? { ...conv, messages: loadedMessages }
             : conv
         ))
-      } catch (error: any) {
-        console.error('[Chat] Load messages error:', error?.message)
+      } catch (error: unknown) {
+        const apiError = error as ApiErrorLike
+        console.error('[Chat] Load messages error:', apiError?.message)
         toast({ title: 'Failed to load messages', description: 'Tap to retry.', variant: 'destructive' })
       }
     }
 
     loadMessages()
-  }, [selectedConversation?.id, user, isServerConversationId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserId, isServerConversationId, selectedConversation?.friend.avatar, selectedConversation?.friend.name, selectedConversation?.id, toast])
 
   const showConversationList = !isMobile || !selectedConversation
 
@@ -919,7 +989,7 @@ export function DirectMessages() {
                     <Search className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
                     <h3 className="text-base font-medium mb-2">No friends found</h3>
                     <p className="text-muted-foreground text-sm">
-                      No friends match your search "{searchTerm}"
+                      No friends match your search &quot;{searchTerm}&quot;
                     </p>
                   </div>
                 )}
@@ -986,7 +1056,7 @@ export function DirectMessages() {
               {/* Messages Area */}
               <KanbanCardContent className="flex-1 p-0">
                 <ScrollArea ref={scrollAreaRef} className="h-[58dvh] lg:h-[calc(100vh-26rem)] p-3 bg-gradient-to-b from-transparent via-muted/10 to-transparent"
-                  onScrollCapture={(e: any) => {
+                  onScrollCapture={(e: React.UIEvent<HTMLDivElement>) => {
                     const el = e.target as HTMLElement
                     if (el.scrollTop < 60 && !loadingMore) {
                       loadOlderMessages()
@@ -1187,7 +1257,7 @@ export function DirectMessages() {
                 <UserPlus className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
                 <h4 className="font-medium mb-1 text-sm">No available friends</h4>
                 <p className="text-xs text-muted-foreground mb-2">
-                  You're already chatting with all your friends or haven't added any yet
+                  You&apos;re already chatting with all your friends or haven&apos;t added any yet
                 </p>
                 <Button variant="outline" size="sm" className="h-7 px-2">
                   <UserPlus className="h-3 w-3 mr-1" />

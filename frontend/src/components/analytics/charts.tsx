@@ -18,8 +18,31 @@ import { formatCurrency } from "@/lib/utils"
 
 interface ChartTooltipProps {
     active?: boolean
-    payload?: any[]
+    payload?: TooltipEntry[]
     label?: string
+}
+
+interface TooltipEntry {
+    color?: string
+    name?: string
+    value?: number
+    payload?: CategoryPieData
+}
+
+interface CategoryPieData {
+    name: string
+    value: number
+    cents: number
+    count: number
+}
+
+interface PieLabelProps {
+    cx?: number
+    cy?: number
+    midAngle?: number
+    innerRadius?: number
+    outerRadius?: number
+    percent?: number
 }
 
 interface ChartDataItem {
@@ -58,7 +81,7 @@ const CATEGORY_COLORS = [
 
 // --- Charts ---
 
-export function SpendingOverTimeChart({ data, baseCurrency, detailed = false }: {
+export function SpendingOverTimeChart({ data, baseCurrency, detailed: _detailed = false }: {
     data: ChartDataItem[] | undefined | null
     baseCurrency: string
     detailed?: boolean
@@ -91,9 +114,9 @@ export function SpendingOverTimeChart({ data, baseCurrency, detailed = false }: 
             return (
                 <div className="bg-[var(--card)] p-3 border border-gray-100/10 rounded-lg shadow-lg text-sm">
                     <p className="font-medium">{label}</p>
-                    {payload.map((entry: any, index: number) => (
+                    {payload.map((entry, index: number) => (
                         <p key={index} style={{ color: entry.color }}>
-                            {entry.name}: {formatCurrency(entry.value, baseCurrency)}
+                            {entry.name}: {formatCurrency(entry.value || 0, baseCurrency)}
                         </p>
                     ))}
                 </div>
@@ -126,7 +149,7 @@ export function SpendingOverTimeChart({ data, baseCurrency, detailed = false }: 
                         <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#888' }} axisLine={false} tickLine={false} />
                         <YAxis
                             tick={{ fontSize: 12, fill: '#888' }}
-                            tickFormatter={(value: any) => formatCurrency(value, baseCurrency)}
+                            tickFormatter={(value: number) => formatCurrency(value, baseCurrency)}
                             axisLine={false}
                             tickLine={false}
                         />
@@ -181,9 +204,9 @@ export function MonthlyTrendsChart({ data, baseCurrency }: { data: MonthlyItem[]
             return (
                 <div className="bg-[var(--card)] p-3 border border-gray-100/10 rounded-lg shadow-lg text-sm">
                     <p className="font-medium">{label}</p>
-                    {payload.map((entry: any, index: number) => (
+                    {payload.map((entry, index: number) => (
                         <p key={index} style={{ color: entry.color }}>
-                            {entry.name}: {formatCurrency(entry.value, baseCurrency)}
+                            {entry.name}: {formatCurrency(entry.value || 0, baseCurrency)}
                         </p>
                     ))}
                 </div>
@@ -205,7 +228,7 @@ export function MonthlyTrendsChart({ data, baseCurrency }: { data: MonthlyItem[]
                     />
                     <YAxis
                         tick={{ fontSize: 12, fill: '#888' }}
-                        tickFormatter={(value: any) => formatCurrency(value, baseCurrency)}
+                        tickFormatter={(value: number) => formatCurrency(value, baseCurrency)}
                         axisLine={false}
                         tickLine={false}
                     />
@@ -234,11 +257,11 @@ export function CategoryTrendsChart({ data, baseCurrency }: { data: Array<{ _id:
 
     const CustomTooltip = ({ active, payload, label }: ChartTooltipProps) => {
         if (active && payload && payload.length) {
-            const row = payload[0].payload
+            const row = payload[0]?.payload as { amount?: number } | undefined
             return (
                 <div className="bg-[var(--card)] p-3 border border-gray-100/10 rounded-lg shadow-lg text-sm">
                     <p className="font-medium capitalize">{label}</p>
-                    <p className="text-sm">{formatCurrency(row.amount, baseCurrency)}</p>
+                    <p className="text-sm">{formatCurrency(row?.amount || 0, baseCurrency)}</p>
                 </div>
             )
         }
@@ -253,7 +276,7 @@ export function CategoryTrendsChart({ data, baseCurrency }: { data: Array<{ _id:
                     <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#888' }} axisLine={false} tickLine={false} />
                     <YAxis
                         tick={{ fontSize: 12, fill: '#888' }}
-                        tickFormatter={(value: any) => formatCurrency(value, baseCurrency)}
+                        tickFormatter={(value: number) => formatCurrency(value, baseCurrency)}
                         axisLine={false}
                         tickLine={false}
                     />
@@ -265,7 +288,7 @@ export function CategoryTrendsChart({ data, baseCurrency }: { data: Array<{ _id:
     )
 }
 
-export function CategoryBreakdownChart({ data, baseCurrency, detailed }: { data: Array<{ _id: string; totalBaseCents?: number; count?: number }>; baseCurrency: string; detailed?: boolean }) {
+export function CategoryBreakdownChart({ data, baseCurrency, detailed: _detailed }: { data: Array<{ _id: string; totalBaseCents?: number; count?: number }>; baseCurrency: string; detailed?: boolean }) {
     const safe = Array.isArray(data) ? data : []
     if (safe.length === 0) {
         return (
@@ -302,9 +325,10 @@ export function CategoryBreakdownChart({ data, baseCurrency, detailed }: { data:
         })
     }
 
-    const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: any[] }) => {
+    const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: TooltipEntry[] }) => {
         if (active && payload && payload.length) {
             const d = payload[0].payload
+            if (!d) return null
             const pct = totalCents > 0 ? ((d.cents / totalCents) * 100).toFixed(1) : '0'
             return (
                 <div className="bg-[var(--card)] p-3 border border-gray-100/10 rounded-lg shadow-lg text-sm">
@@ -318,7 +342,17 @@ export function CategoryBreakdownChart({ data, baseCurrency, detailed }: { data:
     }
 
     // Custom label renderer
-    const renderLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
+    const renderLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: PieLabelProps) => {
+        if (
+            typeof cx !== "number" ||
+            typeof cy !== "number" ||
+            typeof midAngle !== "number" ||
+            typeof innerRadius !== "number" ||
+            typeof outerRadius !== "number" ||
+            typeof percent !== "number"
+        ) {
+            return null
+        }
         if (percent < 0.05) return null
         const RADIAN = Math.PI / 180
         const radius = innerRadius + (outerRadius - innerRadius) * 0.5
@@ -363,7 +397,7 @@ export function CategoryBreakdownChart({ data, baseCurrency, detailed }: { data:
                             labelLine={false}
                             stroke="none"
                         >
-                            {pieData.map((_: any, index: number) => (
+                            {pieData.map((_, index: number) => (
                                 <Cell key={`cell-${index}`} fill={CATEGORY_COLORS[index % CATEGORY_COLORS.length]} stroke="rgba(0,0,0,0.2)" strokeWidth={1} />
                             ))}
                         </Pie>

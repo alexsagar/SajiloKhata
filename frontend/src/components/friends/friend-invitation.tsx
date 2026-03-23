@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { KanbanCard, KanbanCardContent, KanbanCardDescription, KanbanCardHeader, KanbanCardTitle } from "@/components/ui/kanban-card"
+import { KanbanCard, KanbanCardContent, KanbanCardHeader, KanbanCardTitle } from "@/components/ui/kanban-card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -10,7 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
+
 import { 
   UserPlus, 
   Mail, 
@@ -21,10 +21,7 @@ import {
   X,
   Users,
   MessageSquare,
-  DollarSign,
-  Plus,
-  Trash2,
-  MoreHorizontal
+  DollarSign
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { friendsAPI } from "@/lib/api"
@@ -50,6 +47,10 @@ interface PendingInvitation {
   message?: string
 }
 
+interface InviteApiError {
+  message?: string
+}
+
 // Empty initial data - will be populated from API
 const mockFriends: Friend[] = []
 const mockPendingInvitations: PendingInvitation[] = []
@@ -57,7 +58,7 @@ const mockPendingInvitations: PendingInvitation[] = []
 export function FriendInvitation() {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || "USD"
-  const [friends, setFriends] = useState<Friend[]>(mockFriends)
+  const [friends, _setFriends] = useState<Friend[]>(mockFriends)
   const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>(mockPendingInvitations)
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false)
   const [inviteEmails, setInviteEmails] = useState('')
@@ -135,8 +136,9 @@ export function FriendInvitation() {
       if (failed.length) {
         toast({ title: "Some invites failed", description: failed.join(', '), variant: "destructive" })
       }
-    } catch (e: any) {
-      toast({ title: "Failed to send invites", description: e?.message || "", variant: "destructive" })
+    } catch (e: unknown) {
+      const _error = e as InviteApiError
+      toast({ title: "Failed to send invites", description: _error.message || "", variant: "destructive" })
     }
   }
 
@@ -149,7 +151,7 @@ export function FriendInvitation() {
         title: "Link copied!",
         description: "Invitation link copied to clipboard.",
       })
-    } catch (error) {
+    } catch (_error) {
       toast({
         title: "Failed to copy",
         description: "Please copy the link manually.",
@@ -197,7 +199,7 @@ export function FriendInvitation() {
     }
   }
 
-  const startDirectChat = (friendId: string) => {
+  const startDirectChat = (_friendId: string) => {
     // This would navigate to direct chat with the friend
     toast({
       title: "Starting chat",
@@ -205,7 +207,7 @@ export function FriendInvitation() {
     })
   }
 
-  const addToExpense = (friendId: string) => {
+  const addToExpense = (_friendId: string) => {
     // This would open expense creation with friend pre-selected
     toast({
       title: "Adding to expense",
@@ -419,7 +421,7 @@ export function FriendInvitation() {
                 <Mail className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                 <h3 className="text-lg font-medium mb-2">No pending invitations</h3>
                 <p className="text-muted-foreground mb-4">
-                  All your invitations have been accepted or you haven't sent any yet
+                  All your invitations have been accepted or you haven&apos;t sent any yet
                 </p>
                 <Button onClick={() => setIsInviteDialogOpen(true)}>
                   <UserPlus className="h-4 w-4 mr-2" />

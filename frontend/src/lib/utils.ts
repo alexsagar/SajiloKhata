@@ -55,7 +55,12 @@ export function generateInviteCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase()
 }
 
-export function calculateSplitAmount(totalAmount: number, splitType: string, participants: any[]): any[] {
+type SplitParticipant = {
+  percentage?: number
+  [key: string]: unknown
+}
+
+export function calculateSplitAmount<T extends SplitParticipant>(totalAmount: number, splitType: string, participants: T[]): T[] {
   switch (splitType) {
     case "equal":
       const equalAmount = totalAmount / participants.length
@@ -64,7 +69,7 @@ export function calculateSplitAmount(totalAmount: number, splitType: string, par
     case "percentage":
       return participants.map((p) => ({
         ...p,
-        amount: (totalAmount * p.percentage) / 100,
+        amount: (totalAmount * (p.percentage || 0)) / 100,
       }))
 
     case "exact":
@@ -75,7 +80,7 @@ export function calculateSplitAmount(totalAmount: number, splitType: string, par
   }
 }
 
-export function debounce<T extends (...args: any[]) => any>(func: T, wait: number): (...args: Parameters<T>) => void {
+export function debounce<T extends (...args: unknown[]) => unknown>(func: T, wait: number): (...args: Parameters<T>) => void {
   let timeout: NodeJS.Timeout
   return (...args: Parameters<T>) => {
     clearTimeout(timeout)
@@ -83,7 +88,7 @@ export function debounce<T extends (...args: any[]) => any>(func: T, wait: numbe
   }
 }
 
-export function throttle<T extends (...args: any[]) => any>(func: T, limit: number): (...args: Parameters<T>) => void {
+export function throttle<T extends (...args: unknown[]) => unknown>(func: T, limit: number): (...args: Parameters<T>) => void {
   let inThrottle: boolean
   return (...args: Parameters<T>) => {
     if (!inThrottle) {
@@ -156,7 +161,7 @@ export function copyToClipboard(text: string): Promise<void> {
     textArea.select()
     try {
       document.execCommand("copy")
-    } catch (err) {
+    } catch {
       
     }
     document.body.removeChild(textArea)
@@ -164,7 +169,7 @@ export function copyToClipboard(text: string): Promise<void> {
   }
 }
 
-export function downloadFile(data: any, filename: string, type = "application/json") {
+export function downloadFile(data: BlobPart, filename: string, type = "application/json") {
   const blob = new Blob([data], { type })
   const url = window.URL.createObjectURL(blob)
   const link = document.createElement("a")

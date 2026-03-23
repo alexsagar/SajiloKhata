@@ -14,7 +14,6 @@ import {
   Smartphone, 
   DollarSign, 
   Users, 
-  Calendar,
   AlertTriangle,
   CheckCircle,
   Settings,
@@ -37,6 +36,8 @@ interface NotificationPreference {
   frequency: 'instant' | 'daily' | 'weekly' | 'never'
   enabled: boolean
 }
+
+type NotificationFrequency = NotificationPreference["frequency"]
 
 // Mock notification preferences
 const defaultPreferences: NotificationPreference[] = [
@@ -196,7 +197,7 @@ export function NotificationSettings() {
         title: "Settings saved",
         description: "Your notification preferences have been updated.",
       })
-    } catch (error) {
+    } catch (_error) {
       toast({
         title: "Error",
         description: "Failed to save notification settings. Please try again.",
@@ -507,8 +508,8 @@ export function NotificationSettings() {
                         <Label className="text-sm font-medium">Frequency</Label>
                         <Select
                           value={pref.frequency}
-                          onValueChange={(value: any) => 
-                            updatePreference(pref.id, { frequency: value })
+                          onValueChange={(value) =>
+                            updatePreference(pref.id, { frequency: value as NotificationFrequency })
                           }
                         >
                           <SelectTrigger className="w-40 mt-2">

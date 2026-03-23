@@ -1,10 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import { useCurrency } from "@/contexts/currency-context"
 import { userAPI } from "@/lib/api"
-import { CURRENCIES, type Currency } from "@/lib/currency"
+import { CURRENCIES } from "@/lib/currency"
 import {
   Dialog,
   DialogContent,
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { toast } from "@/hooks/use-toast"
 import { Globe, Search, Check, Loader2 } from "lucide-react"
@@ -62,6 +62,14 @@ const COUNTRIES = [
 interface CurrencyOnboardingDialogProps {
   open: boolean
   onComplete: () => void
+}
+
+interface UserPreferenceUpdate {
+  preferences: {
+    currency: string
+    baseCurrency: string
+    country?: string | null
+  }
 }
 
 export function CurrencyOnboardingDialog({ open, onComplete }: CurrencyOnboardingDialogProps) {
@@ -126,7 +134,7 @@ export function CurrencyOnboardingDialog({ open, onComplete }: CurrencyOnboardin
           currency: selectedCurrency,
           baseCurrency: selectedCurrency,
         },
-      } as any)
+      } as UserPreferenceUpdate)
 
       // Update currency context
       setUserCurrency(selectedCurrency)

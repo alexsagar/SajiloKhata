@@ -16,6 +16,36 @@ export interface SearchResult {
   url: string
 }
 
+type SearchExpense = {
+  _id: string
+  description: string
+  amountCents: number
+  currencyCode?: string
+  date?: string
+  category?: string
+}
+
+type SearchGroup = {
+  _id: string
+  name: string
+  avatar?: string
+  members?: unknown[]
+}
+
+type SearchUser = {
+  _id: string
+  firstName: string
+  lastName: string
+  username?: string
+  avatar?: string
+}
+
+type SearchPayload = {
+  users: SearchUser[]
+  groups: SearchGroup[]
+  expenses: SearchExpense[]
+}
+
 export function useGlobalSearch() {
   const [searchQuery, setSearchQuery] = useState('')
   const debouncedQuery = useDebounce(searchQuery, 300)
@@ -35,8 +65,8 @@ export function useGlobalSearch() {
           users: response.data?.users || [],
           groups: response.data?.groups || [],
           expenses: response.data?.expenses || [],
-        }
-      } catch (error) {
+        } as SearchPayload
+      } catch {
         return { users: [], groups: [], expenses: [] }
       }
     },
@@ -50,7 +80,7 @@ export function useGlobalSearch() {
 
     // Add expense results
     if (searchPayload?.expenses) {
-      searchPayload.expenses.forEach((expense: any) => {
+      searchPayload.expenses.forEach((expense) => {
         results.push({
           id: expense._id,
           type: 'expense',
@@ -67,7 +97,7 @@ export function useGlobalSearch() {
 
     // Add group results
     if (searchPayload?.groups) {
-      searchPayload.groups.forEach((group: any) => {
+      searchPayload.groups.forEach((group) => {
         results.push({
           id: group._id,
           type: 'group',
@@ -81,7 +111,7 @@ export function useGlobalSearch() {
 
     // Add user results
     if (searchPayload?.users) {
-      searchPayload.users.forEach((user: any) => {
+      searchPayload.users.forEach((user) => {
         results.push({
           id: user._id,
           type: 'user',

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import { CurrencyOnboardingDialog } from "./currency-onboarding-dialog"
+import type { User } from "@/types/user"
 
 /**
  * OnboardingProvider
@@ -65,7 +66,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
 /**
  * Check if user needs onboarding
  */
-function checkNeedsOnboarding(user: any): boolean {
+function checkNeedsOnboarding(user: User): boolean {
   // User must have a valid ID (from backend)
   if (!user?.id || user.id === "" || user.id.startsWith("local-")) {
     return false

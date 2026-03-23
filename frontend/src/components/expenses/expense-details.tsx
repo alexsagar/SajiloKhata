@@ -13,9 +13,55 @@ import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { useMemo, useState } from "react"
 import { toast } from "@/hooks/use-toast"
+import type { User } from "@/types/user"
 
 interface ExpenseDetailsProps {
   expenseId: string
+}
+
+type ExpenseUser = {
+  _id?: string
+  firstName?: string
+  lastName?: string
+  username?: string
+  avatar?: string
+}
+
+type ExpenseSplit = {
+  user?: string | ExpenseUser
+  amountCents?: number
+  amount?: number
+  settled?: boolean
+}
+
+type ExpenseComment = {
+  _id: string
+  user?: ExpenseUser
+  text?: string
+  createdAt?: string
+  editedAt?: string | null
+}
+
+type ExpenseRecord = {
+  description?: string
+  amountCents?: number
+  amount?: number
+  currencyCode?: string
+  currency?: string
+  date?: string
+  notes?: string
+  receipt?: {
+    url?: string
+  }
+  group?: {
+    name?: string
+  }
+  paidBy?: ExpenseUser
+  splits?: ExpenseSplit[]
+}
+
+type ExpenseCommentsPayload = {
+  comments?: ExpenseComment[]
 }
 
 function getMentionQuery(text: string, cursor: number) {
@@ -58,7 +104,7 @@ export function ExpenseDetails({ expenseId }: ExpenseDetailsProps) {
       queryClient.invalidateQueries({ queryKey: ["expense-comments", expenseId] })
       toast({ title: "Comment added" })
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       toast({ variant: "destructive", title: "Failed to add comment", description: error?.message })
     },
   })
@@ -69,7 +115,7 @@ export function ExpenseDetails({ expenseId }: ExpenseDetailsProps) {
       queryClient.invalidateQueries({ queryKey: ["expense-comments", expenseId] })
       toast({ title: "Comment deleted" })
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       toast({ variant: "destructive", title: "Failed to delete comment", description: error?.message })
     },
   })
@@ -82,47 +128,30 @@ export function ExpenseDetails({ expenseId }: ExpenseDetailsProps) {
       queryClient.invalidateQueries({ queryKey: ["expense-comments", expenseId] })
       toast({ title: "Comment updated" })
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       toast({ variant: "destructive", title: "Failed to update comment", description: error?.message })
     },
   })
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <LoadingSpinner />
-      </div>
-    )
-  }
-
-  if (isError || !data) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Expense Details</CardTitle>
-          <CardDescription>Unable to load expense {expenseId}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-destructive">Something went wrong loading this expense.</p>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  const payload = (data.data && (data.data as any).data) ? (data.data as any).data : (data.data as any)
-  const expense = payload?.expense || payload
+  const payload = ((data?.data && (data.data as { data?: ExpenseRecord | { expense?: ExpenseRecord } }).data)
+    ? (data.data as { data?: ExpenseRecord | { expense?: ExpenseRecord } }).data
+    : data?.data) as ExpenseRecord | { expense?: ExpenseRecord } | undefined
+  const expense = (payload && "expense" in payload ? payload.expense : payload) as ExpenseRecord | undefined
 
   const amount = (expense?.amountCents != null ? expense.amountCents / 100 : expense?.amount) || 0
   const currency = displayCurrency || expense?.currencyCode || expense?.currency || "USD"
-  const splits = Array.isArray(expense?.splits) ? expense.splits : []
-  const commentsPayload = (commentsQuery.data?.data as any)?.data || (commentsQuery.data?.data as any) || {}
+  const splits = useMemo(() => (Array.isArray(expense?.splits) ? expense.splits : []), [expense?.splits])
+  const commentsPayload = (((commentsQuery.data?.data as { data?: ExpenseCommentsPayload } | undefined)?.data) ||
+    commentsQuery.data?.data ||
+    {}) as ExpenseCommentsPayload
   const comments = Array.isArray(commentsPayload.comments) ? commentsPayload.comments : []
 
   const mentionCandidates = useMemo(() => {
     const map = new Map<string, string>()
     for (const split of splits) {
-      const username = split?.user?.username
-      if (username) map.set(username, `${split?.user?.firstName || ""} ${split?.user?.lastName || ""}`.trim())
+      const splitUser = typeof split?.user === "object" ? split.user : undefined
+      const username = splitUser?.username
+      if (username) map.set(username, `${splitUser?.firstName || ""} ${splitUser?.lastName || ""}`.trim())
     }
     if (expense?.paidBy?.username) {
       map.set(expense.paidBy.username, `${expense?.paidBy?.firstName || ""} ${expense?.paidBy?.lastName || ""}`.trim())
@@ -145,6 +174,28 @@ export function ExpenseDetails({ expenseId }: ExpenseDetailsProps) {
     addMentionSuggestions.length > 0 ? Math.min(addMentionIndex, addMentionSuggestions.length - 1) : 0
   const normalizedEditMentionIndex =
     editMentionSuggestions.length > 0 ? Math.min(editMentionIndex, editMentionSuggestions.length - 1) : 0
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <LoadingSpinner />
+      </div>
+    )
+  }
+
+  if (isError || !data || !expense) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Expense Details</CardTitle>
+          <CardDescription>Unable to load expense {expenseId}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-destructive">Something went wrong loading this expense.</p>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Card>
@@ -189,19 +240,20 @@ export function ExpenseDetails({ expenseId }: ExpenseDetailsProps) {
             <p className="text-sm text-muted-foreground">No split data.</p>
           ) : (
             <div className="space-y-2">
-              {splits.map((s: any) => {
+              {splits.map((s) => {
                 const share = s?.amountCents != null ? s.amountCents / 100 : s?.amount || 0
+                const splitUser = typeof s.user === "object" ? s.user : undefined
                 return (
-                  <div key={s.user?._id || s.user} className="flex items-center justify-between p-2 rounded-md border">
+                  <div key={splitUser?._id || String(s.user)} className="flex items-center justify-between p-2 rounded-md border">
                     <div className="flex items-center gap-2">
                       <Avatar className="h-6 w-6">
-                        <AvatarImage src={s?.user?.avatar} />
+                        <AvatarImage src={splitUser?.avatar} />
                         <AvatarFallback className="text-xs">
-                          {getInitials(s?.user?.firstName || "", s?.user?.lastName || "")}
+                          {getInitials(splitUser?.firstName || "", splitUser?.lastName || "")}
                         </AvatarFallback>
                       </Avatar>
                       <span className="text-sm">
-                        {s?.user?.firstName} {s?.user?.lastName}
+                        {splitUser?.firstName} {splitUser?.lastName}
                       </span>
                     </div>
                     <div className="text-sm font-medium">{formatCurrencyWithSymbol(share, currency)}</div>
@@ -299,7 +351,7 @@ export function ExpenseDetails({ expenseId }: ExpenseDetailsProps) {
             {comments.length === 0 ? (
               <p className="text-sm text-muted-foreground">No comments yet.</p>
             ) : (
-              comments.map((comment: any) => (
+              comments.map((comment) => (
                 <div key={comment._id} className="rounded-md border p-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2">
@@ -397,7 +449,7 @@ export function ExpenseDetails({ expenseId }: ExpenseDetailsProps) {
                         </p>
                       </div>
                     </div>
-                    {String(comment?.user?._id || "") === String((user as any)?._id || (user as any)?.id || "") && (
+                    {String(comment?.user?._id || "") === String((user as User | null)?._id || user?.id || "") && (
                       <div className="flex gap-1">
                         {editingCommentId !== String(comment._id) && (
                           <Button

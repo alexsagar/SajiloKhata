@@ -1,24 +1,24 @@
 import React from "react";
 
 export interface DataTableColumn<T> {
-  key: keyof T;
-  label: string;
-  render?: (value: any, row: T) => React.ReactNode;
+  key: keyof T
+  label: string
+  render?: (value: T[keyof T], row: T) => React.ReactNode
 }
 
 // Compatibility with admin table configs
 type LegacyColumn<T> = {
-  header: string;
-  accessorKey: keyof T | string;
-  cell?: ({ row }: any) => React.ReactNode;
+  header: string
+  accessorKey: keyof T | string
+  cell?: ({ row }: { row: { original: T } }) => React.ReactNode
 }
 
 export interface DataTableProps<T> {
-  data: T[];
-  columns: Array<DataTableColumn<T> | LegacyColumn<T>>;
-  rowKey?: (row: T) => string | number;
-  loading?: boolean;
-  emptyMessage?: string;
+  data: T[]
+  columns: Array<DataTableColumn<T> | LegacyColumn<T>>
+  rowKey?: (row: T) => string | number
+  loading?: boolean
+  emptyMessage?: string
 }
 
 function DataTable<T>({
@@ -64,16 +64,18 @@ function DataTable<T>({
                 {columns.map((col) => {
                   if ("label" in col) {
                     const c = col as DataTableColumn<T>
+                    const value = row[c.key]
                     return (
                       <td key={String(c.key)} className="px-4 py-2 border-b">
-                        {c.render ? c.render((row as any)[c.key], row) : String((row as any)[c.key])}
+                        {c.render ? c.render(value, row) : String(value)}
                       </td>
                     )
                   } else {
                     const c = col as LegacyColumn<T>
+                    const value = row[c.accessorKey as keyof T]
                     return (
                       <td key={String(c.accessorKey)} className="px-4 py-2 border-b">
-                        {c.cell ? c.cell({ row: { original: row } }) : String((row as any)[c.accessorKey as any])}
+                        {c.cell ? c.cell({ row: { original: row } }) : String(value)}
                       </td>
                     )
                   }
@@ -84,7 +86,7 @@ function DataTable<T>({
         </tbody>
       </table>
     </div>
-  );
+  )
 }
 
-export default DataTable;
+export default DataTable

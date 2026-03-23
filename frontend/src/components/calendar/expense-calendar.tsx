@@ -17,6 +17,49 @@ import { calendarAPI, groupAPI, reminderAPI } from "@/lib/api"
 import { useCurrency } from "@/contexts/currency-context"
 import { formatCurrency } from "@/lib/utils"
 
+interface ReminderItem {
+  _id?: string
+  dueDate?: string
+  dueDateKey?: string
+  title?: string
+  description?: string
+  amount?: number
+  category?: string
+}
+
+interface CalendarApiDay {
+  date: string
+  totalBaseCents?: number
+  count?: number
+}
+
+interface CalendarMonthResponse {
+  data?: {
+    days?: CalendarApiDay[]
+  }
+}
+
+interface GroupOption {
+  _id: string
+  name: string
+}
+
+interface GroupsResponse {
+  data?: {
+    data?: GroupOption[]
+  }
+}
+
+interface RemindersResponse {
+  data?: {
+    data?: ReminderItem[]
+  }
+}
+
+interface ErrorWithMessage {
+  message?: string
+}
+
 const months = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"
@@ -49,7 +92,7 @@ function formatLocalDateLabel(dateKey: string) {
   return parsed ? parsed.toLocaleDateString() : dateKey
 }
 
-function getReminderDateKey(value: any) {
+function getReminderDateKey(value: ReminderItem | string | null | undefined) {
   if (value && typeof value === "object" && value.dueDateKey) {
     return String(value.dueDateKey)
   }
@@ -67,16 +110,18 @@ interface CalendarDay {
   day: number
   isCurrentMonth: boolean
   date: string
-  expenses?: any[]
+  expenses?: CalendarApiDay[]
   totalBaseCents?: number
   count?: number
-  reminders?: any[]
+  reminders?: ReminderItem[]
 }
 
 interface CalendarFilters {
   mode: 'personal' | 'group' | 'all'
   groupIds: string[]
 }
+
+type CalendarFilterValue = CalendarFilters[keyof CalendarFilters]
 
 export function ExpenseCalendar() {
   const [currentDate, setCurrentDate] = useState(new Date())
@@ -120,7 +165,7 @@ export function ExpenseCalendar() {
     staleTime: 5 * 60 * 1000,
   })
 
-  const reminderList = (remindersData as any)?.data?.data || []
+  const reminderList = useMemo(() => ((remindersData as RemindersResponse | undefined)?.data?.data) || [], [remindersData])
 
   const navigateMonth = (direction: 'prev' | 'next') => {
     setCurrentDate(prev => {
@@ -138,7 +183,7 @@ export function ExpenseCalendar() {
     setSelectedDate(date)
 
     // Check if this date has any reminders; if so, open reminder dialog prefilled
-    const remindersForDate = reminderList.filter((r: any) => {
+    const remindersForDate = reminderList.filter((r) => {
       if (!r?.dueDate) return false
       const key = getReminderDateKey(r)
       return key === date
@@ -162,7 +207,7 @@ export function ExpenseCalendar() {
     }
   }
 
-  const handleFilterChange = (key: keyof CalendarFilters, value: any) => {
+  const handleFilterChange = (key: keyof CalendarFilters, value: CalendarFilterValue) => {
     setFilters(prev => ({ ...prev, [key]: value }))
   }
 
@@ -174,8 +219,8 @@ export function ExpenseCalendar() {
     const daysInPrevMonth = new Date(year, currentMonthIndex, 0).getDate()
 
     // Map reminders by date (YYYY-MM-DD)
-    const remindersByDate = new Map<string, any[]>()
-    reminderList.forEach((r: any) => {
+    const remindersByDate = new Map<string, ReminderItem[]>()
+    reminderList.forEach((r) => {
       if (!r?.dueDate) return
       const dateKey = getReminderDateKey(r)
       if (!remindersByDate.has(dateKey)) remindersByDate.set(dateKey, [])
@@ -201,7 +246,7 @@ export function ExpenseCalendar() {
     for (let day = 1; day <= daysInMonth; day++) {
       const jsDate = new Date(year, currentMonthIndex, day)
       const date = toLocalDateKey(jsDate)
-      const dayData = monthData?.data?.days?.find((d: any) => d.date === date)
+      const dayData = (monthData as CalendarMonthResponse | undefined)?.data?.days?.find((dayItem) => dayItem.date === date)
       days.push({
         day,
         isCurrentMonth: true,
@@ -226,15 +271,16 @@ export function ExpenseCalendar() {
     }
 
     return days
-  }, [year, month, monthData, remindersData])
+  }, [year, month, monthData, reminderList])
   const isToday = toLocalDateKey(new Date())
   const reminderStats = useMemo(() => {
     const total = reminderList.length
     const todayDate = parseLocalDateKey(isToday) || new Date()
-    const upcoming7d = reminderList.filter((r: any) => {
+    const upcoming7d = reminderList.filter((r) => {
       if (!r?.dueDate) return false
       const dueKey = getReminderDateKey(r)
       const due = parseLocalDateKey(dueKey)
+      if (!due) return false
       if (Number.isNaN(due.getTime())) return false
       const deltaDays = Math.floor((due.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24))
       return deltaDays >= 0 && deltaDays <= 7
@@ -339,7 +385,7 @@ export function ExpenseCalendar() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Groups</SelectItem>
-                      {(groupsData as any)?.data?.data?.map((group: any) => (
+                      {((groupsData as GroupsResponse | undefined)?.data?.data || []).map((group) => (
                         <SelectItem key={group._id} value={group._id}>
                           {group.name}
                         </SelectItem>
@@ -476,7 +522,7 @@ export function ExpenseCalendar() {
               Add reminder — {selectedDate ? formatLocalDateLabel(selectedDate) : "Select a date"}
             </DialogTitle>
             <DialogDescription className="text-responsive-sm">
-              Create a reminder like a bill or subscription; you'll be notified a few days before it is due.
+              Create a reminder like a bill or subscription; you&apos;ll be notified a few days before it is due.
             </DialogDescription>
           </DialogHeader>
 
@@ -567,7 +613,7 @@ export function ExpenseCalendar() {
                         description: 'This reminder has been removed from your calendar.',
                       })
                     })
-                    .catch((err: any) => {
+                    .catch((err: ErrorWithMessage) => {
                       toast({
                         title: 'Error',
                         description: err?.message || 'Failed to delete reminder',
@@ -604,7 +650,7 @@ export function ExpenseCalendar() {
                       description: 'We will notify you before this reminder is due.',
                     })
                   })
-                  .catch((err: any) => {
+                  .catch((err: ErrorWithMessage) => {
                     toast({
                       title: 'Error',
                       description: err?.message || 'Failed to create reminder',

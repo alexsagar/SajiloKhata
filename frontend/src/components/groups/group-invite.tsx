@@ -6,6 +6,10 @@ interface GroupInviteProps {
   onInvite: (email: string) => Promise<void>;
 }
 
+interface ErrorWithMessage {
+  message?: string;
+}
+
 const GroupInvite: React.FC<GroupInviteProps> = ({ onInvite }) => {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -25,8 +29,9 @@ const GroupInvite: React.FC<GroupInviteProps> = ({ onInvite }) => {
       await onInvite(email);
       notify("Invitation sent.");
       setEmail("");
-    } catch (err: any) {
-      setError(err?.message || "Failed to send invite.");
+    } catch (err: unknown) {
+      const error = err as ErrorWithMessage;
+      setError(error.message || "Failed to send invite.");
     } finally {
       setLoading(false);
     }

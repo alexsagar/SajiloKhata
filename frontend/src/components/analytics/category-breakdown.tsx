@@ -63,7 +63,7 @@ export function CategoryBreakdown({ data, detailed = false }: CategoryBreakdownP
         </ResponsiveContainer>
         
         <div className="grid gap-2">
-          {chartData.map((item, index) => (
+          {chartData.map((item, _index) => (
             <div key={item.name} className="flex items-center justify-between p-2 rounded-lg border">
               <div className="flex items-center gap-2">
                 <div 

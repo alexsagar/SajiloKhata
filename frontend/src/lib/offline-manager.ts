@@ -2,10 +2,10 @@
 
 import { isLocalStorageAvailable } from "./storage"
 
-interface PendingAction {
+export interface PendingAction {
   id: string
   type: string
-  data: any
+  data: Record<string, unknown> | FormData
   timestamp: number
   retries: number
 }
@@ -21,7 +21,7 @@ class OfflineManager {
         return stored ? JSON.parse(stored) : []
       }
       return []
-    } catch (error) {
+    } catch {
       
       return []
     }
@@ -39,7 +39,7 @@ class OfflineManager {
       if (isLocalStorageAvailable()) {
         localStorage.setItem(this.storageKey, JSON.stringify(actions))
       }
-    } catch (error) {
+    } catch {
       
     }
   }
@@ -51,7 +51,7 @@ class OfflineManager {
       if (isLocalStorageAvailable()) {
         localStorage.setItem(this.storageKey, JSON.stringify(filtered))
       }
-    } catch (error) {
+    } catch {
       
     }
   }
@@ -63,17 +63,15 @@ class OfflineManager {
       try {
         await this.executeAction(action)
         await this.removePendingAction(action.id)
-      } catch (error) {
-        
-
+      } catch {
         if (action.retries < this.maxRetries) {
           action.retries++
-          const actions = await this.getPendingActions()
-          const index = actions.findIndex((a) => a.id === action.id)
+          const currentActions = await this.getPendingActions()
+          const index = currentActions.findIndex((a) => a.id === action.id)
           if (index !== -1) {
-            actions[index] = action
+            currentActions[index] = action
             if (isLocalStorageAvailable()) {
-              localStorage.setItem(this.storageKey, JSON.stringify(actions))
+              localStorage.setItem(this.storageKey, JSON.stringify(currentActions))
             }
           }
         } else {
@@ -92,18 +90,24 @@ class OfflineManager {
       case "CREATE_EXPENSE":
         await expenseAPI.createExpense(action.data)
         break
-      case "UPDATE_EXPENSE":
-        await expenseAPI.updateExpense(action.data.id, action.data)
+      case "UPDATE_EXPENSE": {
+        const data = action.data as Record<string, unknown>
+        await expenseAPI.updateExpense(data.id as string, data)
         break
-      case "DELETE_EXPENSE":
-        await expenseAPI.deleteExpense(action.data.id)
+      }
+      case "DELETE_EXPENSE": {
+        const data = action.data as Record<string, unknown>
+        await expenseAPI.deleteExpense(data.id as string)
         break
+      }
       case "CREATE_GROUP":
-        await groupAPI.createGroup(action.data)
+        await groupAPI.createGroup(action.data as FormData)
         break
-      case "UPDATE_GROUP":
-        await groupAPI.updateGroup(action.data.id, action.data)
+      case "UPDATE_GROUP": {
+        const data = action.data as Record<string, unknown>
+        await groupAPI.updateGroup(data.id as string, data as unknown as FormData)
         break
+      }
       default:
         
     }

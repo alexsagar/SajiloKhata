@@ -7,6 +7,22 @@ import { formatDistanceToNow } from "date-fns"
 import { CreditCard, Users } from "lucide-react"
 import { useExpensesQuery } from "@/hooks/use-expenses-query"
 
+interface RecentExpense {
+  _id: string
+  groupId?: string | null
+  description: string
+  category?: string
+  createdAt?: string
+  updatedAt?: string
+  date?: string
+  amountCents?: number
+  currencyCode?: string
+}
+
+interface ExpensePayload {
+  expenses?: RecentExpense[]
+}
+
 export function RecentTransactions() {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || 'USD'
@@ -15,13 +31,14 @@ export function RecentTransactions() {
 
   // Memoize sorting to prevent re-computation on every render
   const recentExpenses = useMemo(() => {
-    const rawExpenses = expenseData?.data?.expenses || expenseData?.expenses || []
-    const getSafeTime = (exp: any): number => {
-      const val = exp?.createdAt || exp?.updatedAt || exp?.date
-      const t = val ? Date.parse(val) : NaN
+    const payload = (expenseData?.data as ExpensePayload | undefined) || (expenseData as ExpensePayload | undefined)
+    const rawExpenses = payload?.expenses || []
+    const getSafeTime = (expense: RecentExpense): number => {
+      const value = expense.createdAt || expense.updatedAt || expense.date
+      const t = value ? Date.parse(value) : NaN
       return Number.isFinite(t) ? t : Date.now()
     }
-    return [...rawExpenses].sort((a: any, b: any) => getSafeTime(b) - getSafeTime(a))
+    return [...rawExpenses].sort((a, b) => getSafeTime(b) - getSafeTime(a))
   }, [expenseData])
 
   if (isLoading) {
@@ -48,7 +65,7 @@ export function RecentTransactions() {
   return (
     <div className="space-y-4 w-full">
       <div className="space-y-2 max-h-[400px] overflow-y-auto w-full">
-        {recentExpenses.map((expense: any) => {
+        {recentExpenses.map((expense) => {
           const isPersonal = !expense.groupId
           const dateStr = expense?.createdAt || expense?.updatedAt || expense?.date
           const parsed = dateStr ? new Date(dateStr) : new Date()
@@ -91,10 +108,10 @@ export function RecentTransactions() {
           <div>
             <div className="text-sm text-muted-foreground">Personal</div>
             <div className="text-lg font-semibold text-blue-400">
-              {formatCurrencyWithSymbol(
+                {formatCurrencyWithSymbol(
                 recentExpenses
-                  .filter((exp: any) => !exp.groupId)
-                  .reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0) / 100,
+                  .filter((expense) => !expense.groupId)
+                  .reduce((sum, expense) => sum + (expense.amountCents || 0), 0) / 100,
                 userCurrency
               )}
             </div>
@@ -102,10 +119,10 @@ export function RecentTransactions() {
           <div>
             <div className="text-sm text-muted-foreground">Group</div>
             <div className="text-lg font-semibold text-green-400">
-              {formatCurrencyWithSymbol(
+                {formatCurrencyWithSymbol(
                 recentExpenses
-                  .filter((exp: any) => exp.groupId)
-                  .reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0) / 100,
+                  .filter((expense) => expense.groupId)
+                  .reduce((sum, expense) => sum + (expense.amountCents || 0), 0) / 100,
                 userCurrency
               )}
             </div>

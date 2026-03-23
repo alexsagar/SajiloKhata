@@ -1,5 +1,7 @@
-import { io, Socket } from "socket.io-client";
+import { io, type ManagerOptions, type Socket, type SocketOptions } from "socket.io-client"
 
-export function createSocket(url: string, options?: any): Socket {
-  return io(url, options);
+type SocketConnectOptions = Partial<ManagerOptions & SocketOptions>
+
+export function createSocket(url: string, options?: SocketConnectOptions): Socket {
+  return io(url, options)
 }

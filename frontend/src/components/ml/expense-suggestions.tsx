@@ -1,15 +1,14 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { 
   Brain, 
-  TrendingUp, 
   TrendingDown,
   Lightbulb,
   Target,
@@ -18,9 +17,7 @@ import {
   Clock,
   DollarSign,
   Users,
-  Calendar,
   Zap,
-  Star,
   ThumbsUp,
   ThumbsDown,
   X
@@ -43,7 +40,7 @@ interface ExpenseSuggestion {
     currentCategory?: string
     potentialSavings?: number
     frequency?: string
-    similarExpenses?: any[]
+    similarExpenses?: Array<Record<string, unknown>>
   }
   timestamp: string
   status: 'pending' | 'accepted' | 'dismissed'
@@ -69,7 +66,7 @@ export function ExpenseSuggestions() {
     setTimeout(() => setIsLearning(false), 1000)
   }
 
-  const provideFeedback = (id: string, helpful: boolean) => {
+  const provideFeedback = (_id: string, _helpful: boolean) => {
     // In a real app, this would send feedback to the ML service
     
   }

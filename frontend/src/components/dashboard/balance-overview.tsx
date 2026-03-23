@@ -7,14 +7,35 @@ import { formatCurrencyWithSymbol } from "@/lib/currency"
 import { useExpensesQuery } from "@/hooks/use-expenses-query"
 import { useQuery } from "@tanstack/react-query"
 import { userAPI } from "@/lib/api"
+import type { User } from "@/types/user"
 
-function getCurrentUserShareCents(expense: any, currentUserId: string) {
+type ExpenseSummaryItem = {
+  groupId?: string | null
+  amountCents?: number
+  splits?: Array<{
+    user?: string | { _id?: string }
+    amountCents?: number
+    amount?: number
+  }>
+}
+
+type ExpenseSummaryPayload = {
+  expenses?: ExpenseSummaryItem[]
+}
+
+type UserBalanceSummaryPayload = {
+  youOweCents?: number
+  youAreOwedCents?: number
+  totalBalanceCents?: number
+}
+
+function getCurrentUserShareCents(expense: ExpenseSummaryItem, currentUserId: string) {
   if (!expense?.groupId) {
     return Number(expense?.amountCents || 0)
   }
 
   const mySplit = (expense?.splits || []).find(
-    (split: any) => String(split?.user?._id || split?.user) === currentUserId,
+    (split) => String((typeof split?.user === "object" ? split?.user?._id : split?.user) || "") === currentUserId,
   )
 
   if (!mySplit) return 0
@@ -24,7 +45,7 @@ function getCurrentUserShareCents(expense: any, currentUserId: string) {
 export function BalanceOverview() {
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency || 'USD'
-  const currentUserId = String((user as any)?._id || (user as any)?.id || "")
+  const currentUserId = String((user as User | null)?._id || user?.id || "")
 
   const { data: expenseSummary, isLoading, error } = useExpensesQuery()
 
@@ -76,20 +97,20 @@ export function BalanceOverview() {
   }
 
   // Calculate personal vs group expense breakdown
-  const payload = expenseSummary?.data?.data ? expenseSummary.data.data : expenseSummary?.data
-  const expensesData = payload?.expenses || expenseSummary?.expenses || []
-  const personalExpenses = expensesData.filter((exp: any) => !exp.groupId)
-  const groupExpenses = expensesData.filter((exp: any) => exp.groupId)
+  const payload = (expenseSummary?.data?.data ? expenseSummary.data.data : expenseSummary?.data) as ExpenseSummaryPayload | undefined
+  const expensesData: ExpenseSummaryItem[] = payload?.expenses || expenseSummary?.expenses || []
+  const personalExpenses = expensesData.filter((exp) => !exp.groupId)
+  const groupExpenses = expensesData.filter((exp) => exp.groupId)
 
-  const personalTotal = personalExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
-  const groupTotal = groupExpenses.reduce((sum: number, exp: any) => sum + (exp.amountCents || 0), 0)
+  const personalTotal = personalExpenses.reduce((sum, exp) => sum + (exp.amountCents || 0), 0)
+  const groupTotal = groupExpenses.reduce((sum, exp) => sum + (exp.amountCents || 0), 0)
   const userTotal = expensesData.reduce(
-    (sum: number, exp: any) => sum + getCurrentUserShareCents(exp, currentUserId),
+    (sum, exp) => sum + getCurrentUserShareCents(exp, currentUserId),
     0,
   )
 
   // Use backend-computed summary (all in cents for precision)
-  const balanceData = balanceResp?.data?.data || balanceResp?.data || {}
+  const balanceData = (balanceResp?.data?.data || balanceResp?.data || {}) as UserBalanceSummaryPayload
   const youOwe = Number(balanceData.youOweCents ?? 0)
   const youreOwed = Number(balanceData.youAreOwedCents ?? 0)
   const totalBalance = Number(balanceData.totalBalanceCents ?? (youreOwed - youOwe))
@@ -111,7 +132,7 @@ export function BalanceOverview() {
 
       <KanbanCard className="shrink-0 snap-start w-[84vw] sm:w-[68vw] md:w-auto">
         <KanbanCardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <KanbanCardTitle className="text-xs sm:text-sm font-medium text-slate-400">You're Owed</KanbanCardTitle>
+          <KanbanCardTitle className="text-xs sm:text-sm font-medium text-slate-400">You&apos;re Owed</KanbanCardTitle>
           <TrendingUp className="hidden sm:block h-4 w-4 text-emerald-400" />
         </KanbanCardHeader>
         <KanbanCardContent>

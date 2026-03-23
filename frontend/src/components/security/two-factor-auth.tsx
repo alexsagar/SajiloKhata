@@ -57,7 +57,33 @@ interface TwoFactorAuthProps {
     className?: string
 }
 
+interface ApiErrorLike {
+    message?: string
+    response?: {
+        status?: number
+    }
+}
+
+interface GenerateSecretResponse {
+    data?: {
+        data?: Partial<SetupData> & { secret: string }
+    } & Partial<SetupData> & { secret: string }
+}
+
+interface BackupCodesResponse {
+    data?: {
+        data?: {
+            codes?: string[]
+        }
+        codes?: string[]
+    }
+}
+
 type SetupStep = "initial" | "generate" | "verify" | "backup-codes" | "complete"
+
+function getSetupPayload(response: GenerateSecretResponse): (Partial<SetupData> & { secret: string }) | null {
+    return response.data?.data || response.data || null
+}
 
 // Constants
 const CODE_LENGTH = 6
@@ -91,7 +117,6 @@ export function TwoFactorAuth({ className }: TwoFactorAuthProps) {
 
     // UI state
     const [copied, setCopied] = useState(false)
-    const [showBackupCodes, setShowBackupCodes] = useState(false)
     const [showBackupCodesView, setShowBackupCodesView] = useState(false)
 
     // Refs
@@ -101,10 +126,30 @@ export function TwoFactorAuth({ className }: TwoFactorAuthProps) {
     const { toast } = useToast()
     const { user, isOAuthUser } = useAuth()
 
+    // Fetch 2FA status
+    const fetchStatus = useCallback(async () => {
+        setIsLoading(true)
+        setError(null)
+        try {
+            const response = await userAPI.get2FAStatus()
+            setStatus(response.data?.data || response.data)
+        } catch (err: unknown) {
+            const error = err as ApiErrorLike
+            // If 404, assume 2FA is not set up
+            if (error.response?.status === 404) {
+                setStatus({ enabled: false })
+            } else {
+                setError(error.message || "Failed to fetch 2FA status")
+            }
+        } finally {
+            setIsLoading(false)
+        }
+    }, [])
+
     // Fetch 2FA status on mount
     useEffect(() => {
         fetchStatus()
-    }, [])
+    }, [fetchStatus])
 
     // Focus code input when relevant
     useEffect(() => {
@@ -135,32 +180,17 @@ export function TwoFactorAuth({ className }: TwoFactorAuthProps) {
         }
     }, [disableDialogOpen])
 
-    // Fetch 2FA status
-    const fetchStatus = useCallback(async () => {
-        setIsLoading(true)
-        setError(null)
-        try {
-            const response = await userAPI.get2FAStatus()
-            setStatus(response.data?.data || response.data)
-        } catch (err: any) {
-            // If 404, assume 2FA is not set up
-            if (err.response?.status === 404) {
-                setStatus({ enabled: false })
-            } else {
-                setError(err.message || "Failed to fetch 2FA status")
-            }
-        } finally {
-            setIsLoading(false)
-        }
-    }, [])
-
     // Generate 2FA secret
     const handleGenerateSecret = useCallback(async () => {
         setIsGenerating(true)
         setVerifyError(null)
         try {
-            const response = await userAPI.generate2FASecret()
-            const data = response.data?.data || response.data
+            const response = await userAPI.generate2FASecret() as GenerateSecretResponse
+            const data = getSetupPayload(response)
+
+            if (!data?.secret) {
+                throw new Error("Failed to generate setup secret")
+            }
 
             const issuer = data.issuer || "SajiloKhata"
             const accountName = user?.email || ""
@@ -175,10 +205,11 @@ export function TwoFactorAuth({ className }: TwoFactorAuthProps) {
                 accountName,
             })
             setEnableStep("verify")
-        } catch (err: any) {
+        } catch (err: unknown) {
+            const error = err as ApiErrorLike
             toast({
                 title: "Failed to generate secret",
-                description: err.message || "Please try again",
+                description: error.message || "Please try again",
                 variant: "destructive",
             })
         } finally {
@@ -210,8 +241,9 @@ export function TwoFactorAuth({ className }: TwoFactorAuthProps) {
                 title: "2FA Enabled",
                 description: "Two-factor authentication is now active on your account.",
             })
-        } catch (err: any) {
-            setVerifyError(err.message || "Invalid verification code")
+        } catch (err: unknown) {
+            const error = err as ApiErrorLike
+            setVerifyError(error.message || "Invalid verification code")
         } finally {
             setIsVerifying(false)
         }
@@ -250,8 +282,9 @@ export function TwoFactorAuth({ className }: TwoFactorAuthProps) {
                 title: "2FA Disabled",
                 description: "Two-factor authentication has been disabled.",
             })
-        } catch (err: any) {
-            setDisableError(err.message || "Failed to disable 2FA")
+        } catch (err: unknown) {
+            const error = err as ApiErrorLike
+            setDisableError(error.message || "Failed to disable 2FA")
         } finally {
             setIsDisabling(false)
         }
@@ -416,13 +449,14 @@ export function TwoFactorAuth({ className }: TwoFactorAuthProps) {
                                 className="w-full"
                                 onClick={async () => {
                                     try {
-                                        const response = await userAPI.getBackupCodes()
+                                        const response = await userAPI.getBackupCodes() as BackupCodesResponse
                                         setBackupCodes(response.data?.data?.codes || response.data?.codes || [])
                                         setShowBackupCodesView(true)
-                                    } catch (err: any) {
+                                    } catch (err: unknown) {
+                                        const error = err as ApiErrorLike
                                         toast({
                                             title: "Failed to fetch backup codes",
-                                            description: err.message,
+                                            description: error.message,
                                             variant: "destructive",
                                         })
                                     }
@@ -457,7 +491,7 @@ export function TwoFactorAuth({ className }: TwoFactorAuthProps) {
                             <div className="rounded-lg border bg-muted/50 p-4 space-y-3">
                                 <h4 className="font-medium flex items-center gap-2">
                                     <Smartphone className="h-4 w-4" />
-                                    What you'll need
+                                    What you&apos;ll need
                                 </h4>
                                 <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
                                     <li>Download an authenticator app like Google Authenticator or Authy</li>
@@ -507,7 +541,7 @@ export function TwoFactorAuth({ className }: TwoFactorAuthProps) {
                                 >
                                     <span className="flex items-center gap-2 text-sm text-muted-foreground">
                                         <Key className="h-4 w-4" />
-                                        Can't scan? Enter code manually
+                                        Can&apos;t scan? Enter code manually
                                     </span>
                                     {showManualEntry ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                                 </Button>

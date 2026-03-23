@@ -9,7 +9,7 @@ interface BillingHistoryProps {
   userId?: string
 }
 
-export function BillingHistory({ userId }: BillingHistoryProps) {
+export function BillingHistory({ userId: _userId }: BillingHistoryProps) {
   // Mock data - replace with actual API call
   const billingHistory = [
     {

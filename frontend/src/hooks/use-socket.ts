@@ -1,15 +1,17 @@
-import { useEffect, useRef } from "react";
-import { io, Socket } from "socket.io-client";
+import { useEffect, useRef } from "react"
+import { io, type ManagerOptions, type Socket, type SocketOptions } from "socket.io-client"
 
-export function useSocket(url: string, options?: any) {
-  const socketRef = useRef<Socket | null>(null);
+type SocketConnectOptions = Partial<ManagerOptions & SocketOptions>
+
+export function useSocket(url: string, options?: SocketConnectOptions) {
+  const socketRef = useRef<Socket | null>(null)
 
   useEffect(() => {
-    socketRef.current = io(url, options);
+    socketRef.current = io(url, options)
     return () => {
-      socketRef.current?.disconnect();
-    };
-  }, [url, options]);
+      socketRef.current?.disconnect()
+    }
+  }, [url, options])
 
-  return socketRef.current;
+  return socketRef.current
 }

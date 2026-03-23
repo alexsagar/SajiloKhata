@@ -1,10 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Trash2, Plus, MessageSquare } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -143,7 +143,7 @@ export function SimpleGroupTest() {
           <DialogHeader>
             <DialogTitle>Delete Group</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{groupToDelete?.name}"?
+              Are you sure you want to delete &quot;{groupToDelete?.name}&quot;?
             </DialogDescription>
           </DialogHeader>
           

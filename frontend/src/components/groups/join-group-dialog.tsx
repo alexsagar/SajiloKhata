@@ -33,6 +33,24 @@ interface JoinGroupDialogProps {
   children: React.ReactNode
 }
 
+interface JoinGroupResponse {
+  data?: {
+    name?: string
+  }
+}
+
+function getJoinedGroupName(response: JoinGroupResponse) {
+  return response.data?.name || "group"
+}
+
+interface ErrorWithMessage {
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
 export function JoinGroupDialog({ children }: JoinGroupDialogProps) {
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
@@ -48,16 +66,16 @@ export function JoinGroupDialog({ children }: JoinGroupDialogProps) {
 
   const joinGroupMutation = useMutation({
     mutationFn: (data: JoinGroupFormData) => groupAPI.joinGroup(data.inviteCode),
-    onSuccess: (response) => {
+    onSuccess: (response: JoinGroupResponse) => {
       syncDashboardState(queryClient, { includeNotifications: true })
       toast({
         title: "Joined group",
-        description: `You've successfully joined "${response.data.name}".`,
+        description: `You've successfully joined "${getJoinedGroupName(response)}".`,
       })
       setOpen(false)
       reset()
     },
-    onError: (error: any) => {
+    onError: (error: ErrorWithMessage) => {
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to join group",

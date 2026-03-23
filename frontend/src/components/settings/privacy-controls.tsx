@@ -10,13 +10,26 @@ import { useMutation } from "@tanstack/react-query"
 import { useAuth } from "@/contexts/auth-context"
 import { userAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
+import type { User } from "@/types/user"
+
+interface UpdatePreferencesResponse {
+  data?: {
+    user?: {
+      preferences?: User["preferences"]
+    }
+  }
+}
+
+interface ErrorWithMessage {
+  message?: string
+}
 
 export function PrivacyControls() {
   const { user, updateUser } = useAuth()
   const [profileVisibility, setProfileVisibility] = useState<"public" | "friends" | "private">("friends")
 
   useEffect(() => {
-    const next = (user as any)?.preferences?.privacy?.profileVisibility
+    const next = user?.preferences?.privacy?.profileVisibility
     if (next === "public" || next === "friends" || next === "private") {
       setProfileVisibility(next)
     }
@@ -24,14 +37,14 @@ export function PrivacyControls() {
 
   const mutation = useMutation({
     mutationFn: () => userAPI.updatePreferences({ privacy: { profileVisibility } }),
-    onSuccess: (response) => {
+    onSuccess: (response: UpdatePreferencesResponse) => {
       updateUser({ preferences: response.data?.user?.preferences })
       toast({
         title: "Privacy updated",
         description: "Your privacy settings were saved.",
       })
     },
-    onError: (error: any) => {
+    onError: (error: ErrorWithMessage) => {
       toast({
         title: "Failed to update privacy",
         description: error?.message || "Please try again.",

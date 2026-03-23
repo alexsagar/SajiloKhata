@@ -1,5 +1,6 @@
 export interface User {
   id: string
+  _id?: string
   email: string
   username: string
   firstName: string
@@ -7,13 +8,20 @@ export interface User {
   avatar?: string
   preferences: {
     currency: string
+    baseCurrency?: string
     language: string
     theme: string
     timezone: string
+    dateFormat?: string
+    autoSplit?: boolean
+    defaultSplitType?: string
     notifications: {
       email: boolean
       push: boolean
       sms: boolean
+    }
+    privacy?: {
+      profileVisibility?: string
     }
   }
   role: string

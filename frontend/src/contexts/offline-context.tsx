@@ -4,12 +4,13 @@ import type React from "react"
 import { createContext, useContext, useEffect, useState } from "react"
 import { useOnlineStatus } from "@/hooks/use-online-status"
 import { offlineManager } from "@/lib/offline-manager"
+import type { PendingAction } from "@/lib/offline-manager"
 
 interface OfflineContextType {
   isOnline: boolean
-  pendingActions: any[]
+  pendingActions: PendingAction[]
   syncPendingActions: () => Promise<void>
-  addPendingAction: (action: any) => void
+  addPendingAction: (action: Omit<PendingAction, "id">) => void
   removePendingAction: (id: string) => void
 }
 
@@ -17,7 +18,7 @@ const OfflineContext = createContext<OfflineContextType | undefined>(undefined)
 
 export function OfflineProvider({ children }: { children: React.ReactNode }) {
   const isOnline = useOnlineStatus()
-  const [pendingActions, setPendingActions] = useState<any[]>([])
+  const [pendingActions, setPendingActions] = useState<PendingAction[]>([])
 
   useEffect(() => {
     // Load pending actions from storage on mount
@@ -39,12 +40,12 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
     try {
       await offlineManager.syncPendingActions()
       setPendingActions([])
-    } catch (error) {
+    } catch {
       
     }
   }
 
-  const addPendingAction = (action: any) => {
+  const addPendingAction = (action: Omit<PendingAction, "id">) => {
     const newAction = { ...action, id: Date.now().toString() }
     setPendingActions((prev) => [...prev, newAction])
     offlineManager.addPendingAction(newAction)

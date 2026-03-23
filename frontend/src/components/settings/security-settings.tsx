@@ -11,6 +11,10 @@ import { useMutation } from "@tanstack/react-query"
 import { userAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 
+interface ErrorWithMessage {
+  message?: string
+}
+
 export function SecuritySettings() {
   const [currentPassword, setCurrentPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
@@ -27,7 +31,7 @@ export function SecuritySettings() {
         description: "Your password has been changed successfully.",
       })
     },
-    onError: (error: any) => {
+    onError: (error: ErrorWithMessage) => {
       toast({
         title: "Failed to update password",
         description: error?.message || "Please check your current password and try again.",

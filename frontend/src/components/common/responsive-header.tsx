@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Menu, X } from "lucide-react"
+import { Menu } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -13,7 +13,7 @@ interface ResponsiveHeaderProps {
 }
 
 export function ResponsiveHeader({ title, subtitle, children, className }: ResponsiveHeaderProps) {
-  const [isMobile, setIsMobile] = useState(false)
+  const [, setIsMobile] = useState(false)
 
   useEffect(() => {
     const checkMobile = () => {

@@ -5,8 +5,10 @@ interface OfflineQueueProps {
   manager?: typeof defaultManager;
 }
 
+type PendingOfflineAction = Awaited<ReturnType<typeof defaultManager.getPendingActions>>[number]
+
 const OfflineQueue: React.FC<OfflineQueueProps> = ({ manager = defaultManager }) => {
-  const [actions, setActions] = useState<any[]>([])
+  const [actions, setActions] = useState<PendingOfflineAction[]>([])
 
   useEffect(() => {
     let mounted = true
@@ -28,7 +30,7 @@ const OfflineQueue: React.FC<OfflineQueueProps> = ({ manager = defaultManager })
         <p className="text-gray-500">No pending actions.</p>
       ) : (
         <ul className="list-disc ml-4">
-          {actions.map((action: any, idx: number) => (
+          {actions.map((action, idx: number) => (
             <li key={idx}>{action.type || "Pending action"}</li>
           ))}
         </ul>

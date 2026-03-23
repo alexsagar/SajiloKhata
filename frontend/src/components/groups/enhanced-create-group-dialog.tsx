@@ -30,11 +30,26 @@ interface Friend {
 
 interface CreateGroupDialogProps {
   children: React.ReactNode
-  onGroupCreated?: (group: any) => void
+  onGroupCreated?: (group: CreatedGroup) => void
 }
 
 // Empty initial data - will be populated from API
 const mockFriends: Friend[] = []
+
+interface GroupMemberPreview extends Friend {
+  role: "admin" | "member"
+  status: "active" | "invited"
+}
+
+interface CreatedGroup {
+  id: string
+  name: string
+  description: string
+  members: GroupMemberPreview[]
+  createdAt: string
+  totalExpenses: number
+  totalAmount: number
+}
 
 export function EnhancedCreateGroupDialog({ children, onGroupCreated }: CreateGroupDialogProps) {
   const [isOpen, setIsOpen] = useState(false)
@@ -97,7 +112,7 @@ export function EnhancedCreateGroupDialog({ children, onGroupCreated }: CreateGr
       return
     }
 
-    const newGroup = {
+    const newGroup: CreatedGroup = {
       id: Date.now().toString(),
       name: groupName.trim(),
       description: groupDescription.trim(),
@@ -111,15 +126,15 @@ export function EnhancedCreateGroupDialog({ children, onGroupCreated }: CreateGr
         },
         ...selectedFriends.map(friend => ({
           ...friend,
-          role: 'member',
-          status: 'active'
+          role: 'member' as const,
+          status: 'active' as const
         })),
         ...emailList.map(email => ({
           id: `invite-${Date.now()}-${Math.random()}`,
           name: email.split('@')[0],
           email,
-          role: 'member',
-          status: 'invited'
+          role: 'member' as const,
+          status: 'invited' as const
         }))
       ],
       createdAt: new Date().toISOString(),
@@ -236,7 +251,7 @@ export function EnhancedCreateGroupDialog({ children, onGroupCreated }: CreateGr
                       
                       {filteredFriends.length === 0 && searchTerm && (
                         <p className="text-center text-muted-foreground py-4">
-                          No friends found matching "{searchTerm}"
+                          No friends found matching &quot;{searchTerm}&quot;
                         </p>
                       )}
                     </>

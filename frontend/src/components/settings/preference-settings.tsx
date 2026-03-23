@@ -12,10 +12,30 @@ import { userAPI } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 import { Loader2 } from "lucide-react"
 import { CurrencySelector } from "@/components/currency/currency-selector"
+import type { User } from "@/types/user"
+
+type PreferenceState = Pick<User["preferences"], "currency" | "language" | "theme" | "timezone"> & {
+  autoSplit: boolean
+  defaultSplitType: "equal" | "percentage" | "exact"
+}
+
+type PreferencesResponse = {
+  user: {
+    preferences: User["preferences"]
+  }
+}
+
+type ApiErrorLike = {
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
 
 export function PreferenceSettings() {
   const { user, updateUser } = useAuth()
-  const [preferences, setPreferences] = useState({
+  const [preferences, setPreferences] = useState<PreferenceState>({
     currency: "USD",
     language: "en",
     theme: "system",
@@ -32,8 +52,8 @@ export function PreferenceSettings() {
         language: user.preferences.language || "en",
         theme: user.preferences.theme || "system",
         timezone: user.preferences.timezone || "America/New_York",
-        autoSplit: !!(user as any).preferences?.autoSplit,
-        defaultSplitType: (user as any).preferences?.defaultSplitType ?? "equal",
+        autoSplit: !!user.preferences?.autoSplit,
+        defaultSplitType: user.preferences?.defaultSplitType as PreferenceState["defaultSplitType"] || "equal",
       }
       setPreferences(newPreferences)
     }
@@ -42,16 +62,18 @@ export function PreferenceSettings() {
   const updatePreferencesMutation = useMutation({
     mutationFn: userAPI.updatePreferences,
     onSuccess: (response) => {
-      updateUser({ preferences: response.data.user.preferences })
+      const payload = response.data as PreferencesResponse
+      updateUser({ preferences: payload.user.preferences })
       toast({
         title: "Preferences updated",
         description: "Your preferences have been saved successfully.",
       })
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
+      const apiError = error as ApiErrorLike
       toast({
         title: "Error",
-        description: error.response?.data?.message || "Failed to update preferences",
+        description: error instanceof Error ? error.message : apiError.response?.data?.message || "Failed to update preferences",
         variant: "destructive",
       })
     },
@@ -61,7 +83,7 @@ export function PreferenceSettings() {
     updatePreferencesMutation.mutate(preferences)
   }
 
-  const updatePreference = (key: string, value: any) => {
+  const updatePreference = <K extends keyof PreferenceState>(key: K, value: PreferenceState[K]) => {
     setPreferences(prev => ({ ...prev, [key]: value }))
   }
 
@@ -168,7 +190,7 @@ export function PreferenceSettings() {
             <Label htmlFor="defaultSplitType">Default Split Type</Label>
             <Select
               value={preferences.defaultSplitType}
-              onValueChange={(value) => updatePreference("defaultSplitType", value)}
+              onValueChange={(value: PreferenceState["defaultSplitType"]) => updatePreference("defaultSplitType", value)}
             >
               <SelectTrigger>
                 <SelectValue />

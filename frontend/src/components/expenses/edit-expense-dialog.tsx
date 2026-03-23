@@ -34,8 +34,36 @@ const editExpenseSchema = z.object({
 
 type EditExpenseFormData = z.infer<typeof editExpenseSchema>
 
+interface ExpenseGroupRef {
+  _id?: string
+}
+
+interface EditableExpense {
+  _id: string
+  description: string
+  amount?: number
+  category?: string
+  date?: string | Date
+  notes?: string
+  groupId?: string | ExpenseGroupRef | null
+}
+
+function getExpenseGroupId(groupId: EditableExpense["groupId"]) {
+  if (!groupId) return ""
+  if (typeof groupId === "string") return groupId
+  return String(groupId._id || "")
+}
+
+interface ApiErrorLike {
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
 interface EditExpenseDialogProps {
-  expense: any
+  expense: EditableExpense
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -58,8 +86,8 @@ export function EditExpenseDialog({ expense, open, onOpenChange }: EditExpenseDi
     if (expense) {
       reset({
         description: expense.description,
-        amount: expense.amount,
-        category: expense.category,
+        amount: expense.amount ?? 0,
+        category: expense.category || "other",
         date: expense.date ? new Date(expense.date).toISOString().split('T')[0] : "",
         notes: expense.notes || "",
       })
@@ -69,9 +97,10 @@ export function EditExpenseDialog({ expense, open, onOpenChange }: EditExpenseDi
   const updateExpenseMutation = useMutation({
     mutationFn: (data: EditExpenseFormData) => expenseAPI.updateExpense(expense._id, data),
     onSuccess: () => {
-      if (expense?.groupId?._id || expense?.groupId) {
+      const groupId = getExpenseGroupId(expense.groupId)
+      if (groupId) {
         syncGroupState(queryClient, {
-          groupId: String(expense.groupId?._id || expense.groupId),
+          groupId,
           expenseId: String(expense._id),
           includeNotifications: true,
         })
@@ -84,7 +113,7 @@ export function EditExpenseDialog({ expense, open, onOpenChange }: EditExpenseDi
       })
       onOpenChange(false)
     },
-    onError: (error: any) => {
+    onError: (error: ApiErrorLike) => {
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to update expense",

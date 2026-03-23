@@ -9,19 +9,14 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+
 import { 
   Search, 
   Users, 
-  DollarSign, 
-  Calendar,
-  MoreHorizontal,
   Eye,
   Ban,
   CheckCircle,
-  AlertTriangle,
   Download,
-  TrendingUp,
   Activity
 } from "lucide-react"
 import DataTable from "@/components/common/data-table"
@@ -50,6 +45,12 @@ interface Group {
 
 // Empty initial data - will be populated from API
 const mockGroups: Group[] = []
+
+interface TableRow<T> {
+  row: {
+    original: T
+  }
+}
 
 export function GroupManagement() {
   const [groups, setGroups] = useState<Group[]>(mockGroups)
@@ -121,7 +122,7 @@ export function GroupManagement() {
     {
       header: 'Group',
       accessorKey: 'group',
-      cell: ({ row }: any) => {
+      cell: ({ row }: TableRow<Group>) => {
         const group = row.original
         return (
           <div className="flex items-center gap-3">
@@ -143,7 +144,7 @@ export function GroupManagement() {
     {
       header: 'Creator',
       accessorKey: 'creator',
-      cell: ({ row }: any) => {
+      cell: ({ row }: TableRow<Group>) => {
         const creator = row.original.creator
         return (
           <div>
@@ -156,7 +157,7 @@ export function GroupManagement() {
     {
       header: 'Members',
       accessorKey: 'memberCount',
-      cell: ({ row }: any) => (
+      cell: ({ row }: TableRow<Group>) => (
         <div className="flex items-center gap-1">
           <Users className="h-4 w-4 text-muted-foreground" />
           <span>{row.original.memberCount}</span>
@@ -166,7 +167,7 @@ export function GroupManagement() {
     {
       header: 'Total Expenses',
       accessorKey: 'totalExpenses',
-      cell: ({ row }: any) => (
+      cell: ({ row }: TableRow<Group>) => (
         <div className="text-right font-medium">
           ${row.original.totalExpenses.toLocaleString()}
         </div>
@@ -175,17 +176,17 @@ export function GroupManagement() {
     {
       header: 'Status',
       accessorKey: 'status',
-      cell: ({ row }: any) => getStatusBadge(row.original.status)
+      cell: ({ row }: TableRow<Group>) => getStatusBadge(row.original.status)
     },
     {
       header: 'Category',
       accessorKey: 'category',
-      cell: ({ row }: any) => getCategoryBadge(row.original.category)
+      cell: ({ row }: TableRow<Group>) => getCategoryBadge(row.original.category)
     },
     {
       header: 'Last Activity',
       accessorKey: 'lastActivity',
-      cell: ({ row }: any) => (
+      cell: ({ row }: TableRow<Group>) => (
         <div className="text-sm">
           {new Date(row.original.lastActivity).toLocaleDateString()}
         </div>
@@ -194,7 +195,7 @@ export function GroupManagement() {
     {
       header: 'Actions',
       accessorKey: 'actions',
-      cell: ({ row }: any) => {
+      cell: ({ row }: TableRow<Group>) => {
         const group = row.original
         return (
           <div className="flex items-center gap-2">

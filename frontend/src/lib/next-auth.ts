@@ -2,6 +2,7 @@ import NextAuth from "next-auth"
 import Google from "next-auth/providers/google"
 import Facebook from "next-auth/providers/facebook"
 import type { NextAuthConfig } from "next-auth"
+import type { JWT } from "next-auth/jwt"
 
 /**
  * NextAuth.js Configuration for Google and Facebook OAuth
@@ -11,6 +12,14 @@ import type { NextAuthConfig } from "next-auth"
  * 2. Syncing the OAuth user with your backend
  * 3. Storing user data in JWT session
  */
+
+type ExtendedJWT = JWT & {
+  accessToken?: string
+  provider?: string
+  providerAccountId?: string
+  backendUserId?: string
+  id?: string
+}
 
 const config: NextAuthConfig = {
   providers: [
@@ -51,44 +60,44 @@ const config: NextAuthConfig = {
   callbacks: {
     // Handle JWT token creation and updates
     async jwt({ token, user, account, profile }) {
+      const extendedToken = token as ExtendedJWT
+      void profile
       // Initial sign in
       if (account && user) {
-        token.accessToken = account.access_token
-        token.provider = account.provider
-        token.id = user.id
+        extendedToken.accessToken = account.access_token
+        extendedToken.provider = account.provider
+        extendedToken.id = user.id
         // Store providerAccountId so the client can sync with backend
         // (e.g. Facebook numeric id or Google sub)
-        // @ts-ignore
-        token.providerAccountId = account.providerAccountId
-        token.email = user.email
-        token.name = user.name
-        token.image = user.image
+        extendedToken.providerAccountId = account.providerAccountId
+        extendedToken.email = user.email
+        extendedToken.name = user.name
+        extendedToken.image = user.image
       }
       
-      return token
+      return extendedToken
     },
     
     // Make user data available in session
     async session({ session, token }) {
+      const extendedToken = token as ExtendedJWT
       if (token) {
-        session.user.id = token.id as string
+        session.user.id = extendedToken.id as string
         session.user.email = token.email as string
         session.user.name = token.name as string
         session.user.image = token.image as string
-        // @ts-ignore - Add custom fields
-        session.user.provider = token.provider
-        // @ts-ignore
-        session.user.providerAccountId = token.providerAccountId as string | undefined
-        // @ts-ignore
-        session.user.backendUserId = token.backendUserId
-        // @ts-ignore
-        session.accessToken = token.accessToken
+        session.user.provider = extendedToken.provider
+        session.user.providerAccountId = extendedToken.providerAccountId as string | undefined
+        session.user.backendUserId = extendedToken.backendUserId
+        session.accessToken = extendedToken.accessToken
       }
       return session
     },
     
     // Control which users can sign in
-    async signIn({ user, account, profile }) {
+    async signIn({ account, profile, user }) {
+      void user
+      void profile
       // Allow all OAuth sign-ins
       if (account?.provider === "google" || account?.provider === "facebook") {
         return true

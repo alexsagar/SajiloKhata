@@ -53,6 +53,10 @@ interface AccountDeletionProps {
     className?: string
 }
 
+interface ApiErrorLike {
+    message?: string
+}
+
 // Constants
 const CONFIRMATION_PHRASE = "DELETE MY ACCOUNT"
 const DELETION_STEPS: DeletionStep[] = [
@@ -161,17 +165,18 @@ export function AccountDeletion({ className }: AccountDeletionProps) {
                 title: "Export Complete",
                 description: "Your data has been exported successfully.",
             })
-        } catch (error: any) {
+        } catch (error: unknown) {
+            const apiError = error as ApiErrorLike
             setExportStatus({
                 isExporting: false,
                 progress: 0,
                 downloadUrl: null,
-                error: error.message || "Failed to export data",
+                error: apiError.message || "Failed to export data",
             })
 
             toast({
                 title: "Export Failed",
-                description: error.message || "Failed to export your data. You can try again or skip this step.",
+                description: apiError.message || "Failed to export your data. You can try again or skip this step.",
                 variant: "destructive",
             })
         }
@@ -217,8 +222,9 @@ export function AccountDeletion({ className }: AccountDeletionProps) {
             // Logout and redirect
             await logout()
             router.push("/goodbye")
-        } catch (error: any) {
-            const errorMessage = error.message || "Failed to delete account"
+        } catch (error: unknown) {
+            const apiError = error as ApiErrorLike
+            const errorMessage = apiError.message || "Failed to delete account"
             setDeletionError(errorMessage)
 
             toast({
@@ -396,7 +402,7 @@ export function AccountDeletion({ className }: AccountDeletionProps) {
                         )}
 
                         <p className="text-sm text-muted-foreground text-center">
-                            You can skip this step if you don't need a copy of your data.
+                            You can skip this step if you don&apos;t need a copy of your data.
                         </p>
                     </div>
                 )
@@ -425,7 +431,7 @@ export function AccountDeletion({ className }: AccountDeletionProps) {
                                     <div>
                                         <p className="font-medium text-green-700 dark:text-green-400">Identity Verified</p>
                                         <p className="text-sm text-muted-foreground">
-                                            You're signed in as {user?.email}
+                                            You&apos;re signed in as {user?.email}
                                         </p>
                                     </div>
                                 </div>
@@ -488,7 +494,7 @@ export function AccountDeletion({ className }: AccountDeletionProps) {
                             />
                             {confirmationPhrase && !confirmationValid && (
                                 <p className="text-sm text-muted-foreground text-center">
-                                    Phrase doesn't match. Please type exactly: {CONFIRMATION_PHRASE}
+                                    Phrase doesn&apos;t match. Please type exactly: {CONFIRMATION_PHRASE}
                                 </p>
                             )}
                         </div>
