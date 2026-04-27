@@ -150,10 +150,10 @@ export function FriendInvitationWithDelete() {
   const [inviteMessage, setInviteMessage] = useState('Hey! Join me on SajiloKhata to easily split and track our shared expenses. It makes managing group expenses so much simpler!')
   const [copiedLink, setCopiedLink] = useState(false)
   const [sending, setSending] = useState(false)
+  const [inviteLink, setInviteLink] = useState<string | null>(null)
+  const [generatingLink, setGeneratingLink] = useState(false)
   const { toast } = useToast()
   const router = useRouter()
-
-  const inviteLink = "https://SajiloKhata.app/invite/abc123"
 
   const isLoading = friendsLoading || invitesLoading
 
@@ -161,7 +161,7 @@ export function FriendInvitationWithDelete() {
     if (sending) return
     setSending(true)
     const emails = inviteEmails
-      .split(/[\\,\\n]/)
+      .split(/[,\n]/)
       .map(email => email.trim())
       .filter(email => email && email.includes('@'))
 
@@ -225,7 +225,25 @@ export function FriendInvitationWithDelete() {
     setSending(false)
   }
 
+  const handleGenerateLink = async () => {
+    setGeneratingLink(true)
+    try {
+      const res = await friendsAPI.createInvite({ message: inviteMessage || undefined }) as { data?: { inviteUrl?: string } }
+      const url = res.data?.inviteUrl || null
+      setInviteLink(url)
+      if (url) {
+        toast({ title: "Invite link generated!", description: "Share this link with your friend." })
+      }
+    } catch (e: unknown) {
+      const error = e as ApiErrorLike
+      toast({ title: "Failed to generate link", description: error.response?.data?.message || error.message || "", variant: "destructive" })
+    } finally {
+      setGeneratingLink(false)
+    }
+  }
+
   const handleCopyLink = async () => {
+    if (!inviteLink) return
     try {
       await navigator.clipboard.writeText(inviteLink)
       setCopiedLink(true)
@@ -652,19 +670,32 @@ export function FriendInvitationWithDelete() {
             <TabsContent value="link" className="space-y-2">
               <div>
                 <Label className="text-xs">Your Personal Invite Link</Label>
-                <div className="flex gap-2 mt-2">
-                  <Input value={inviteLink} readOnly className="flex-1 h-8 text-sm" />
-                  <Button
-                    variant="outline"
-                    onClick={handleCopyLink}
-                    className="flex-shrink-0 h-8"
-                  >
-                    {copiedLink ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Share this link with friends so they can join SajiloKhata and connect with you
-                </p>
+                {inviteLink ? (
+                  <>
+                    <div className="flex gap-2 mt-2">
+                      <Input value={inviteLink} readOnly className="flex-1 h-8 text-sm" />
+                      <Button
+                        variant="outline"
+                        onClick={handleCopyLink}
+                        className="flex-shrink-0 h-8"
+                      >
+                        {copiedLink ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Share this link with friends so they can join SajiloKhata and connect with you
+                    </p>
+                  </>
+                ) : (
+                  <div className="mt-2">
+                    <Button onClick={handleGenerateLink} disabled={generatingLink} size="sm" className="w-full">
+                      {generatingLink ? 'Generating...' : 'Generate Invite Link'}
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Click to generate a shareable invite link
+                    </p>
+                  </div>
+                )}
               </div>
             </TabsContent>
           </Tabs>

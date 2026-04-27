@@ -116,11 +116,24 @@ export function SmartReceiptScanner({ open, onOpenChange, onReceiptProcessed }: 
       setUploadProgress(10)
       
       const response = await receiptAPI.uploadReceipt(formData)
-      const payload = (response as { data?: { data?: { id?: string } } })?.data?.data || {}
+      const payload = (response as { data?: { data?: { id?: string; processingStatus?: string } } })?.data?.data || {}
 
-      // Simulate OCR processing progress
       setUploadProgress(50)
-      const completedReceipt = payload?.id ? await pollReceiptResult(String(payload.id)) : null
+
+      // If the backend processed synchronously (Redis unavailable), the status
+      // is already "completed" — skip polling and fetch the full receipt.
+      const alreadyDone = payload?.processingStatus === "completed"
+
+      let completedReceipt: ReceiptRecord | null = null
+      if (payload?.id) {
+        if (alreadyDone) {
+          const result = await receiptAPI.getReceipt(String(payload.id))
+          completedReceipt = (result as { data?: { receipt?: ReceiptRecord } })?.data?.receipt ?? null
+        } else {
+          completedReceipt = (await pollReceiptResult(String(payload.id))) ?? null
+        }
+      }
+
       setUploadProgress(80)
       await new Promise(resolve => setTimeout(resolve, 500))
       setUploadProgress(100)

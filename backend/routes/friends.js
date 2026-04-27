@@ -118,7 +118,8 @@ router.post(
 
       if (normalizedInviteeEmail) {
         const inviter = await User.findById(req.user._id).select("firstName")
-        await sendEmail({
+        try {
+          await sendEmail({
           to: req.body.inviteeEmail,
           subject: "You're invited to join SajiloKhata",
           template: "groupInvite",
@@ -128,6 +129,9 @@ router.post(
             inviteUrl,
           },
         })
+        } catch (e) {
+          console.error("Non-fatal email error:", e.message);
+        }
 
         // If the invitee already has an account, notify them in real time
         const existingUser = await User.findOne({ email: normalizedInviteeEmail }).select("_id").lean()

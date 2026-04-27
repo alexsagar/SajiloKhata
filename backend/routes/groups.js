@@ -36,7 +36,7 @@ async function invalidateGroupCaches({ req, group = null, groupId = null, extraU
 async function buildGroupNetBalances(groupId) {
   const [result] = await measure("groups.buildGroupNetBalances", () =>
     Expense.aggregate([
-      { $match: { groupId, status: "active" } },
+      { $match: { groupId, status: { $in: ["active", "settled"] } } },
       {
         $facet: {
           expenseEdges: [
@@ -45,13 +45,7 @@ async function buildGroupNetBalances(groupId) {
               $project: {
                 fromUserId: "$splits.user",
                 toUserId: "$paidBy",
-                amountCents: {
-                  $cond: [
-                    { $eq: ["$splits.settled", true] },
-                    0,
-                    { $ifNull: ["$splits.amountCents", 0] },
-                  ],
-                },
+                amountCents: { $ifNull: ["$splits.amountCents", 0] },
               },
             },
             {
@@ -96,6 +90,13 @@ async function buildGroupNetBalances(groupId) {
   for (const edge of expenseEdges) {
     bump(edge._id.toUserId, edge.amountCents)
     bump(edge._id.fromUserId, -edge.amountCents)
+  }
+
+  const Settlement = require("../models/Settlement")
+  const confirmedSettlements = await Settlement.find({ groupId, status: "CONFIRMED" }).lean()
+  for (const s of confirmedSettlements) {
+    bump(s.fromUserId, s.amountCents)
+    bump(s.toUserId, -s.amountCents)
   }
 
   return {
@@ -217,21 +218,17 @@ router.get("/my-balance", cacheUserResponse({ namespace: "groups", ttlSeconds: 6
       return ok(res, { youOwe: 0, youreOwed: 0, totalBalance: 0 })
     }
 
-    const [expenseEdges] = await Promise.all([
+    const Settlement = require("../models/Settlement")
+    const [expenseEdges, confirmedSettlements] = await Promise.all([
       Expense.aggregate([
-        { $match: { groupId: { $in: groupIds }, status: "active" } },
+        { $match: { groupId: { $in: groupIds }, status: { $in: ["active", "settled"] } } },
         { $unwind: "$splits" },
         {
           $project: {
+            groupId: "$groupId",
             fromUserId: "$splits.user",
             toUserId: "$paidBy",
-            amountCents: {
-              $cond: [
-                { $eq: ["$splits.settled", true] },
-                0,
-                { $ifNull: ["$splits.amountCents", 0] },
-              ],
-            },
+            amountCents: { $ifNull: ["$splits.amountCents", 0] },
           },
         },
         {
@@ -246,32 +243,45 @@ router.get("/my-balance", cacheUserResponse({ namespace: "groups", ttlSeconds: 6
         },
         {
           $group: {
-            _id: { fromUserId: "$fromUserId", toUserId: "$toUserId" },
+            _id: { groupId: "$groupId", fromUserId: "$fromUserId", toUserId: "$toUserId" },
             amountCents: { $sum: "$amountCents" },
           },
         },
       ]),
+      Settlement.find({ groupId: { $in: groupIds }, status: "CONFIRMED" }).lean(),
     ])
 
-    const netByCounterparty = new Map()
-    const bumpPair = (counterpartyId, deltaCents) => {
-      const key = String(counterpartyId)
-      netByCounterparty.set(key, (netByCounterparty.get(key) || 0) + deltaCents)
+    const netByGroup = new Map()
+    const bumpNet = (gId, deltaCents) => {
+      const key = String(gId)
+      netByGroup.set(key, (netByGroup.get(key) || 0) + deltaCents)
     }
 
     for (const edge of expenseEdges) {
+      const gId = String(edge?._id?.groupId || "")
       const fromId = String(edge?._id?.fromUserId || "")
       const toId = String(edge?._id?.toUserId || "")
       const cents = Math.round(Number(edge?.amountCents || 0))
       if (cents <= 0) continue
 
-      if (toId === currentUserId && fromId !== currentUserId) bumpPair(fromId, cents)
-      if (fromId === currentUserId && toId !== currentUserId) bumpPair(toId, -cents)
+      if (toId === currentUserId) bumpNet(gId, cents)
+      if (fromId === currentUserId) bumpNet(gId, -cents)
+    }
+
+    for (const s of confirmedSettlements) {
+      const gId = String(s.groupId || "")
+      const fromId = String(s.fromUserId || "")
+      const toId = String(s.toUserId || "")
+      const cents = Math.round(Number(s.amountCents || 0))
+      if (cents <= 0) continue
+
+      if (toId === currentUserId) bumpNet(gId, -cents)
+      if (fromId === currentUserId) bumpNet(gId, cents)
     }
 
     let youreOwed = 0
     let youOwe = 0
-    for (const v of netByCounterparty.values()) {
+    for (const v of netByGroup.values()) {
       if (v > 0) youreOwed += v
       if (v < 0) youOwe += Math.abs(v)
     }

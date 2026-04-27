@@ -83,7 +83,31 @@ Main entrypoint: `backend/app.js`
 - Contexts for auth/currency/notifications/socket
 - UI primitives under `frontend/src/components/ui`
 
-## 4. Quick Start (Local)
+## 4. Non-Functional Requirements
+
+The following NFRs reflect the current codebase. Items that are not yet enforced in code should be treated as future goals, not current guarantees.
+
+- Performance
+  - Supports near real-time UI updates for groups, expenses, settlements, and notifications using Socket.IO plus React Query invalidation/sync.
+  - Uses Redis-backed caching and async Bull queues when Redis is available, with synchronous fallback for receipt OCR when the queue is unavailable.
+  - OCR processing is asynchronous and retried in the queue, but the codebase does not enforce or measure a strict `< 5 seconds` SLA. Avoid claiming a hard OCR completion bound until benchmarked and monitored in production.
+- Usability
+  - Provides responsive mobile and desktop layouts, dedicated mobile routes, optimistic expense creation, and guided flows for groups, splits, receipts, analytics, and notifications.
+  - It is reasonable to claim the UI is optimized for mobile and desktop use.
+- Security
+  - Implements cookie-based JWT authentication, refresh tokens, CSRF protection for mutating routes, bcrypt password hashing, Helmet, CORS controls, and route or role checks for admin-only flows and group member permissions.
+  - Do not claim generic "encryption of user data and financial details" unless you mean HTTPS in transit and password hashing. The current codebase does not show field-level or database-at-rest encryption for transaction data.
+- Reliability
+  - Handles failures more gracefully through queue retries, synchronous OCR fallback, global error handling, unhandled rejection capture, and Redis/cache degradation paths that avoid bringing down the API.
+  - Do not claim concurrent group edits are handled with explicit conflict resolution. The codebase does not implement optimistic locking, version checks, or database transactions for that.
+  - Do not claim automatic backups as an implemented system feature; the repository contains deployment instructions for `mongodump`/`mongorestore`, but no automated backup scheduler in application code.
+- Scalability
+  - Supports moderate growth through MongoDB indexes, Redis caching, paginated APIs, async workers, and Socket.IO room-based fan-out.
+  - Replace "Portability" with "Scalability" here. The current codebase does not implement MongoDB sharding or Socket.IO horizontal scaling adapters, so those should not be described as completed capabilities.
+- Observability
+  - Includes structured request logging, request context IDs, slow-request/per-database-operation instrumentation, audit logging, and Sentry integration hooks. This is a meaningful NFR already supported by the backend.
+
+## 5. Quick Start (Local)
 
 ## Prerequisites
 
@@ -143,7 +167,7 @@ URLs:
 - API: `http://localhost:5000/api`
 - Health check: `http://localhost:5000/api/health`
 
-## 5. API Surface (High Level)
+## 6. API Surface (High Level)
 
 All routes are mounted under `/api`.
 
@@ -163,20 +187,20 @@ All routes are mounted under `/api`.
 
 For detailed route reference, see `docs/API.md`.
 
-## 6. Notable Operational Jobs and Workers
+## 7. Notable Operational Jobs and Workers
 
 - Reminder job: `backend/jobs/reminderNotifications.js`
 - Reconciliation job: `backend/jobs/reconciliationJob.js`
 - Expense queue worker: `backend/queues/expenseQueue.js`
 - Receipt queue worker: `backend/queues/receiptQueue.js`
 
-## 7. Important Product Rules
+## 8. Important Product Rules
 
 - Money math is handled in cents in persistence (`amountCents`), with display conversion in UI/API responses.
 - Group debt is computed from expenses and settlements.
 - Settlement records update balances; no in-app wallet load is required for debt tracking.
 
-## 8. Development Scripts
+## 9. Development Scripts
 
 ### Backend (`backend/package.json`)
 
@@ -198,14 +222,14 @@ For detailed route reference, see `docs/API.md`.
 
 See `scripts/README.md` for script usage and safety notes.
 
-## 9. Documentation Map
+## 10. Documentation Map
 
 - `docs/API.md` - endpoint and auth/CSRF reference
 - `docs/analytics-system.md` - analytics architecture and endpoints
 - `docs/currency-feature.md` - currency handling and formatting behavior
 - `docs/DEPLOYMENT.md` - production deployment runbook
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 Common checks:
 
@@ -222,7 +246,7 @@ Common checks:
   - verify `CLIENT_URL` CORS setting
   - inspect browser console for socket auth errors
 
-## 11. Repository Audit Notes
+## 12. Repository Audit Notes
 
 Recent cleanup included:
 
@@ -230,11 +254,10 @@ Recent cleanup included:
 - Removed stale `scripts/package-lock.json` that was not part of runtime or tooling.
 - Updated docs to reflect current app behavior and route surface.
 
-## 12. Contributing
+## 13. Contributing
 
 - Keep backend route changes synchronized with `frontend/src/lib/api.ts`.
 - Prefer cents-safe money operations and avoid floating-point persistence.
 - Run at least:
   - backend syntax check for changed JS files
   - `frontend` typecheck before merging
-

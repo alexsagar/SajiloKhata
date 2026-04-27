@@ -3,97 +3,112 @@ const Settlement = require("../models/Settlement")
 const Group = require("../models/Group")
 
 async function reconcileConfirmedSettlementsForGroup(groupId) {
-  const group = await Group.findById(groupId).select("_id settlementsReconciledAt").lean()
+  // 1. Fetch group
+  const group = await Group.findById(groupId).select("_id")
   if (!group) return
 
-  const latestConfirmedSettlement = await Settlement.findOne({
-    groupId,
-    status: "CONFIRMED",
-  })
-    .select("confirmedAt createdAt")
-    .sort({ confirmedAt: -1, createdAt: -1 })
-    .lean()
+  // 2. Fetch mathematical true balances (ignoring current settled flags)
+  // We can't easily import groups.js router, so we inline the exact ledger query:
+  const expenseResult = await Expense.aggregate([
+    { $match: { groupId, status: { $in: ["active", "settled"] } } },
+    { $unwind: "$splits" },
+    {
+      $project: {
+        fromUserId: "$splits.user",
+        toUserId: "$paidBy",
+        amountCents: { $ifNull: ["$splits.amountCents", 0] },
+      },
+    },
+    { $match: { $expr: { $and: [{ $gt: ["$amountCents", 0] }, { $ne: ["$fromUserId", "$toUserId"] }] } } },
+    { $group: { _id: { fromUserId: "$fromUserId", toUserId: "$toUserId" }, amountCents: { $sum: "$amountCents" } } },
+  ])
 
-  if (!latestConfirmedSettlement) {
-    if (!group.settlementsReconciledAt) {
-      await Group.updateOne({ _id: groupId }, { $set: { settlementsReconciledAt: new Date() } })
+  const netByUser = new Map()
+  const bump = (userId, delta) => {
+    const key = String(userId)
+    netByUser.set(key, (netByUser.get(key) || 0) + delta)
+  }
+
+  const actualEdges = Array.isArray(expenseResult) ? expenseResult : []
+
+  for (const edge of actualEdges) {
+    bump(edge._id.toUserId, edge.amountCents)
+    bump(edge._id.fromUserId, -edge.amountCents)
+  }
+
+  // Loop confirmed settlements
+  const confirmedSettlements = await Settlement.find({ groupId, status: "CONFIRMED" }).lean()
+  for (const s of confirmedSettlements) {
+    bump(s.fromUserId, s.amountCents)
+    bump(s.toUserId, -s.amountCents)
+  }
+
+  // 3. Unallocated Debt Map (users who owe money)
+  const unallocatedDebtMap = new Map()
+  for (const [userId, netCents] of netByUser.entries()) {
+    // If netCents < 0, they owe money. That's their unpaid debt.
+    if (netCents < 0) {
+      unallocatedDebtMap.set(String(userId), Math.abs(Math.round(netCents)))
     }
-    return
   }
 
-  const latestAppliedAt = latestConfirmedSettlement.confirmedAt || latestConfirmedSettlement.createdAt
-  if (
-    group.settlementsReconciledAt &&
-    latestAppliedAt &&
-    new Date(group.settlementsReconciledAt).getTime() >= new Date(latestAppliedAt).getTime()
-  ) {
-    return
-  }
-
-  const settlements = await Settlement.find({
-    groupId,
-    status: "CONFIRMED",
-  })
-    .select("fromUserId toUserId amountCents confirmedAt createdAt")
-    .sort({ confirmedAt: 1, createdAt: 1 })
-    .lean()
-
-  if (!settlements.length) return
-
+  // 4. Fetch all expenses, NEWEST first (so newest stay Unpaid, oldest get Settled)
   const expenses = await Expense.find({
     groupId,
-    status: "active",
-  }).sort({ date: 1, createdAt: 1 })
+    status: { $in: ["active", "settled"] },
+  }).sort({ date: -1, createdAt: -1 })
 
   const now = new Date()
   const changedExpenseIds = new Set()
 
-  for (const settlement of settlements) {
-    let remainingCents = Math.max(0, Number(settlement.amountCents || 0))
-    if (remainingCents <= 0) continue
-    const settlementCutoff = settlement.confirmedAt || settlement.createdAt || now
+  for (const expense of expenses) {
+    let changed = false
+    const paidBy = String(expense.paidBy)
 
-    for (const expense of expenses) {
-      if (remainingCents <= 0) break
-      if (String(expense.paidBy) !== String(settlement.toUserId)) continue
-      if (expense.createdAt && new Date(expense.createdAt).getTime() > new Date(settlementCutoff).getTime()) continue
+    for (const split of expense.splits) {
+      const splitUser = String(split.user)
+      if (splitUser === paidBy) continue
 
-      let changed = false
-      for (const split of expense.splits) {
-        if (remainingCents <= 0) break
-        if (String(split.user) !== String(settlement.fromUserId)) continue
-        if (split.settled) continue
-
-        const dueCents = Math.max(0, Number(split.amountCents || 0))
-        if (dueCents <= 0) {
+      const dueCents = Number(split.amountCents || 0)
+      if (dueCents <= 0) {
+        if (!split.settled) {
           split.settled = true
           split.settledAt = now
           changed = true
-          continue
         }
+        continue
+      }
 
-        if (remainingCents >= dueCents) {
+      let remainingUnpaid = unallocatedDebtMap.get(splitUser) || 0
+      
+      if (remainingUnpaid > 0) {
+        // Still has unpaid debt, this newer expense remains Unpaid
+        if (split.settled) {
+          split.settled = false
+          split.settledAt = null
+          changed = true
+        }
+        unallocatedDebtMap.set(splitUser, remainingUnpaid - dueCents)
+      } else {
+        // No more unpaid debt, this older expense is Settled
+        if (!split.settled) {
           split.settled = true
           split.settledAt = now
-          remainingCents -= dueCents
-          changed = true
-        } else {
-          split.amountCents = dueCents - remainingCents
-          if (typeof split.amount === "number") {
-            split.amount = split.amountCents / 100
-          }
-          remainingCents = 0
           changed = true
         }
       }
+    }
 
-      if (changed) {
-        if (expense.splits.every((s) => s.settled)) {
-          expense.status = "settled"
-          expense.settledAt = now
-        }
-        changedExpenseIds.add(String(expense._id))
+    if (changed) {
+      const allSettled = expense.splits.every(s => s.settled || String(s.user) === paidBy || Number(s.amountCents || 0) <= 0)
+      if (allSettled && expense.status !== "settled") {
+        expense.status = "settled"
+        expense.settledAt = now
+      } else if (!allSettled && expense.status !== "active") {
+        expense.status = "active"
+        expense.settledAt = null
       }
+      changedExpenseIds.add(String(expense._id))
     }
   }
 
@@ -107,7 +122,7 @@ async function reconcileConfirmedSettlementsForGroup(groupId) {
 
   await Group.updateOne(
     { _id: groupId },
-    { $set: { settlementsReconciledAt: latestAppliedAt || new Date() } },
+    { $set: { settlementsReconciledAt: now } },
   )
 }
 

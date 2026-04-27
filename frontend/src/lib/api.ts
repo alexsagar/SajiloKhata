@@ -265,6 +265,7 @@ export const receiptAPI = {
   uploadReceipt: (formData: FormData) =>
     api.post("/receipts/upload", formData, {
       headers: { "Content-Type": "multipart/form-data" },
+      timeout: 120_000, // OCR processing can take 10-30s
     }),
   getReceipts: (params?: {
     expenseId?: string

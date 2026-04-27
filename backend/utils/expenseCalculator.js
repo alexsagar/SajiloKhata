@@ -82,7 +82,8 @@ class ExpenseCalculator {
   calculateMinimumTransactions() {
     const transactions = []
     const balancesCopy = new Map(this.balances)
-
+    
+    //GreedyAlgorithm
     // Get all creditors (positive balance) and debtors (negative balance)
     const creditors = []
     const debtors = []
