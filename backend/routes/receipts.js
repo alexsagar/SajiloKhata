@@ -8,6 +8,8 @@ const Expense = require("../models/Expense")
 const { getPagination } = require("../utils/query")
 const { enqueueReceiptProcessing, isReceiptQueueAvailable } = require("../queues/receiptQueue")
 const { learnAndResolveMerchant } = require("../services/merchantLearningService")
+const OCRService = require("../services/ocrService")
+const { makeFingerprint, detectDuplicate, computeReviewFlags } = require("../services/receiptQualityService")
 
 const router = express.Router()
 
@@ -36,17 +38,127 @@ const upload = multer({
   },
 })
 
+/**
+ * Synchronous fallback: runs OCR processing inline when the Bull queue
+ * (Redis) is unavailable. Mirrors the logic in receiptQueue.processReceiptJob.
+ */
+async function processReceiptSync(receipt) {
+  const ocrService = new OCRService()
+
+  await Receipt.updateOne(
+    { _id: receipt._id },
+    { $set: { "ocrData.processingStatus": "processing", "ocrData.processingError": null } },
+  )
+
+  try {
+    const relativePath = String(receipt.filePath || "").replace(/^[/\\]+/, "")
+    const absolutePath = path.join(__dirname, "..", relativePath)
+    const buffer = await fs.readFile(absolutePath)
+
+    let parsed
+    if (receipt.mimeType === "application/pdf" || absolutePath.toLowerCase().endsWith(".pdf")) {
+      const pdfParse = require("pdf-parse")
+      const pdfResult = await pdfParse(buffer)
+      parsed = { rawText: pdfResult.text || "", ...ocrService.parseReceiptText(pdfResult.text || "") }
+    } else {
+      parsed = await ocrService.extractText(buffer)
+    }
+
+    const confidence = ocrService.calculateConfidence(parsed)
+    const merchantLearning = await learnAndResolveMerchant(receipt.userId, parsed.merchantName || "")
+
+    let linkedExpenseAmount = null
+    if (receipt.expenseId) {
+      const linked = await Expense.findById(receipt.expenseId).select("amountCents").lean()
+      if (linked) linkedExpenseAmount = Number(linked.amountCents || 0) / 100
+    }
+
+    const parsedData = {
+      merchant: merchantLearning.canonicalName || parsed.merchantName || null,
+      merchantCanonical: merchantLearning.normalizedName || null,
+      total: parsed.total || null,
+      subtotal: parsed.subtotal || null,
+      discount: parsed.discount || null,
+      serviceCharge: parsed.serviceCharge || null,
+      vat: parsed.vat || null,
+      date: parsed.date ? new Date(parsed.date) : null,
+      currency: receipt.ocrData?.parsedData?.currency || "USD",
+      items: Array.isArray(parsed.items)
+        ? parsed.items.map((it) => ({
+            description: it.description,
+            quantity: 1,
+            unitPrice: it.amount || null,
+            totalPrice: it.amount || null,
+          }))
+        : [],
+      tax: parsed.tax || null,
+      tip: parsed.tip || null,
+      paymentMethod: null,
+    }
+
+    const fingerprint = makeFingerprint({
+      merchantCanonical: parsedData.merchantCanonical,
+      total: parsedData.total,
+      date: parsedData.date,
+      itemsCount: parsedData.items.length,
+      currency: parsedData.currency,
+      fileSize: receipt.fileSize,
+    })
+    const duplicateDetection = await detectDuplicate({
+      userId: receipt.userId,
+      receiptId: receipt._id,
+      fingerprint,
+    })
+    const review = computeReviewFlags({
+      confidence,
+      parsedData,
+      duplicateDetection,
+      linkedExpenseAmount,
+    })
+
+    await Receipt.updateOne(
+      { _id: receipt._id },
+      {
+        $set: {
+          "ocrData.rawText": parsed.rawText || "",
+          "ocrData.confidence": Math.round(confidence),
+          "ocrData.parsedData": parsedData,
+          "ocrData.processingStatus": "completed",
+          "ocrData.processingError": null,
+          "ocrData.lastProcessedAt": new Date(),
+          "ocrData.requiresReview": review.requiresReview,
+          "ocrData.reviewReasons": review.reviewReasons,
+          "ocrData.reviewedAt": null,
+          "ocrData.reviewedByUser": false,
+          "ocrData.duplicateDetection": {
+            isDuplicate: duplicateDetection.isDuplicate,
+            duplicateOf: duplicateDetection.duplicateOf || null,
+            fingerprint,
+            matchScore: duplicateDetection.matchScore || 0,
+            checkedAt: new Date(),
+          },
+        },
+      },
+    )
+  } catch (err) {
+    await Receipt.updateOne(
+      { _id: receipt._id },
+      {
+        $set: {
+          "ocrData.processingStatus": "failed",
+          "ocrData.processingError": err.message,
+          "ocrData.lastProcessedAt": new Date(),
+        },
+      },
+    )
+    throw err
+  }
+}
+
 router.post("/upload", upload.single("receipt"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: "No file uploaded" })
-    }
-
-    if (!isReceiptQueueAvailable()) {
-      return res.status(503).json({
-        message: "Receipt processing is temporarily unavailable",
-        code: "QUEUE_UNAVAILABLE",
-      })
     }
 
     const receipt = await Receipt.create({
@@ -62,15 +174,39 @@ router.post("/upload", upload.single("receipt"), async (req, res) => {
       },
     })
 
-    await enqueueReceiptProcessing({ receiptId: receipt._id.toString() })
+    // Try async queue first; fall back to synchronous processing
+    if (isReceiptQueueAvailable()) {
+      await enqueueReceiptProcessing({ receiptId: receipt._id.toString() })
 
-    return res.status(202).json({
+      return res.status(202).json({
+        success: true,
+        data: {
+          id: receipt._id,
+          filename: receipt.filename,
+          path: receipt.filePath,
+          processingStatus: "pending",
+        },
+      })
+    }
+
+    // Synchronous fallback — process inline when Redis/Bull is down
+    console.log("[ReceiptUpload] Queue unavailable, processing receipt synchronously")
+    try {
+      await processReceiptSync(receipt)
+    } catch (syncErr) {
+      console.error("[ReceiptUpload] Synchronous OCR failed:", syncErr.message)
+      // Receipt is saved with "failed" status — still return it so the frontend can display the error
+    }
+
+    const updatedReceipt = await Receipt.findById(receipt._id).lean()
+
+    return res.status(200).json({
       success: true,
       data: {
-        id: receipt._id,
-        filename: receipt.filename,
-        path: receipt.filePath,
-        processingStatus: "pending",
+        id: updatedReceipt._id,
+        filename: updatedReceipt.filename,
+        path: updatedReceipt.filePath,
+        processingStatus: updatedReceipt.ocrData?.processingStatus || "failed",
       },
     })
   } catch (error) {
@@ -282,13 +418,6 @@ router.put("/:id/link-expense", [body("expenseId").isMongoId().withMessage("Vali
 
 router.post("/:id/reprocess", async (req, res) => {
   try {
-    if (!isReceiptQueueAvailable()) {
-      return res.status(503).json({
-        message: "Receipt processing is temporarily unavailable",
-        code: "QUEUE_UNAVAILABLE",
-      })
-    }
-
     const receipt = await Receipt.findOne({
       _id: req.params.id,
       userId: req.user._id,
@@ -308,12 +437,31 @@ router.post("/:id/reprocess", async (req, res) => {
         },
       },
     )
-    await enqueueReceiptProcessing({ receiptId: receipt._id.toString() })
 
-    return res.status(202).json({
-      message: "Receipt reprocessing queued",
+    // Try async queue first; fall back to synchronous processing
+    if (isReceiptQueueAvailable()) {
+      await enqueueReceiptProcessing({ receiptId: receipt._id.toString() })
+
+      return res.status(202).json({
+        message: "Receipt reprocessing queued",
+        receiptId: receipt._id,
+        processingStatus: "pending",
+      })
+    }
+
+    // Synchronous fallback
+    console.log("[ReceiptReprocess] Queue unavailable, processing receipt synchronously")
+    try {
+      await processReceiptSync(receipt)
+    } catch (syncErr) {
+      console.error("[ReceiptReprocess] Synchronous OCR failed:", syncErr.message)
+    }
+
+    const updated = await Receipt.findById(receipt._id).lean()
+    return res.status(200).json({
+      message: "Receipt reprocessed",
       receiptId: receipt._id,
-      processingStatus: "pending",
+      processingStatus: updated?.ocrData?.processingStatus || "failed",
     })
   } catch (error) {
     return res.status(500).json({ message: "Error reprocessing receipt" })

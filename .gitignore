@@ -10,6 +10,9 @@ dist/
 npm-debug.log
 yarn-error.log
 
+# Runtime uploads
+backend/uploads/
+
 # OS files
 .DS_Store
 Thumbs.db

@@ -6,12 +6,11 @@ async function updateUserAvatars() {
     try {
         // Connect to MongoDB
         await mongoose.connect(process.env.MONGODB_URI)
-        
+        console.log('Connected to MongoDB')
 
         // Find all users (update everyone to robot avatars)
         const allUsers = await User.find({})
-
-        
+        console.log(`Updating ${allUsers.length} users...`)
 
         // Update each user with new robot avatar
         let updated = 0
@@ -20,13 +19,13 @@ async function updateUserAvatars() {
             user.avatar = `https://api.dicebear.com/7.x/bottts/svg?seed=${seed}`
             await user.save()
             updated++
-             with robot avatar`)
+            console.log(`Updated user ${user.username} with robot avatar`)
         }
 
-        
+        console.log(`Finished updating ${updated} user avatars.`)
         process.exit(0)
     } catch (error) {
-        
+        console.error('Error updating avatars:', error.message)
         process.exit(1)
     }
 }
